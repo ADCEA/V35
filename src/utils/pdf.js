@@ -134,6 +134,9 @@ function buildDeliveryNotePdf(order) {
     }
 
     // ---------- pied de page ----------
+    // Le pied de page est écrit dans la marge basse : on la neutralise,
+    // sinon pdfkit ouvre une page blanche supplémentaire rien que pour lui.
+    doc.page.margins.bottom = 0;
     doc.font('Helvetica').fontSize(7.5).fillColor(GRAY)
       .text(`Généré le ${new Date().toLocaleDateString('fr-FR')} — Blanchisserie Cézanne`,
         marginX, doc.page.height - 50);
@@ -252,6 +255,7 @@ function buildPreparationSlipPdf(order, plan) {
     const range = doc.bufferedPageRange();
     for (let i = 0; i < range.count; i += 1) {
       doc.switchToPage(range.start + i);
+      doc.page.margins.bottom = 0; // pied de page dans la marge : évite une page blanche en plus
       doc.font('Helvetica').fontSize(7.5).fillColor(GRAY)
         .text(`Généré le ${new Date().toLocaleDateString('fr-FR')} — Blanchisserie Cézanne — page ${i + 1}/${range.count}`,
           marginX, pageHeight - 40);
@@ -348,6 +352,7 @@ function buildInvoiceAnnexPdf(invoiceRef, societe, orders) {
     const range = doc.bufferedPageRange();
     for (let i = 0; i < range.count; i += 1) {
       doc.switchToPage(range.start + i);
+      doc.page.margins.bottom = 0; // pied de page dans la marge : évite une page blanche en plus
       doc.font('Helvetica').fontSize(7.5).fillColor(GRAY)
         .text(`Annexe — ${invoiceRef} — page ${i + 1}/${range.count}`, marginX, pageHeight - 40);
     }
@@ -446,6 +451,7 @@ function buildInvoiceSummaryPdf(invoiceRef, societe, periodStart, periodEnd, ord
     const range = doc.bufferedPageRange();
     for (let i = 0; i < range.count; i += 1) {
       doc.switchToPage(range.start + i);
+      doc.page.margins.bottom = 0; // pied de page dans la marge : évite une page blanche en plus
       doc.font('Helvetica').fontSize(7.5).fillColor(GRAY)
         .text(`Récapitulatif — ${invoiceRef} — page ${i + 1}/${range.count}`, marginX, pageHeight - 40);
     }

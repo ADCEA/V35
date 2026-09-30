@@ -188,6 +188,8 @@ section.block{padding:48px 0;}
 .history-filters{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:16px;margin-bottom:20px;}
 .history-filters .field{margin-bottom:0;min-width:150px;flex:1;}
 .history-filters select{width:100%;border:1px solid var(--line);border-radius:4px;padding:10px 12px;font-family:inherit;font-size:14px;background:var(--bg);color:var(--ink);}
+.history-export-note{font-size:12.5px;color:#B3261E;margin:-10px 0 14px;}
+.history-export-note:empty{display:none;}
 .history-empty{font-size:13px;color:var(--steel-light);font-style:italic;padding:20px 0;text-align:center;}
 .kcol-history-link{display:block;text-align:center;font-size:11px;color:var(--brand);margin-top:8px;background:transparent;border:none;width:100%;padding:4px;}
 .kcol-history-link:hover{text-decoration:underline;}

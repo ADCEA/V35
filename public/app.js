@@ -2987,7 +2987,8 @@ function renderHistoryFilters() {
   select.value = clients.includes(current) ? current : '';
 }
 
-function renderHistoryList() {
+// Commandes livrées correspondant aux filtres de l'historique (plus récentes d'abord).
+function getFilteredHistory() {
   const from = document.getElementById('hist-date-from').value;
   const to = document.getElementById('hist-date-to').value;
   const client = document.getElementById('hist-client').value;
@@ -2996,7 +2997,19 @@ function renderHistoryList() {
   if (from) list = list.filter(o => new Date(o.createdAt) >= new Date(from));
   if (to) list = list.filter(o => new Date(o.createdAt) <= new Date(to + 'T23:59:59'));
   if (client) list = list.filter(o => o.client.societe === client);
-  list = [...list].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  return [...list].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+function updateHistoryExportButton(count) {
+  const btn = document.getElementById('btn-hist-export-bl');
+  if (btn.dataset.busy === '1') return;
+  btn.disabled = count === 0;
+  btn.textContent = count > 0 ? `Exporter les ${count} BL (PDF)` : 'Exporter les BL (PDF)';
+}
+
+function renderHistoryList() {
+  const list = getFilteredHistory();
+  updateHistoryExportButton(list.length);
 
   const box = document.getElementById('history-list');
   if (list.length === 0) {
@@ -3021,6 +3034,47 @@ function renderHistoryList() {
 ['hist-date-from', 'hist-date-to', 'hist-client'].forEach(id => {
   document.getElementById(id).addEventListener('change', renderHistoryList);
 });
+document.getElementById('btn-hist-export-bl').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-hist-export-bl');
+  const note = document.getElementById('hist-export-note');
+  const list = getFilteredHistory();
+  if (list.length === 0) return;
+
+  btn.dataset.busy = '1';
+  btn.disabled = true;
+  btn.textContent = `Génération de ${list.length} BL…`;
+  note.textContent = '';
+  try {
+    const res = await fetch('/api/admin/delivery-notes/export', {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: list.map(o => o.id) }),
+    });
+    if (!res.ok) {
+      let data = null;
+      try { data = await res.json(); } catch (e) { /* pas de corps JSON */ }
+      throw new Error((data && data.error) || `Erreur ${res.status}`);
+    }
+    const blob = await res.blob();
+    const match = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = match ? match[1] : 'bons-livraison.pdf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (err) {
+    note.textContent = `Export impossible : ${err.message}`;
+  } finally {
+    delete btn.dataset.busy;
+    updateHistoryExportButton(getFilteredHistory().length);
+  }
+});
+
 document.getElementById('btn-hist-reset').addEventListener('click', () => {
   document.getElementById('hist-date-from').value = '';
   document.getElementById('hist-date-to').value = '';

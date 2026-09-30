@@ -1156,4 +1156,39 @@ router.post('/orders/:id/delivery-note', async (req, res) => {
   }
 });
 
+// POST /api/admin/delivery-notes/export — regroupe dans un seul PDF les bons
+// de livraison des commandes livrées dont les identifiants sont fournis
+// (ceux qu'affiche l'historique avec les filtres en cours). Un BL par page
+// (ou plus si le BL est long), du plus ancien au plus récent.
+const EXPORT_MAX_ORDERS = 500;
+router.post('/delivery-notes/export', async (req, res) => {
+  const ids = [...new Set((req.body?.ids || []).map(Number).filter(Number.isInteger))];
+  if (ids.length === 0) return res.status(400).json({ error: 'Aucune commande à exporter.' });
+  if (ids.length > EXPORT_MAX_ORDERS) {
+    return res.status(400).json({ error: `Trop de bons à la fois (${ids.length}). Maximum ${EXPORT_MAX_ORDERS} : resserrez les filtres.` });
+  }
+
+  const placeholders = ids.map(() => '?').join(',');
+  const orders = db.prepare(
+    `SELECT * FROM orders WHERE id IN (${placeholders}) AND status = 'livree' ORDER BY created_at ASC, id ASC`
+  ).all(...ids);
+  if (orders.length === 0) return res.status(404).json({ error: 'Aucune commande livrée trouvée.' });
+
+  try {
+    const buffers = [];
+    for (const order of orders) {
+      buffers.push(await buildDeliveryNotePdf({ ...order, items: getItems(order.id) }));
+    }
+    const merged = await mergePdfs(buffers);
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="bons-livraison-${stamp}.pdf"`);
+    res.setHeader('X-Order-Count', String(orders.length));
+    res.send(merged);
+  } catch (err) {
+    console.error('Échec export BL groupé :', err.message);
+    res.status(500).json({ error: 'Erreur lors de la génération du PDF groupé.' });
+  }
+});
+
 module.exports = router;
