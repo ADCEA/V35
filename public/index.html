@@ -497,9 +497,17 @@
           <div class="history-filters">
             <div class="field"><label>Du</label><input type="date" id="hist-date-from"></div>
             <div class="field"><label>Au</label><input type="date" id="hist-date-to"></div>
-            <div class="field">
-              <label>Client</label>
-              <select id="hist-client"><option value="">Tous les clients</option></select>
+            <div class="field hist-client-field">
+              <label>Clients</label>
+              <button type="button" class="hist-client-toggle" id="hist-client-toggle" aria-haspopup="true" aria-expanded="false">Tous les clients</button>
+              <div class="hist-client-panel" id="hist-client-panel" hidden>
+                <input type="search" id="hist-client-search" placeholder="Rechercher un client…" autocomplete="off">
+                <div class="hist-client-actions">
+                  <button type="button" id="hist-client-all">Tout cocher</button>
+                  <button type="button" id="hist-client-none">Tout décocher</button>
+                </div>
+                <div class="hist-client-list" id="hist-client-list"></div>
+              </div>
             </div>
             <button class="btn-secondary" id="btn-hist-reset">Réinitialiser</button>
             <button class="btn-secondary" id="btn-hist-export-bl" disabled>Exporter les BL (PDF)</button>

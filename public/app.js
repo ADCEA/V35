@@ -2933,7 +2933,7 @@ function switchAdminView(view) {
   if (view === 'kanban') refreshAdmin();
   if (view === 'logistics') renderLogisticsView();
   if (view === 'stats') renderStats();
-  if (view === 'historique') { renderHistoryFilters(); renderHistoryList(); }
+  if (view === 'historique') renderHistoryView();
   if (view === 'articles') renderArticlesView();
   if (view === 'facture') renderFactureTab();
   if (view === 'garage') renderGarageView();
@@ -2977,26 +2977,74 @@ function collectQtyGrid(containerId) {
     .filter(i => i.qty > 0);
 }
 
+// Filtre client multiple de l'historique : ensemble vide = tous les clients.
+const histSelectedClients = new Set();
+
+function escHtml(str) {
+  return String(str ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+function updateHistClientToggle() {
+  const btn = document.getElementById('hist-client-toggle');
+  const n = histSelectedClients.size;
+  btn.textContent = n === 0 ? 'Tous les clients'
+    : n === 1 ? [...histSelectedClients][0]
+    : `${n} clients sélectionnés`;
+  btn.classList.toggle('has-selection', n > 0);
+}
+
 function renderHistoryFilters() {
-  const select = document.getElementById('hist-client');
-  const current = select.value;
   const clients = [...new Set(
     adminOrdersCache.filter(o => o.status === 'livree').map(o => o.client.societe)
   )].sort((a, b) => a.localeCompare(b));
-  select.innerHTML = '<option value="">Tous les clients</option>' + clients.map(c => `<option value="${c}">${c}</option>`).join('');
-  select.value = clients.includes(current) ? current : '';
+  // On oublie les clients cochés qui n'ont plus aucune commande livrée.
+  [...histSelectedClients].forEach(c => { if (!clients.includes(c)) histSelectedClients.delete(c); });
+
+  document.getElementById('hist-client-list').innerHTML = clients.map(c => `
+    <label class="hist-client-option" data-name="${escHtml(c.toLowerCase())}">
+      <input type="checkbox" value="${escHtml(c)}" ${histSelectedClients.has(c) ? 'checked' : ''}>
+      <span>${escHtml(c)}</span>
+    </label>
+  `).join('') || '<p class="history-empty">Aucun client livré.</p>';
+  filterHistClientOptions();
+  updateHistClientToggle();
+}
+
+function filterHistClientOptions() {
+  const q = document.getElementById('hist-client-search').value.trim().toLowerCase();
+  document.querySelectorAll('#hist-client-list .hist-client-option').forEach(el => {
+    el.hidden = q !== '' && !el.dataset.name.includes(q);
+  });
+}
+
+// L'historique recharge toutes les commandes : adminOrdersCache peut contenir
+// uniquement celles de Production ou de Logistique (sans les livrées) si
+// l'on arrive depuis ces vues.
+async function renderHistoryView() {
+  renderHistoryFilters();
+  renderHistoryList();
+  try {
+    const { orders } = await api('GET', '/api/admin/orders');
+    adminOrdersCache = orders;
+  } catch (err) {
+    document.getElementById('hist-export-note').textContent = `Chargement impossible : ${err.message}`;
+    return;
+  }
+  renderHistoryFilters();
+  renderHistoryList();
 }
 
 // Commandes livrées correspondant aux filtres de l'historique (plus récentes d'abord).
 function getFilteredHistory() {
   const from = document.getElementById('hist-date-from').value;
   const to = document.getElementById('hist-date-to').value;
-  const client = document.getElementById('hist-client').value;
 
   let list = adminOrdersCache.filter(o => o.status === 'livree');
   if (from) list = list.filter(o => new Date(o.createdAt) >= new Date(from));
   if (to) list = list.filter(o => new Date(o.createdAt) <= new Date(to + 'T23:59:59'));
-  if (client) list = list.filter(o => o.client.societe === client);
+  if (histSelectedClients.size > 0) list = list.filter(o => histSelectedClients.has(o.client.societe));
   return [...list].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
@@ -3031,9 +3079,46 @@ function renderHistoryList() {
   });
 }
 
-['hist-date-from', 'hist-date-to', 'hist-client'].forEach(id => {
+['hist-date-from', 'hist-date-to'].forEach(id => {
   document.getElementById(id).addEventListener('change', renderHistoryList);
 });
+
+// ---------- sélection multiple des clients (historique) ----------
+function setHistClientPanel(open) {
+  const panel = document.getElementById('hist-client-panel');
+  panel.hidden = !open;
+  document.getElementById('hist-client-toggle').setAttribute('aria-expanded', String(open));
+  if (open) document.getElementById('hist-client-search').focus();
+}
+document.getElementById('hist-client-toggle').addEventListener('click', () => {
+  setHistClientPanel(document.getElementById('hist-client-panel').hidden);
+});
+document.addEventListener('click', e => {
+  const field = document.querySelector('.hist-client-field');
+  if (field && !field.contains(e.target)) setHistClientPanel(false);
+});
+document.getElementById('hist-client-panel').addEventListener('keydown', e => {
+  if (e.key === 'Escape') { setHistClientPanel(false); document.getElementById('hist-client-toggle').focus(); }
+});
+document.getElementById('hist-client-search').addEventListener('input', filterHistClientOptions);
+document.getElementById('hist-client-list').addEventListener('change', e => {
+  if (e.target.type !== 'checkbox') return;
+  if (e.target.checked) histSelectedClients.add(e.target.value);
+  else histSelectedClients.delete(e.target.value);
+  updateHistClientToggle();
+  renderHistoryList();
+});
+// « Tout cocher / décocher » agit sur les clients visibles (après recherche).
+function setVisibleHistClients(checked) {
+  document.querySelectorAll('#hist-client-list .hist-client-option:not([hidden]) input').forEach(cb => {
+    cb.checked = checked;
+    if (checked) histSelectedClients.add(cb.value); else histSelectedClients.delete(cb.value);
+  });
+  updateHistClientToggle();
+  renderHistoryList();
+}
+document.getElementById('hist-client-all').addEventListener('click', () => setVisibleHistClients(true));
+document.getElementById('hist-client-none').addEventListener('click', () => setVisibleHistClients(false));
 document.getElementById('btn-hist-export-bl').addEventListener('click', async () => {
   const btn = document.getElementById('btn-hist-export-bl');
   const note = document.getElementById('hist-export-note');
@@ -3078,7 +3163,9 @@ document.getElementById('btn-hist-export-bl').addEventListener('click', async ()
 document.getElementById('btn-hist-reset').addEventListener('click', () => {
   document.getElementById('hist-date-from').value = '';
   document.getElementById('hist-date-to').value = '';
-  document.getElementById('hist-client').value = '';
+  histSelectedClients.clear();
+  document.getElementById('hist-client-search').value = '';
+  renderHistoryFilters();
   renderHistoryList();
 });
 
