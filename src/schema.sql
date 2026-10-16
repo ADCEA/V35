@@ -6,7 +6,9 @@
 
 CREATE TABLE IF NOT EXISTS clients (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  email         TEXT NOT NULL UNIQUE,
+  -- Facultatif : un client peut être créé avec son seul nom (raccourci
+  -- depuis « Nouvelle commande »). Sans email, pas d'accès à l'espace client.
+  email         TEXT UNIQUE,
   societe       TEXT NOT NULL,
   contact       TEXT NOT NULL,
   tel           TEXT NOT NULL,

@@ -2141,8 +2141,8 @@ async function renderClientsView() {
         </div>
       </div>
       <div class="room-type-summary">
-        Contact : <b>${c.contact}</b> · Tél : <b>${c.tel}</b> · Email : <b>${c.email}</b><br>
-        Adresse : <b>${c.adresse}</b>
+        Contact : <b>${c.contact || '—'}</b> · Tél : <b>${c.tel || '—'}</b> · Email : <b>${c.email || '—'}</b><br>
+        Adresse : <b>${c.adresse || '—'}</b>
       </div>
     </div>
   `).join('');
@@ -2189,15 +2189,16 @@ function renderClientForm(existing) {
   zone.innerHTML = `
     <div class="card" style="margin-top:14px;margin-bottom:14px;background:var(--bg);">
       <h4 class="card-subhead">${existing ? 'Modifier' : 'Nouvel'} hôtel</h4>
+      <p style="font-size:11px;color:var(--steel-light);margin:-4px 0 10px;">* Seul le nom est obligatoire. Email et code d'accès ne servent qu'à ouvrir l'espace client de l'hôtel.</p>
       <div class="field-row">
-        <div class="field"><label>Société / établissement</label><input id="cl-societe" value="${existing ? existing.societe.replace(/"/g, '&quot;') : ''}" placeholder="Ex. Hôtel Verlaine"></div>
-        <div class="field"><label>Nom du contact</label><input id="cl-contact" value="${existing ? existing.contact.replace(/"/g, '&quot;') : ''}" placeholder="Ex. Camille Roux"></div>
+        <div class="field"><label>Nom du client *</label><input id="cl-societe" value="${existing ? existing.societe.replace(/"/g, '&quot;') : ''}" placeholder="Ex. Hôtel Verlaine"></div>
+        <div class="field"><label>Nom du contact</label><input id="cl-contact" value="${existing ? (existing.contact || '').replace(/"/g, '&quot;') : ''}" placeholder="Ex. Camille Roux"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Téléphone</label><input id="cl-tel" value="${existing ? existing.tel : ''}" placeholder="06 12 34 56 78"></div>
-        <div class="field"><label>Email</label><input id="cl-email" type="email" value="${existing ? existing.email : ''}" placeholder="vous@societe.fr"></div>
+        <div class="field"><label>Téléphone</label><input id="cl-tel" value="${existing ? (existing.tel || '') : ''}" placeholder="06 12 34 56 78"></div>
+        <div class="field"><label>Email</label><input id="cl-email" type="email" value="${existing ? (existing.email || '') : ''}" placeholder="vous@societe.fr"></div>
       </div>
-      <div class="field"><label>Adresse</label><input id="cl-adresse" value="${existing ? existing.adresse.replace(/"/g, '&quot;') : ''}" placeholder="Ex. 12 rue de la Paix, 84200 Carpentras"></div>
+      <div class="field"><label>Adresse</label><input id="cl-adresse" value="${existing ? (existing.adresse || '').replace(/"/g, '&quot;') : ''}" placeholder="Ex. 12 rue de la Paix, 84200 Carpentras"></div>
       <div class="field-row">
         <div class="field" style="max-width:160px;"><label>Code postal</label><input id="cl-code-postal" value="${existing ? (existing.codePostal || '') : ''}" placeholder="84200"></div>
         <div class="field"><label>Ville</label><input id="cl-ville" value="${existing ? (existing.ville || '').replace(/"/g, '&quot;') : ''}" placeholder="Carpentras"></div>
@@ -2213,7 +2214,7 @@ function renderClientForm(existing) {
       ` : ''}
       <div class="field" style="max-width:260px;">
         <label>${existing ? "Nouveau code d'accès (optionnel)" : "Code d'accès"}</label>
-        <input id="cl-code" inputmode="numeric" maxlength="8" placeholder="${existing ? 'Laisser vide = inchangé' : '4 à 8 chiffres'}">
+        <input id="cl-code" inputmode="numeric" maxlength="8" placeholder="${existing ? 'Laisser vide = inchangé' : '4 à 8 chiffres (facultatif)'}">
       </div>
       ${existing ? '<p style="font-size:11px;color:var(--steel-light);margin:4px 0 0;">Le code actuel n\'est jamais visible (il est chiffré) — n\'en saisissez un nouveau que si l\'hôtel l\'a oublié.</p>' : ''}
       <button class="btn-primary" id="cl-save" style="width:auto;margin-top:12px;">Enregistrer</button>
@@ -2669,8 +2670,8 @@ async function saveClient(existingId) {
     payload.tvaNumber = document.getElementById('cl-tva').value.trim();
     payload.adresseFacturation = document.getElementById('cl-adresse-facturation').value.trim();
   }
-  if (!existingId && !code) {
-    errorNote.textContent = "Le code d'accès est requis pour un nouvel hôtel.";
+  if (!payload.societe) {
+    errorNote.textContent = 'Le nom du client est obligatoire.';
     errorNote.classList.add('error');
     return;
   }
@@ -2822,22 +2823,26 @@ async function openManualOrderModal(context) {
     </h3>
 
     <div class="field">
-      <label>Hôtel</label>
-      <select id="mo-client-select">
-        <option value="">— Client non enregistré (saisir à la main) —</option>
-        ${manualOrderClientsCache.map(c => `<option value="${c.id}">${c.societe}</option>`).join('')}
-      </select>
+      <label>Client *</label>
+      <div class="mo-client-row">
+        <select id="mo-client-select"></select>
+        <button type="button" class="btn-secondary" id="mo-new-client-toggle">+ Nouveau client</button>
+      </div>
     </div>
 
-    <div id="mo-manual-client-fields">
+    <div class="mo-new-client" id="mo-new-client" hidden>
+      <p class="mo-new-client-title">Nouveau client — seul le nom est obligatoire, la fiche se complète ensuite dans « Clients ».</p>
       <div class="field-row">
-        <div class="field"><label>Société *</label><input id="mo-societe" placeholder="Ex. Hôtel Verlaine"></div>
-        <div class="field"><label>Contact (optionnel)</label><input id="mo-contact" placeholder="Ex. Camille Roux"></div>
+        <div class="field"><label>Nom du client *</label><input id="mo-nc-societe" placeholder="Ex. Hôtel Verlaine"></div>
+        <div class="field"><label>Contact</label><input id="mo-nc-contact" placeholder="Ex. Camille Roux"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Téléphone (optionnel)</label><input id="mo-tel"></div>
-        <div class="field"><label>Adresse (optionnel)</label><input id="mo-adresse"></div>
+        <div class="field"><label>Téléphone</label><input id="mo-nc-tel"></div>
+        <div class="field"><label>Adresse</label><input id="mo-nc-adresse"></div>
       </div>
+      <button type="button" class="btn-primary" id="mo-nc-save" style="width:auto;">Créer le client</button>
+      <button type="button" class="btn-secondary" id="mo-nc-cancel" style="width:auto;">Annuler</button>
+      <div class="qty-save-note" id="mo-nc-error"></div>
     </div>
 
     <div class="field-row">
@@ -2861,10 +2866,20 @@ async function openManualOrderModal(context) {
   `;
   renderQtyGrid('mo-items-grid', []);
 
-  const clientSelect = document.getElementById('mo-client-select');
-  const manualFields = document.getElementById('mo-manual-client-fields');
-  clientSelect.addEventListener('change', () => {
-    manualFields.style.display = clientSelect.value ? 'none' : 'block';
+  fillManualOrderClientSelect();
+  const newClientBox = document.getElementById('mo-new-client');
+  const toggleNewClient = open => {
+    newClientBox.hidden = !open;
+    if (open) document.getElementById('mo-nc-societe').focus();
+  };
+  document.getElementById('mo-new-client-toggle').addEventListener('click', () => toggleNewClient(newClientBox.hidden));
+  document.getElementById('mo-nc-cancel').addEventListener('click', () => toggleNewClient(false));
+  document.getElementById('mo-nc-save').addEventListener('click', createClientFromManualOrder);
+  document.getElementById('mo-nc-societe').addEventListener('input', () => {
+    document.getElementById('mo-nc-error').textContent = '';
+  });
+  document.getElementById('mo-nc-societe').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); createClientFromManualOrder(); }
   });
 
   document.getElementById('mo-submit').addEventListener('click', () => submitManualOrder(context));
@@ -2872,13 +2887,60 @@ async function openManualOrderModal(context) {
   document.getElementById('manual-order-modal').classList.add('open');
 }
 
+function fillManualOrderClientSelect(selectedId) {
+  const select = document.getElementById('mo-client-select');
+  const clients = [...manualOrderClientsCache].sort((a, b) => a.societe.localeCompare(b.societe));
+  select.innerHTML = '<option value="">— Choisir un client —</option>'
+    + clients.map(c => `<option value="${c.id}">${escHtml(c.societe)}</option>`).join('');
+  if (selectedId) select.value = String(selectedId);
+}
+
+// Raccourci « + Nouveau client » : crée la fiche (nom seul obligatoire)
+// puis la sélectionne directement pour la commande en cours.
+async function createClientFromManualOrder() {
+  const errorNote = document.getElementById('mo-nc-error');
+  const societe = document.getElementById('mo-nc-societe').value.trim();
+  errorNote.classList.remove('error');
+  errorNote.textContent = '';
+  if (!societe) {
+    errorNote.textContent = 'Le nom du client est obligatoire.';
+    errorNote.classList.add('error');
+    return;
+  }
+  const duplicate = manualOrderClientsCache.find(c => c.societe.trim().toLowerCase() === societe.toLowerCase());
+  if (duplicate) {
+    fillManualOrderClientSelect(duplicate.id);
+    document.getElementById('mo-new-client').hidden = true;
+    return;
+  }
+  const btn = document.getElementById('mo-nc-save');
+  btn.disabled = true;
+  try {
+    const { client } = await api('POST', '/api/admin/clients', {
+      societe,
+      contact: document.getElementById('mo-nc-contact').value.trim(),
+      tel: document.getElementById('mo-nc-tel').value.trim(),
+      adresse: document.getElementById('mo-nc-adresse').value.trim(),
+    });
+    manualOrderClientsCache = [...manualOrderClientsCache, client];
+    fillManualOrderClientSelect(client.id);
+    ['mo-nc-societe', 'mo-nc-contact', 'mo-nc-tel', 'mo-nc-adresse'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('mo-new-client').hidden = true;
+  } catch (err) {
+    errorNote.textContent = err.message;
+    errorNote.classList.add('error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function submitManualOrder(context) {
   const errorNote = document.getElementById('mo-error');
   const clientId = document.getElementById('mo-client-select').value || null;
   const items = collectQtyGrid('mo-items-grid');
 
-  if (!clientId && !document.getElementById('mo-societe').value.trim()) {
-    errorNote.textContent = 'La société est requise (ou choisissez un hôtel enregistré ci-dessus).';
+  if (!clientId) {
+    errorNote.textContent = 'Choisissez un client enregistré (ou créez-le avec « + Nouveau client »).';
     errorNote.classList.add('error');
     return;
   }
@@ -2890,10 +2952,6 @@ async function submitManualOrder(context) {
 
   const payload = {
     clientId,
-    societe: document.getElementById('mo-societe').value.trim(),
-    contact: document.getElementById('mo-contact').value.trim(),
-    tel: document.getElementById('mo-tel').value.trim(),
-    adresse: document.getElementById('mo-adresse').value.trim(),
     items,
     livraisonPrevue: document.getElementById('mo-livraison').value,
     notes: document.getElementById('mo-notes').value.trim(),

@@ -92,24 +92,31 @@ router.get('/clients', (req, res) => {
 // passer par l'auto-inscription publique) — utile pour préparer un accès
 // avant même que l'hôtel s'en serve, en lui communiquant le code choisi.
 router.post('/clients', (req, res) => {
-  const { societe, contact, tel, adresse, codePostal, ville, email, code } = req.body || {};
-  if (!societe || !contact || !tel || !adresse || !email) {
-    return res.status(400).json({ error: 'Merci de remplir tous les champs.' });
+  const { societe, contact, tel, adresse, codePostal, ville, code } = req.body || {};
+  // Seul le nom est obligatoire : le reste peut être complété plus tard
+  // depuis la fiche client (création rapide depuis « Nouvelle commande »).
+  if (!societe || !societe.trim()) {
+    return res.status(400).json({ error: 'Merci de renseigner le nom du client.' });
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  const email = (req.body?.email || '').trim().toLowerCase() || null;
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Adresse email invalide.' });
   }
-  if (!/^\d{4,8}$/.test(code || '')) {
+  if (code && !/^\d{4,8}$/.test(code)) {
     return res.status(400).json({ error: "Le code d'accès doit contenir entre 4 et 8 chiffres." });
   }
-  const existing = db.prepare('SELECT id FROM clients WHERE email = ?').get(email.toLowerCase());
-  if (existing) return res.status(409).json({ error: 'Un compte existe déjà avec cet email.' });
+  if (email) {
+    const existing = db.prepare('SELECT id FROM clients WHERE email = ?').get(email);
+    if (existing) return res.status(409).json({ error: 'Un compte existe déjà avec cet email.' });
+  }
 
-  const codeHash = bcrypt.hashSync(code, 10);
+  // Sans code choisi, on enregistre l'empreinte d'un secret aléatoire jamais
+  // communiqué : l'espace client reste fermé tant qu'un code n'est pas défini.
+  const codeHash = bcrypt.hashSync(code || crypto.randomBytes(24).toString('hex'), 10);
   const info = db.prepare(`
     INSERT INTO clients (email, societe, contact, tel, adresse, code_postal, ville, code_hash)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(email.toLowerCase(), societe.trim(), contact.trim(), tel.trim(), adresse.trim(), codePostal?.trim() || null, ville?.trim() || null, codeHash);
+  `).run(email, societe.trim(), (contact || '').trim(), (tel || '').trim(), (adresse || '').trim(), codePostal?.trim() || null, ville?.trim() || null, codeHash);
 
   const row = db.prepare('SELECT id, email, societe, contact, tel, adresse, code_postal as codePostal, ville, created_at as createdAt FROM clients WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json({ client: row });
@@ -125,12 +132,18 @@ router.put('/clients/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM clients WHERE id = ?').get(id);
   if (!existing) return res.status(404).json({ error: 'Hôtel introuvable.' });
 
-  const { societe, contact, tel, adresse, codePostal, ville, email, code, siret, tvaNumber, adresseFacturation } = req.body || {};
-  if (email !== undefined && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  const { societe, contact, tel, adresse, codePostal, ville, code, siret, tvaNumber, adresseFacturation } = req.body || {};
+  // Email facultatif : vide = aucun email (et donc pas d'accès à l'espace client).
+  const email = req.body?.email === undefined ? existing.email
+    : ((req.body.email || '').trim().toLowerCase() || null);
+  if (societe !== undefined && !String(societe).trim()) {
+    return res.status(400).json({ error: 'Le nom du client ne peut pas être vide.' });
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Adresse email invalide.' });
   }
-  if (email !== undefined && email.toLowerCase() !== existing.email) {
-    const emailTaken = db.prepare('SELECT id FROM clients WHERE email = ? AND id != ?').get(email.toLowerCase(), id);
+  if (email && email !== existing.email) {
+    const emailTaken = db.prepare('SELECT id FROM clients WHERE email = ? AND id != ?').get(email, id);
     if (emailTaken) return res.status(409).json({ error: 'Cet email est déjà utilisé par un autre compte.' });
   }
   if (siret && !/^\d{14}$/.test(siret.replace(/\s/g, ''))) {
@@ -147,12 +160,12 @@ router.put('/clients/:id', (req, res) => {
       siret = ?, tva_number = ?, adresse_facturation = ? WHERE id = ?
   `).run(
     (societe ?? existing.societe).trim(),
-    (contact ?? existing.contact).trim(),
-    (tel ?? existing.tel).trim(),
-    (adresse ?? existing.adresse).trim(),
+    (contact ?? existing.contact ?? '').trim(),
+    (tel ?? existing.tel ?? '').trim(),
+    (adresse ?? existing.adresse ?? '').trim(),
     codePostal !== undefined ? (codePostal.trim() || null) : existing.code_postal,
     ville !== undefined ? (ville.trim() || null) : existing.ville,
-    (email ?? existing.email).toLowerCase(),
+    email,
     codeHash,
     siret !== undefined ? (siret.replace(/\s/g, '') || null) : existing.siret,
     tvaNumber !== undefined ? (tvaNumber || null) : existing.tva_number,
@@ -819,20 +832,20 @@ const PRODUCTION_STAGES = ['tri', 'lavage', 'sechage', 'repassage', 'pliage', 'e
 // POST /api/admin/orders/manual — création manuelle par l'admin, depuis
 // l'onglet "Préparation de commande" (statut "recue" par défaut) ou
 // "Production" (statut "traitement" avec une étape de départ).
-// body: { clientId?, societe?, contact?, tel?, adresse?, items:[{id,qty}],
+// body: { clientId, items:[{id,qty}],
 //         livraisonPrevue?, notes?, status?, productionStage? }
 router.post('/orders/manual', (req, res) => {
   const { clientId, items, livraisonPrevue, notes, status, productionStage } = req.body || {};
   let { societe, contact, tel, adresse } = req.body || {};
 
-  if (clientId) {
-    const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(Number(clientId));
-    if (!client) return res.status(404).json({ error: 'Hôtel introuvable.' });
-    ({ societe, contact, tel, adresse } = client);
+  // Uniquement des clients enregistrés : un client inconnu se crée d'abord
+  // (raccourci « + Nouveau client » dans la fenêtre de commande).
+  if (!clientId) {
+    return res.status(400).json({ error: 'Merci de choisir un client enregistré.' });
   }
-  if (!societe || !societe.trim()) {
-    return res.status(400).json({ error: 'Merci de renseigner au moins la société (ou de choisir un hôtel enregistré).' });
-  }
+  const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(Number(clientId));
+  if (!client) return res.status(404).json({ error: 'Client introuvable.' });
+  ({ societe, contact, tel, adresse } = client);
   contact = contact || '';
   tel = tel || '';
   adresse = adresse || '';

@@ -227,6 +227,39 @@ if (clientsColumns.length > 0 && !clientsColumns.includes('code_postal')) {
   db.exec(`ALTER TABLE clients ADD COLUMN ville TEXT;`);
 }
 
+// L'email client devient facultatif (fiche créée avec le seul nom). SQLite
+// ne sait pas retirer un NOT NULL : on recrée la table à l'identique, sans
+// cette contrainte. Les clés étrangères sont désactivées le temps de
+// l'opération, sinon le DROP TABLE supprimerait en cascade les tarifs,
+// jetons API, etc. et détacherait les commandes de leur client.
+const clientsEmailCol = db.prepare(`PRAGMA table_info(clients)`).all().find(c => c.name === 'email');
+if (clientsEmailCol && clientsEmailCol.notnull) {
+  const createSql = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='clients'`).get().sql;
+  const newSql = createSql
+    .replace(/^CREATE TABLE\s+(IF NOT EXISTS\s+)?"?clients"?/i, 'CREATE TABLE clients_new')
+    .replace(/\bemail(\s+)TEXT\s+NOT\s+NULL\s+UNIQUE/i, 'email$1TEXT UNIQUE');
+  if (!/email\s+TEXT UNIQUE/i.test(newSql)) {
+    console.error('Migration clients.email : définition de colonne inattendue, migration ignorée.');
+  } else {
+    db.pragma('foreign_keys = OFF');
+    try {
+      db.transaction(() => {
+        db.exec(newSql);
+        db.exec('INSERT INTO clients_new SELECT * FROM clients;');
+        db.exec('DROP TABLE clients;');
+        db.exec('ALTER TABLE clients_new RENAME TO clients;');
+        const problems = db.pragma('foreign_key_check');
+        if (problems.length > 0) throw new Error(`${problems.length} incohérence(s) de clés étrangères`);
+      })();
+      console.log('Migration clients.email : email client désormais facultatif.');
+    } catch (err) {
+      console.error('Migration clients.email annulée :', err.message);
+    } finally {
+      db.pragma('foreign_keys = ON');
+    }
+  }
+}
+
 const invoicesColumns = db.prepare(`PRAGMA table_info(invoices)`).all().map(c => c.name);
 if (invoicesColumns.length > 0 && !invoicesColumns.includes('total_ht')) {
   db.exec(`ALTER TABLE invoices ADD COLUMN total_ht REAL;`);

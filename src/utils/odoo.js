@@ -116,7 +116,7 @@ async function odooPartnerFieldExists(fieldName) {
 async function findOrCreateOdooPartner(client) {
   const vals = {
     name: client.societe,
-    email: client.email,
+    email: client.email || false,
     phone: client.tel,
     street: client.adresse_facturation || client.adresse,
     // city/zip ne sont envoyés QUE si c'est bien l'adresse de collecte qui
@@ -143,11 +143,23 @@ async function findOrCreateOdooPartner(client) {
     if (await odooPartnerFieldExists('siret')) vals.siret = client.siret;
   }
 
-  const existing = await odooCall('res.partner', 'search_read', {
-    domain: [['email', '=', client.email]],
-    fields: ['id'],
-    limit: 1,
-  });
+  // Recherche par email uniquement si le client en a un : sans email, un
+  // domaine [['email', '=', false]] renverrait n'importe quel partenaire
+  // sans email. On réutilise alors le partenaire déjà lié s'il existe.
+  let existing = [];
+  if (client.email) {
+    existing = await odooCall('res.partner', 'search_read', {
+      domain: [['email', '=', client.email]],
+      fields: ['id'],
+      limit: 1,
+    });
+  } else if (client.odoo_partner_id) {
+    existing = await odooCall('res.partner', 'search_read', {
+      domain: [['id', '=', client.odoo_partner_id]],
+      fields: ['id'],
+      limit: 1,
+    });
+  }
 
   if (Array.isArray(existing) && existing.length > 0) {
     const partnerId = existing[0].id;
