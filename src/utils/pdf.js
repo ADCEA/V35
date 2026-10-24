@@ -1,463 +1,284 @@
-const PDFDocument = require('pdfkit');
-const { STATUS_LABELS, formatDateFr } = require('./deliveryNote');
+// PDF d'exploitation : bon de livraison, bon de préparation, annexe détaillée et récapitulatif de facture.
+// Mise en page commune : voir src/utils/pdfKit.js.
 
-// Palette limitée à l'essentiel pour l'impression : le document reste
-// lisible et sobre en noir/gris sur une imprimante N&B, avec une seule
-// touche de couleur (fine ligne d'accent) pour la charte quand imprimé
-// en couleur ou consulté à l'écran.
-const INK = '#16324F';    // texte principal — quasi noir
-const GRAY = '#64798D';   // texte secondaire
-const LINE = '#B9C4CE';   // filets — assez foncé pour rester visible en N&B
-const ACCENT = '#1D91FF'; // unique touche de couleur (filet + nom de la marque)
-const RUST = '#E0574B';   // alerte (articles ne rentrant dans aucun chariot)
+const K = require('./pdfKit');
+const { STATUS_LABELS } = require('./deliveryNote');
+
+const { C, L, R, W, eur, num, price, dateFr } = K;
+
+const dateOrTbc = (iso) => (iso ? dateFr(iso) : 'à confirmer');
 
 /**
- * Génère le PDF du bon de livraison et résout avec un Buffer.
- * `order` doit contenir : ticket, status, societe, contact, tel, adresse,
- * livraison_prevue, notes, items ([{name, qty, deliveredQty}]).
+ * Bon de livraison. `order` : ticket, status, societe, contact, tel, adresse, livraison_prevue, notes,
+ * items ([{ name, qty, deliveredQty, sageCode? }]). Une zone de signature permet de faire valider la remise.
  */
-function buildDeliveryNotePdf(order) {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 50 });
-    const chunks = [];
-    doc.on('data', c => chunks.push(c));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
+async function buildDeliveryNotePdf(order) {
+  const seller = K.brandSeller();
+  const { doc, done, F } = K.newDocument({ title: `Bon de livraison ${order.ticket}`, subject: order.societe });
+  const continued = () => `Bon de livraison ${order.ticket}  ·  ${order.societe}`;
 
-    const pageWidth = doc.page.width;
-    const marginX = 50;
-    let hasAdjustedItem = false;
+  const statusLabel = STATUS_LABELS[order.status] || order.status;
+  K.header(doc, { title: 'Bon de livraison', number: `N° ${order.ticket}`, chipLabel: statusLabel, chipTone: order.status === 'livree' ? 'ok' : 'soft' });
+  K.foldMarks(doc);
+  K.senderLine(doc, seller);
+  const addrBottom = K.addressBlock(doc, order.societe, [order.contact ? `À l'attention de ${order.contact}` : '', order.adresse, order.tel ? `Tél. ${order.tel}` : '']);
+  const infoBottom = K.infoRows(doc, [
+    ['Livraison prévue', dateOrTbc(order.livraison_prevue), true],
+    ['Commande', order.ticket],
+    ['Références', String(order.items.length)],
+  ]);
+  let y = Math.max(addrBottom + 12, infoBottom + 14, K.CONTENT_TOP);
 
-    // ---------- en-tête (texte + un seul filet de couleur, pas de fond plein) ----------
-    doc.fillColor(ACCENT).font('Helvetica-Bold').fontSize(18)
-      .text('BLANCHISSERIE CÉZANNE', marginX, 45);
-    doc.font('Helvetica').fontSize(9.5).fillColor(GRAY)
-      .text('Du linge propre, livré dans les temps.', marginX, 68);
-
-    doc.save().strokeColor(ACCENT).lineWidth(1.5)
-      .moveTo(marginX, 92).lineTo(pageWidth - marginX, 92).stroke().restore();
-
-    let y = 116;
-
-    // ---------- ticket ----------
-    doc.font('Helvetica').fontSize(9.5).fillColor(GRAY)
-      .text('BON DE LIVRAISON', marginX, y, { characterSpacing: 1 });
-    y += 16;
-    doc.font('Helvetica-Bold').fontSize(22).fillColor(INK)
-      .text(order.ticket, marginX, y);
-    y += 32;
-
-    // Statut : cadre à contour, pas de fond plein — imprimable sans encre couleur.
-    const statusLabel = (STATUS_LABELS[order.status] || order.status).toUpperCase();
-    const badgeWidth = doc.widthOfString(statusLabel) + 22;
-    doc.save().strokeColor(INK).lineWidth(1)
-      .roundedRect(marginX, y, badgeWidth, 19, 9).stroke().restore();
-    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(INK)
-      .text(statusLabel, marginX, y + 5.5, { width: badgeWidth, align: 'center' });
-    y += 38;
-
-    // ---------- ligne pointillée ----------
-    function dashedLine(atY) {
-      doc.save().strokeColor(LINE).lineWidth(0.75).dash(2, { space: 2 })
-        .moveTo(marginX, atY).lineTo(pageWidth - marginX, atY).stroke().undash().restore();
-    }
-    dashedLine(y);
-    y += 20;
-
-    // ---------- client ----------
-    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(GRAY)
-      .text('CLIENT', marginX, y, { characterSpacing: 1 });
-    y += 14;
-    doc.font('Helvetica-Bold').fontSize(11.5).fillColor(INK)
-      .text(`${order.societe} — ${order.contact}`, marginX, y);
-    y += 16;
-    doc.font('Helvetica').fontSize(9.5).fillColor(GRAY)
-      .text(order.adresse, marginX, y);
-    y += 13;
-    doc.text(`Tél : ${order.tel}`, marginX, y);
-    y += 13;
-    doc.text(`Livraison prévue : ${formatDateFr(order.livraison_prevue)}`, marginX, y);
-    y += 28;
-
-    dashedLine(y);
-    y += 20;
-
-    // ---------- articles ----------
-    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(GRAY)
-      .text('ARTICLES', marginX, y, { characterSpacing: 1 });
-    y += 20;
-
-    const colArticle = marginX;
-    const colCommande = pageWidth - marginX - 180;
-    const colLivre = pageWidth - marginX - 80;
-
-    doc.font('Helvetica-Bold').fontSize(8.5).fillColor(GRAY);
-    doc.text('Article', colArticle, y);
-    doc.text('Commandé', colCommande, y, { width: 80, align: 'right' });
-    doc.text('Livré', colLivre, y, { width: 80, align: 'right' });
-    y += 13;
-    doc.save().strokeColor(INK).lineWidth(1)
-      .moveTo(marginX, y).lineTo(pageWidth - marginX, y).stroke().restore();
-    y += 10;
-
-    order.items.forEach(item => {
-      const delivered = item.deliveredQty ?? item.qty;
-      const diff = delivered !== item.qty;
-      if (diff) hasAdjustedItem = true;
-      doc.font('Helvetica').fontSize(10).fillColor(INK)
-        .text(item.name, colArticle, y, { width: colCommande - colArticle - 10 });
-      doc.fillColor(GRAY).text(String(item.qty), colCommande, y, { width: 80, align: 'right' });
-      // Une quantité ajustée se distingue par le gras + un astérisque,
-      // pas par la couleur seule — reste lisible imprimé en N&B.
-      doc.font(diff ? 'Helvetica-Bold' : 'Helvetica').fillColor(INK)
-        .text(diff ? `${delivered} *` : String(delivered), colLivre, y, { width: 80, align: 'right' });
-      y += 19;
-    });
-
-    if (hasAdjustedItem) {
-      y += 4;
-      doc.font('Helvetica-Oblique').fontSize(8).fillColor(GRAY)
-        .text('* quantité livrée différente de la quantité commandée', marginX, y);
-      y += 14;
-    }
-
-    y += 8;
-    if (order.notes) {
-      doc.save().strokeColor(LINE).lineWidth(0.75)
-        .moveTo(marginX, y).lineTo(pageWidth - marginX, y).stroke().restore();
-      y += 16;
-      doc.font('Helvetica-Bold').fontSize(8.5).fillColor(GRAY)
-        .text('NOTES', marginX, y, { characterSpacing: 1 });
-      y += 14;
-      doc.font('Helvetica').fontSize(9.5).fillColor(INK)
-        .text(order.notes, marginX, y, { width: pageWidth - marginX * 2 });
-    }
-
-    // ---------- pied de page ----------
-    // Le pied de page est écrit dans la marge basse : on la neutralise,
-    // sinon pdfkit ouvre une page blanche supplémentaire rien que pour lui.
-    doc.page.margins.bottom = 0;
-    doc.font('Helvetica').fontSize(7.5).fillColor(GRAY)
-      .text(`Généré le ${new Date().toLocaleDateString('fr-FR')} — Blanchisserie Cézanne`,
-        marginX, doc.page.height - 50);
-
-    doc.end();
-  });
-}
-
-/**
- * Génère le PDF du bon de préparation (plan de conditionnement) et
- * résout avec un Buffer. `order` doit contenir : ticket, societe.
- * `plan` est le résultat de packItems : { carts: [{name, usedL, capacityL,
- * usedKg, maxWeightKg, items:[{name, code, qty}]}], unpacked: [...] }.
- * Chaque article est précédé d'une case à cocher — pensé pour être
- * imprimé et coché à la main pendant le conditionnement.
- */
-function buildPreparationSlipPdf(order, plan) {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
-    const chunks = [];
-    doc.on('data', c => chunks.push(c));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
-
-    const pageWidth = doc.page.width;
-    const pageHeight = doc.page.height;
-    const marginX = 50;
-    const bottomLimit = pageHeight - 60;
-
-    function ensureSpace(needed) {
-      if (doc.y + needed > bottomLimit) doc.addPage();
-    }
-
-    function dashedLine(atY) {
-      doc.save().strokeColor(LINE).lineWidth(0.75).dash(2, { space: 2 })
-        .moveTo(marginX, atY).lineTo(pageWidth - marginX, atY).stroke().undash().restore();
-    }
-
-    // ---------- en-tête ----------
-    doc.fillColor(ACCENT).font('Helvetica-Bold').fontSize(18)
-      .text('BLANCHISSERIE CÉZANNE', marginX, 45);
-    doc.font('Helvetica').fontSize(9.5).fillColor(GRAY)
-      .text('Du linge propre, livré dans les temps.', marginX, 68);
-    doc.save().strokeColor(ACCENT).lineWidth(1.5)
-      .moveTo(marginX, 92).lineTo(pageWidth - marginX, 92).stroke().restore();
-
-    let y = 116;
-    doc.font('Helvetica').fontSize(9.5).fillColor(GRAY)
-      .text('BON DE PRÉPARATION — CONDITIONNEMENT', marginX, y, { characterSpacing: 1 });
-    y += 16;
-    doc.font('Helvetica-Bold').fontSize(22).fillColor(INK)
-      .text(order.ticket, marginX, y);
-    y += 30;
-    doc.font('Helvetica-Bold').fontSize(11.5).fillColor(INK)
-      .text(order.societe, marginX, y);
-    y += 24;
-    doc.y = y;
-
-    // ---------- un bloc par chariot ----------
-    plan.carts.forEach((cart, idx) => {
-      ensureSpace(70);
-      y = doc.y;
-      dashedLine(y);
-      y += 18;
-
-      doc.font('Helvetica-Bold').fontSize(13).fillColor(INK)
-        .text(cart.name, marginX, y);
-      const summary = `${cart.usedL} / ${cart.capacityL} L   ·   ${cart.usedKg} / ${cart.maxWeightKg} kg`;
-      doc.font('Helvetica').fontSize(9.5).fillColor(GRAY)
-        .text(summary, marginX, y + 2, { width: pageWidth - marginX * 2, align: 'right' });
-      y += 22;
-      doc.font('Helvetica-Oblique').fontSize(8).fillColor(GRAY)
-        .text('Ordre de chargement — le plus lourd d\'abord, au fond du chariot :', marginX, y);
-      y += 16;
-      doc.y = y;
-
-      cart.items.forEach((item, itemIdx) => {
-        ensureSpace(24);
-        y = doc.y;
-        // case à cocher
-        doc.save().strokeColor(INK).lineWidth(1)
-          .rect(marginX, y + 1, 11, 11).stroke().restore();
-        const labelWidth = pageWidth - marginX * 2 - 20 - 50;
-        doc.font('Helvetica').fontSize(10.5).fillColor(INK)
-          .text(item.name, marginX + 20, y, { continued: true, width: labelWidth })
-          .font('Helvetica-Bold').text(`   × ${item.qty}`, { continued: false });
-        if (itemIdx === 0) {
-          doc.font('Helvetica-Oblique').fontSize(8).fillColor(GRAY)
-            .text('(fond)', pageWidth - marginX - 50, y + 1, { width: 50, align: 'right' });
-        }
-        doc.y = y + 19;
-      });
-      y = doc.y + 6;
-      doc.y = y;
-    });
-
-    // ---------- articles non placés, s'il y en a ----------
-    if (plan.unpacked && plan.unpacked.length > 0) {
-      ensureSpace(60);
-      y = doc.y + 10;
-      doc.save().strokeColor(RUST).lineWidth(1)
-        .roundedRect(marginX, y, pageWidth - marginX * 2, 20 + plan.unpacked.length * 16, 4).stroke().restore();
-      y += 12;
-      doc.font('Helvetica-Bold').fontSize(9.5).fillColor(RUST)
-        .text('⚠ NE RENTRE DANS AUCUN CHARIOT CI-DESSUS :', marginX + 12, y);
-      y += 16;
-      plan.unpacked.forEach(item => {
-        doc.font('Helvetica').fontSize(9.5).fillColor(RUST)
-          .text(`${item.name} × ${item.qty}`, marginX + 12, y);
-        y += 15;
-      });
-      doc.y = y;
-    }
-
-    // ---------- pied de page (chaque page) ----------
-    const range = doc.bufferedPageRange();
-    for (let i = 0; i < range.count; i += 1) {
-      doc.switchToPage(range.start + i);
-      doc.page.margins.bottom = 0; // pied de page dans la marge : évite une page blanche en plus
-      doc.font('Helvetica').fontSize(7.5).fillColor(GRAY)
-        .text(`Généré le ${new Date().toLocaleDateString('fr-FR')} — Blanchisserie Cézanne — page ${i + 1}/${range.count}`,
-          marginX, pageHeight - 40);
-    }
-
-    doc.end();
-  });
-}
-
-/**
- * Génère l'annexe détaillée BL par BL d'une facture, et résout avec un
- * Buffer. Sert à joindre le détail complet (article par article, quel
- * que soit le niveau de résumé choisi sur la facture Odoo elle-même —
- * "une ligne par BL" ou "agrégé" restent lisibles pour vous, mais cette
- * annexe donne au client de quoi vérifier ligne à ligne).
- * `invoiceRef` : texte d'en-tête (ex. numéro de facture Odoo).
- * `orders` : [{ ticket, livraisonPrevue, items: [{name, qty, deliveredQty, price}] }]
- */
-function buildInvoiceAnnexPdf(invoiceRef, societe, orders) {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
-    const chunks = [];
-    doc.on('data', c => chunks.push(c));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
-
-    const pageWidth = doc.page.width;
-    const pageHeight = doc.page.height;
-    const marginX = 50;
-    const bottomLimit = pageHeight - 60;
-
-    function ensureSpace(needed) {
-      if (doc.y + needed > bottomLimit) doc.addPage();
-    }
-
-    // ---------- en-tête ----------
-    doc.fillColor(ACCENT).font('Helvetica-Bold').fontSize(18)
-      .text('BLANCHISSERIE CÉZANNE', marginX, 45);
-    doc.font('Helvetica').fontSize(9.5).fillColor(GRAY)
-      .text('Annexe détaillée — bons de livraison inclus dans la facture', marginX, 68);
-    doc.save().strokeColor(ACCENT).lineWidth(1.5)
-      .moveTo(marginX, 92).lineTo(pageWidth - marginX, 92).stroke().restore();
-
-    let y = 116;
-    doc.font('Helvetica-Bold').fontSize(15).fillColor(INK).text(invoiceRef, marginX, y);
-    y += 20;
-    doc.font('Helvetica').fontSize(10.5).fillColor(GRAY).text(societe, marginX, y);
-    y += 26;
-    doc.y = y;
-
-    let grandTotal = 0;
-
-    orders.forEach(order => {
-      ensureSpace(60);
-      y = doc.y;
-      doc.save().strokeColor(LINE).lineWidth(0.75)
-        .moveTo(marginX, y).lineTo(pageWidth - marginX, y).stroke().restore();
-      y += 14;
-      doc.font('Helvetica-Bold').fontSize(11.5).fillColor(INK)
-        .text(`BL ${order.ticket}`, marginX, y, { continued: true })
-        .font('Helvetica').fontSize(9.5).fillColor(GRAY)
-        .text(`  —  livré le ${formatDateFr(order.livraisonPrevue)}`);
-      y += 20;
-      doc.y = y;
-
-      order.items.forEach(it => {
-        ensureSpace(16);
-        y = doc.y;
-        const qty = it.deliveredQty ?? it.qty;
-        if (qty <= 0) return;
-        const subtotal = qty * it.price;
-        grandTotal += subtotal;
-        doc.font('Helvetica').fontSize(9.5).fillColor(INK)
-          .text(it.name, marginX + 10, y, { width: 260, continued: false });
-        doc.text(`${qty} ×`, marginX + 280, y, { width: 40, align: 'right' });
-        doc.text(`${it.price.toFixed(3)} €`, marginX + 325, y, { width: 60, align: 'right' });
-        doc.font('Helvetica-Bold').text(`${subtotal.toFixed(2)} €`, marginX + 400, y, { width: 95, align: 'right' });
-        doc.y = y + 15;
-      });
-      doc.y += 8;
-    });
-
-    // ---------- total ----------
-    ensureSpace(40);
-    y = doc.y + 6;
-    doc.save().strokeColor(INK).lineWidth(1)
-      .moveTo(marginX + 300, y).lineTo(pageWidth - marginX, y).stroke().restore();
-    y += 10;
-    doc.font('Helvetica-Bold').fontSize(11).fillColor(INK)
-      .text('Total HT (annexe)', marginX + 300, y, { width: 100, continued: false });
-    doc.text(`${grandTotal.toFixed(2)} €`, marginX + 400, y, { width: 95, align: 'right' });
-
-    // ---------- pied de page ----------
-    const range = doc.bufferedPageRange();
-    for (let i = 0; i < range.count; i += 1) {
-      doc.switchToPage(range.start + i);
-      doc.page.margins.bottom = 0; // pied de page dans la marge : évite une page blanche en plus
-      doc.font('Helvetica').fontSize(7.5).fillColor(GRAY)
-        .text(`Annexe — ${invoiceRef} — page ${i + 1}/${range.count}`, marginX, pageHeight - 40);
-    }
-
-    doc.end();
-  });
-}
-
-/**
- * Génère la page de synthèse globale (quantités livrées totales par
- * article, tous BL confondus) qui ouvre le PDF consolidé — avant même la
- * facture Odoo elle-même. `aggregated` est le résultat de
- * aggregateByArticle() (voir invoiceBuilder.js) : [{ name, price, qty }].
- */
-function buildInvoiceSummaryPdf(invoiceRef, societe, periodStart, periodEnd, orderCount, aggregated) {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true });
-    const chunks = [];
-    doc.on('data', c => chunks.push(c));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
-
-    const pageWidth = doc.page.width;
-    const pageHeight = doc.page.height;
-    const marginX = 50;
-    const bottomLimit = pageHeight - 60;
-
-    function ensureSpace(needed) {
-      if (doc.y + needed > bottomLimit) doc.addPage();
-    }
-
-    // ---------- en-tête ----------
-    doc.fillColor(ACCENT).font('Helvetica-Bold').fontSize(18)
-      .text('BLANCHISSERIE CÉZANNE', marginX, 45);
-    doc.font('Helvetica').fontSize(9.5).fillColor(GRAY)
-      .text('Récapitulatif — quantités livrées sur la période', marginX, 68);
-    doc.save().strokeColor(ACCENT).lineWidth(1.5)
-      .moveTo(marginX, 92).lineTo(pageWidth - marginX, 92).stroke().restore();
-
-    let y = 116;
-    doc.font('Helvetica-Bold').fontSize(15).fillColor(INK).text(invoiceRef, marginX, y);
-    y += 20;
-    doc.font('Helvetica').fontSize(10.5).fillColor(GRAY).text(societe, marginX, y);
-    y += 16;
-    doc.text(`Période du ${formatDateFr(periodStart)} au ${formatDateFr(periodEnd)} — ${orderCount} bon(s) de livraison`, marginX, y);
-    y += 26;
-    doc.y = y;
-
-    // ---------- en-tête de tableau ----------
-    ensureSpace(30);
-    y = doc.y;
-    doc.font('Helvetica-Bold').fontSize(9.5).fillColor(GRAY)
-      .text('ARTICLE', marginX, y, { width: 220 })
-      .text('QUANTITÉ LIVRÉE', marginX + 230, y, { width: 90, align: 'right' })
-      .text('PRIX UNIT.', marginX + 330, y, { width: 70, align: 'right' })
-      .text('SOUS-TOTAL', marginX + 410, y, { width: 85, align: 'right' });
-    y += 14;
-    doc.save().strokeColor(INK).lineWidth(1)
-      .moveTo(marginX, y).lineTo(pageWidth - marginX, y).stroke().restore();
-    y += 8;
-    doc.y = y;
-
-    let grandTotal = 0;
-    let grandQty = 0;
-
-    aggregated.forEach(g => {
-      ensureSpace(18);
-      y = doc.y;
-      const subtotal = g.qty * g.price;
-      grandTotal += subtotal;
-      grandQty += g.qty;
-      doc.font('Helvetica').fontSize(10).fillColor(INK)
-        .text(g.name, marginX, y, { width: 220 })
-        .text(String(g.qty), marginX + 230, y, { width: 90, align: 'right' })
-        .text(`${g.price.toFixed(3)} €`, marginX + 330, y, { width: 70, align: 'right' })
-        .font('Helvetica-Bold')
-        .text(`${subtotal.toFixed(2)} €`, marginX + 410, y, { width: 85, align: 'right' });
-      doc.y = y + 17;
-    });
-
-    // ---------- totaux ----------
-    ensureSpace(50);
+  // ---------- articles ----------
+  const cols = [
+    { label: 'Désignation', x: L + 8, w: 280 },
+    { label: 'Commandé', x: L + 300, w: 80, align: 'right' },
+    { label: 'Livré', x: L + 390, w: W - 398, align: 'right' },
+  ];
+  y = K.tableHeader(doc, cols, y);
+  let adjusted = false; let totalOrdered = 0; let totalDelivered = 0;
+  for (const it of order.items) {
+    const delivered = it.deliveredQty ?? it.qty;
+    const diff = delivered !== it.qty;
+    adjusted = adjusted || diff; totalOrdered += it.qty; totalDelivered += delivered;
+    if (y + 30 > K.BOTTOM) { y = K.nextPage(doc, continued()); y = K.tableHeader(doc, cols, y); }
+    doc.font(F.sans).fontSize(10.5).fillColor(C.ink).text(it.name, cols[0].x, y + 7.5, { width: cols[0].w, lineBreak: false });
+    if (it.sageCode) doc.font(F.sans).fontSize(7.5).fillColor(C.mute).text(it.sageCode, cols[0].x, y + 20, { width: cols[0].w, lineBreak: false });
+    const t = { align: 'right', lineBreak: false, features: K.TNUM };
+    doc.font(F.sans).fontSize(10.5).fillColor(C.soft).text(num(it.qty), cols[1].x, y + 7.5, { width: cols[1].w, ...t });
+    // Une quantité ajustée se distingue par le gras et un astérisque, pas par la couleur seule.
+    doc.font(diff ? F.bold : F.semi).fillColor(C.ink).text(diff ? `${num(delivered)}\u00A0*` : num(delivered), cols[2].x, y + 7.5, { width: cols[2].w, ...t });
+    y += it.sageCode ? 33 : 28;
+    K.hr(doc, y);
+  }
+  // total
+  if (y + 40 > K.BOTTOM) { y = K.nextPage(doc, continued()); }
+  doc.font(F.semi).fontSize(9).fillColor(C.soft).text('Total pièces', cols[0].x, y + 10, { width: 200, lineBreak: false });
+  const tt = { align: 'right', lineBreak: false, features: K.TNUM };
+  doc.font(F.medium).fontSize(10.5).fillColor(C.soft).text(num(totalOrdered), cols[1].x, y + 9, { width: cols[1].w, ...tt });
+  doc.font(F.bold).fontSize(12).fillColor(C.ink).text(num(totalDelivered), cols[2].x, y + 8, { width: cols[2].w, ...tt });
+  K.hr(doc, y + 30, { color: C.ink, width: 1 });
+  y += 42;
+  if (adjusted) {
+    doc.font(F.italic).fontSize(8).fillColor(C.soft).text('* Quantité livrée différente de la quantité commandée.', L, y, { width: W });
     y = doc.y + 8;
-    doc.save().strokeColor(INK).lineWidth(1)
-      .moveTo(marginX + 230, y).lineTo(pageWidth - marginX, y).stroke().restore();
-    y += 10;
-    doc.font('Helvetica-Bold').fontSize(10.5).fillColor(INK)
-      .text('Total pièces livrées', marginX, y, { width: 220 })
-      .text(String(grandQty), marginX + 230, y, { width: 90, align: 'right' });
-    y += 18;
-    doc.fontSize(11.5)
-      .text('Total HT', marginX, y, { width: 220 })
-      .text(`${grandTotal.toFixed(2)} €`, marginX + 410, y, { width: 85, align: 'right' });
+  }
 
-    // ---------- pied de page ----------
-    const range = doc.bufferedPageRange();
-    for (let i = 0; i < range.count; i += 1) {
-      doc.switchToPage(range.start + i);
-      doc.page.margins.bottom = 0; // pied de page dans la marge : évite une page blanche en plus
-      doc.font('Helvetica').fontSize(7.5).fillColor(GRAY)
-        .text(`Récapitulatif — ${invoiceRef} — page ${i + 1}/${range.count}`, marginX, pageHeight - 40);
-    }
+  // ---------- notes ----------
+  if (order.notes) {
+    doc.font(F.sans).fontSize(9).fillColor(C.ink);
+    const h = doc.heightOfString(order.notes, { width: W - 28, lineGap: 1.5 }) + 34;
+    if (y + h > K.BOTTOM) y = K.nextPage(doc, continued());
+    doc.save().roundedRect(L, y, W, h, 4).fill(C.wash).restore();
+    doc.font(F.semi).fontSize(8).fillColor(C.soft).text('Notes de livraison', L + 14, y + 10, { width: W - 28, lineBreak: false });
+    doc.font(F.sans).fontSize(9).fillColor(C.ink).text(order.notes, L + 14, y + 24, { width: W - 28, lineGap: 1.5 });
+    y += h + 14;
+  }
 
-    doc.end();
+  // ---------- remise et réception ----------
+  if (y + 96 > K.BOTTOM) y = K.nextPage(doc, continued());
+  y = Math.max(y + 10, Math.min(y + 30, K.BOTTOM - 86));
+  const bw = (W - 16) / 2;
+  [['Remis par', 'Nom du chauffeur, signature'], ['Reçu par', 'Nom, date, signature et réserves éventuelles']].forEach(([title, hint], i) => {
+    const x = L + i * (bw + 16);
+    doc.save().lineWidth(0.8).strokeColor(C.ink).roundedRect(x, y, bw, 78, 4).stroke().restore();
+    doc.font(F.semi).fontSize(9).fillColor(C.ink).text(title, x + 12, y + 10, { width: bw - 24, lineBreak: false });
+    doc.font(F.sans).fontSize(7.6).fillColor(C.mute).text(hint, x + 12, y + 23, { width: bw - 24, lineBreak: false });
   });
+
+  K.footers(doc, { seller, label: `Bon de livraison ${order.ticket}` });
+  doc.end();
+  return done;
+}
+
+/**
+ * Bon de préparation (plan de conditionnement), à imprimer et cocher à la main. `order` : ticket, societe (et
+ * livraison_prevue si connue). `plan` : { carts: [{ name, usedL, capacityL, usedKg, maxWeightKg, items: [{ name, code, qty }] }],
+ * unpacked: [{ name, qty }] }.
+ */
+async function buildPreparationSlipPdf(order, plan) {
+  const seller = K.brandSeller();
+  const { doc, done, F } = K.newDocument({ title: `Bon de préparation ${order.ticket}`, subject: order.societe });
+  const continued = () => `Bon de préparation ${order.ticket}  ·  ${order.societe}`;
+
+  K.header(doc, { title: 'Bon de préparation', number: `N° ${order.ticket}` });
+  const itemCount = plan.carts.reduce((s, c) => s + c.items.length, 0) + (plan.unpacked || []).length;
+  let y = K.metaBand(doc, 120, [
+    ['Client', order.societe],
+    ['Livraison prévue', order.livraison_prevue ? dateFr(order.livraison_prevue) : 'à confirmer'],
+    ['Chariots', String(plan.carts.length)],
+    ['Références', String(itemCount)],
+  ]) + 22;
+
+  plan.carts.forEach((cart) => {
+    const need = 52 + Math.min(cart.items.length, 3) * 28;
+    if (y + need > K.BOTTOM) y = K.nextPage(doc, continued());
+    // bandeau du chariot : nom, remplissage en volume et en poids
+    doc.save().roundedRect(L, y, W, 44, 4).fill(C.wash).restore();
+    doc.font(F.semi).fontSize(12.5).fillColor(C.ink).text(cart.name, L + 14, y + 15, { width: 190, lineBreak: false });
+    const metric = (label, used, cap, unit, x) => {
+      const ratio = cap ? used / cap : 0;
+      doc.font(F.sans).fontSize(7.8).fillColor(C.soft).text(label, x, y + 9, { width: 120, lineBreak: false });
+      doc.font(F.semi).fontSize(8.5).fillColor(ratio > 0.95 ? C.rust : C.ink)
+        .text(`${num(used, 1)} / ${num(cap, 1)} ${unit}`, x, y + 9, { width: 112, align: 'right', lineBreak: false, features: K.TNUM });
+      K.gauge(doc, x, y + 26, 112, ratio, ratio > 0.95 ? C.rust : C.brand);
+    };
+    metric('Volume', cart.usedL, cart.capacityL, 'L', L + 218);
+    metric('Poids', cart.usedKg, cart.maxWeightKg, 'kg', L + 218 + 128);
+    y += 56;
+    doc.font(F.italic).fontSize(8).fillColor(C.soft).text("Ordre de chargement : le plus lourd d'abord, au fond du chariot.", L + 2, y, { width: W, lineBreak: false });
+    y += 16;
+    cart.items.forEach((item, i) => {
+      if (y + 28 > K.BOTTOM) y = K.nextPage(doc, continued());
+      doc.font(F.medium).fontSize(8.5).fillColor(C.mute).text(String(i + 1), L + 2, y + 7, { width: 16, align: 'right', lineBreak: false });
+      K.checkbox(doc, L + 28, y + 5, 13);
+      doc.font(F.sans).fontSize(11).fillColor(C.ink).text(item.name, L + 54, y + 6, { width: 280, lineBreak: false });
+      if (i === 0) doc.font(F.italic).fontSize(8).fillColor(C.mute).text('au fond', L + 340, y + 8.5, { width: 60, lineBreak: false });
+      doc.font(F.bold).fontSize(12.5).fillColor(C.ink).text(`× ${item.qty}`, R - 90, y + 5, { width: 90, align: 'right', lineBreak: false, features: K.TNUM });
+      y += 28;
+      K.hr(doc, y - 2);
+    });
+    y += 16;
+  });
+
+  // ---------- articles qui ne rentrent dans aucun chariot ----------
+  if (plan.unpacked && plan.unpacked.length > 0) {
+    const h = 38 + plan.unpacked.length * 18;
+    if (y + h > K.BOTTOM) y = K.nextPage(doc, continued());
+    doc.save().lineWidth(1.2).strokeColor(C.rust).roundedRect(L, y, W, h, 4).stroke().restore();
+    K.alertIcon(doc, L + 14, y + 12, 15);
+    doc.font(F.semi).fontSize(10).fillColor(C.rust).text('Ne rentre dans aucun chariot ci-dessus', L + 38, y + 14, { width: W - 52, lineBreak: false });
+    let uy = y + 36;
+    plan.unpacked.forEach((it) => {
+      doc.font(F.sans).fontSize(10.5).fillColor(C.rust).text(`${it.name}`, L + 38, uy, { width: 340, lineBreak: false });
+      doc.font(F.bold).text(`× ${it.qty}`, R - 100, uy, { width: 88, align: 'right', lineBreak: false, features: K.TNUM });
+      uy += 18;
+    });
+    y += h + 18;
+  }
+
+  // ---------- visa ----------
+  if (y + 40 > K.BOTTOM) y = K.nextPage(doc, continued());
+  doc.font(F.sans).fontSize(8.5).fillColor(C.soft);
+  doc.text('Préparé par', L, y + 14, { width: 70, lineBreak: false });
+  K.hr(doc, y + 24, { x1: L + 66, x2: L + 230, color: C.mute });
+  doc.text('Contrôlé par', L + 270, y + 14, { width: 70, lineBreak: false });
+  K.hr(doc, y + 24, { x1: L + 340, x2: R, color: C.mute });
+
+  K.footers(doc, { seller, label: `Bon de préparation ${order.ticket}` });
+  doc.end();
+  return done;
+}
+
+// ---------- annexe et récapitulatif de facture ----------
+
+/** Quantité facturée d'une ligne de BL (la quantité livrée prime sur la quantité commandée). */
+const billedQty = (it) => it.deliveredQty ?? it.qty;
+
+/**
+ * Annexe détaillée, BL par BL : de quoi vérifier la facture ligne à ligne.
+ * `orders` : [{ ticket, livraisonPrevue, items: [{ name, qty, deliveredQty, price }] }]
+ */
+async function buildInvoiceAnnexPdf(invoiceRef, societe, orders) {
+  const seller = K.brandSeller();
+  const { doc, done, F } = K.newDocument({ title: `Annexe — ${invoiceRef}`, subject: societe });
+  const continued = () => `Annexe  ·  ${invoiceRef}  ·  ${societe}`;
+
+  K.header(doc, { title: 'Annexe', number: invoiceRef });
+  let y = K.metaBand(doc, 120, [['Client', societe], ['Facture', invoiceRef], ['Bons de livraison', String(orders.length)]]) + 24;
+
+  const cols = [
+    { label: 'Article', x: L + 14, w: 230 },
+    { label: 'Quantité', x: L + 250, w: 60, align: 'right' },
+    { label: 'Prix unitaire HT', x: L + 316, w: 80, align: 'right' },
+    { label: 'Total HT', x: L + 402, w: W - 414, align: 'right' },
+  ];
+  const t = { align: 'right', lineBreak: false, features: K.TNUM };
+  y = K.tableHeader(doc, cols, y) + 10;
+  let grand = 0;
+  for (const order of orders) {
+    const lines = order.items.filter((it) => billedQty(it) > 0);
+    const sub = lines.reduce((s, it) => s + Math.round(billedQty(it) * it.price * 100), 0);
+    grand += sub;
+    if (y + 26 + Math.min(lines.length, 2) * 21 + 24 > K.BOTTOM) { y = K.nextPage(doc, continued()); y = K.tableHeader(doc, cols, y) + 10; }
+    // bandeau du bon : numéro, date de livraison, sous-total
+    doc.save().roundedRect(L, y, W, 26, 4).fill(C.wash).restore();
+    doc.font(F.semi).fontSize(10).fillColor(C.ink).text(`BL ${order.ticket}`, L + 14, y + 8, { width: 120, lineBreak: false });
+    doc.font(F.sans).fontSize(9).fillColor(C.soft).text(`livré le ${dateOrTbc(order.livraisonPrevue)}`, L + 100, y + 8.5, { width: 200, lineBreak: false });
+    doc.font(F.semi).fontSize(9.5).fillColor(C.ink).text(eur(sub), cols[3].x - 60, y + 8, { width: cols[3].w + 60, ...t });
+    y += 30;
+    if (!lines.length) { doc.font(F.italic).fontSize(8.5).fillColor(C.mute).text('Aucune pièce livrée.', cols[0].x, y + 4, { width: 200, lineBreak: false }); y += 22; }
+    for (const it of lines) {
+      if (y + 22 > K.BOTTOM) { y = K.nextPage(doc, continued()); y = K.tableHeader(doc, cols, y); }
+      const qty = billedQty(it);
+      doc.font(F.sans).fontSize(9.5).fillColor(C.ink).text(it.name, cols[0].x, y + 5, { width: cols[0].w, lineBreak: false });
+      doc.text(num(qty), cols[1].x, y + 5, { width: cols[1].w, ...t });
+      doc.fillColor(C.soft).text(price(it.price), cols[2].x, y + 5, { width: cols[2].w, ...t });
+      doc.font(F.semi).fillColor(C.ink).text(eur(Math.round(qty * it.price * 100)), cols[3].x, y + 5, { width: cols[3].w, ...t });
+      y += 21;
+      K.hr(doc, y);
+    }
+    y += 14;
+  }
+
+  if (y + 56 > K.BOTTOM) y = K.nextPage(doc, continued());
+  K.hr(doc, y, { x1: L + 250, color: C.ink, width: 1.2 });
+  doc.font(F.semi).fontSize(9).fillColor(C.ink).text('Total HT de l\'annexe', L + 250, y + 17, { width: 120, lineBreak: false });
+  doc.font(F.serif).fontSize(24).fillColor(C.ink).text(eur(grand), L + 300, y + 8, { width: W - 300, ...t });
+
+  K.footers(doc, { seller, label: `Annexe ${invoiceRef}` });
+  doc.end();
+  return done;
+}
+
+/**
+ * Récapitulatif global : quantités livrées totales par article, tous bons confondus ; ouvre le PDF consolidé.
+ * `aggregated` : [{ name, price, qty }].
+ */
+async function buildInvoiceSummaryPdf(invoiceRef, societe, periodStart, periodEnd, orderCount, aggregated) {
+  const seller = K.brandSeller();
+  const { doc, done, F } = K.newDocument({ title: `Récapitulatif — ${invoiceRef}`, subject: societe });
+  const continued = () => `Récapitulatif  ·  ${invoiceRef}  ·  ${societe}`;
+
+  K.header(doc, { title: 'Récapitulatif', number: invoiceRef });
+  let y = K.metaBand(doc, 120, [
+    ['Client', societe],
+    ['Période', `${dateOrTbc(periodStart)} – ${dateOrTbc(periodEnd)}`],
+    ['Bons de livraison', String(orderCount)],
+  ]) + 24;
+
+  const cols = [
+    { label: 'Article', x: L + 8, w: 220 },
+    { label: 'Quantité livrée', x: L + 232, w: 90, align: 'right' },
+    { label: 'Prix unitaire HT', x: L + 328, w: 78, align: 'right' },
+    { label: 'Sous-total HT', x: L + 412, w: W - 420, align: 'right' },
+  ];
+  const t = { align: 'right', lineBreak: false, features: K.TNUM };
+  y = K.tableHeader(doc, cols, y);
+  let totalHt = 0; let totalQty = 0;
+  for (const g of aggregated) {
+    if (y + 26 > K.BOTTOM) { y = K.nextPage(doc, continued()); y = K.tableHeader(doc, cols, y); }
+    const cents = Math.round(g.qty * g.price * 100);
+    totalHt += cents; totalQty += g.qty;
+    doc.font(F.sans).fontSize(10).fillColor(C.ink).text(g.name, cols[0].x, y + 7, { width: cols[0].w, lineBreak: false });
+    doc.text(num(g.qty), cols[1].x, y + 7, { width: cols[1].w, ...t });
+    doc.fillColor(C.soft).text(price(g.price), cols[2].x, y + 7, { width: cols[2].w, ...t });
+    doc.font(F.semi).fillColor(C.ink).text(eur(cents), cols[3].x, y + 7, { width: cols[3].w, ...t });
+    y += 26;
+    K.hr(doc, y);
+  }
+
+  if (y + 78 > K.BOTTOM) y = K.nextPage(doc, continued());
+  y += 14;
+  doc.font(F.sans).fontSize(9.5).fillColor(C.soft).text('Total pièces livrées', L + 232, y, { width: 130, lineBreak: false });
+  doc.font(F.semi).fillColor(C.ink).text(num(totalQty), L + 340, y, { width: W - 340, ...t });
+  K.hr(doc, y + 20, { x1: L + 232, color: C.ink, width: 1.2 });
+  doc.font(F.semi).fontSize(9).fillColor(C.ink).text('Total HT', L + 232, y + 37, { width: 80, lineBreak: false });
+  doc.font(F.serif).fontSize(24).fillColor(C.ink).text(eur(totalHt), L + 290, y + 28, { width: W - 290, ...t });
+
+  K.footers(doc, { seller, label: `Récapitulatif ${invoiceRef}` });
+  doc.end();
+  return done;
 }
 
 module.exports = { buildDeliveryNotePdf, buildPreparationSlipPdf, buildInvoiceAnnexPdf, buildInvoiceSummaryPdf };

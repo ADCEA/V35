@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test \"test/*.test.js\"",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "pdf:samples": "node scripts/pdf-samples.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",

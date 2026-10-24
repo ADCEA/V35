@@ -345,6 +345,23 @@ aucun article** (la demande est refusée en entier). Les commandes déjà passé
 de commandes depuis le planning des chambres continue d'utiliser le catalogue complet. Chaque changement est écrit dans le journal chaîné
 (`client_article_access`) et visible dans l'historique de l'article comme dans celui de l'hôtel.
 
+### PDF (factures, avoirs, devis, bons, annexes)
+
+Tous les PDF du site partagent une même charte, définie dans `src/utils/pdfKit.js` :
+
+| Document | Fichier | Particularités |
+|---|---|---|
+| Facture, avoir, devis, brouillon | `src/billing/pdf.js` | logo, adresse du client à l'emplacement de la fenêtre d'enveloppe (repères de pliage dans la marge), détail de la TVA, net à payer en grand, bloc de virement (IBAN, échéance, référence à rappeler), pastille « Payée », « Bon pour accord » sur les devis, filigrane sur les brouillons |
+| Bon de livraison | `src/utils/pdf.js` | quantités commandées / livrées (astérisque si écart), notes, **zones de signature** « Remis par » / « Reçu par » |
+| Bon de préparation | `src/utils/pdf.js` | une carte par chariot avec jauges de volume et de poids (rouge au-delà de 95 %), cases à cocher numérotées dans l'ordre de chargement, encadré d'alerte pour ce qui ne rentre pas, visas |
+| Annexe de facture, récapitulatif | `src/utils/pdf.js` | détail BL par BL avec sous-totaux ; synthèse par article |
+
+- les polices (Inter et Instrument Serif, licence OFL) sont **dans le dépôt** (`src/assets/fonts`) : le rendu est identique partout ; sans elles, le PDF est produit avec Helvetica ;
+- l'identité de la société (en-tête, pied de page de chaque page) vient de Facturation → Émetteur ; les factures émises gardent l'identité figée à l'émission ;
+- les PDF sont lisibles en noir et blanc (aucune information portée par la seule couleur) ;
+- **changer la mise en page ne change aucune facture émise** : l'empreinte d'intégrité porte sur les données figées, pas sur le fichier ; un PDF régénéré a le même contenu avec la mise en page du moment ;
+- `npm run pdf:samples [dossier]` génère un exemplaire de chaque modèle avec des données fictives (base jetable) pour juger un changement de mise en page ; `test/pdf.test.js` vérifie que chaque modèle se génère avec le bon nombre de pages.
+
 ### Verrou de la Facturation
 
 La session administrateur ouvre tout le logiciel et dure des jours ; la facturation
