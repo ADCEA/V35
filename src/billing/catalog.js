@@ -7,10 +7,14 @@
 //    Il n'y a une ligne que pour les articles dont le prix diffère du catalogue.
 //  - Le prix applicable à une date = tarif négocié couvrant cette date, sinon prix
 //    catalogue (services.resolveClientPrice, utilisé partout où une commande est créée).
-//  - Le prix est FIGÉ sur chaque ligne de commande à la création (order_items.price) :
-//    changer un tarif ne modifie jamais une commande passée, sauf demande explicite
-//    « réappliquer aux BL non facturés » (repriceUnbilled), qui ne touche pas les BL
-//    déjà dans une facture ou un brouillon.
+//  - Le prix est FIGÉ sur chaque ligne de commande à la création (order_items.price).
+//    Changer un tarif négocié (une case, une opération en masse ou un import) recalcule
+//    AUTOMATIQUEMENT les BL non facturés de l'hôtel, à partir de la date d'effet, au tarif en
+//    vigueur à leur date (repriceUnbilled) ; les BL déjà facturés ne changent jamais, ceux
+//    qui sont dans un brouillon de facture sont signalés mais laissés tels quels. L'aperçu
+//    des opérations en masse et des imports montre cet impact. Un changement de prix
+//    CATALOGUE ne recalcule rien (le catalogue n'a pas d'historique) : « réappliquer » reste
+//    disponible à la main.
 //  - Chaque changement de prix est inscrit dans le journal chaîné (billing_events).
 //  - Aucune route ici : voir routes/billingCatalog.js (validation HTTP, verrou, ressaisie).
 
@@ -716,7 +720,7 @@ function dropPrice(clientId, article, date) {
   return { changed: true, from: current ? current.price : later[0].price, to: round3(article.price) };
 }
 
-function setClientPrice(clientId, articleId, priceInput, dateInput) {
+function setClientPrice(clientId, articleId, priceInput, dateInput, { reprice = true } = {}) {
   const client = clientRow(clientId);
   const article = articleRow(articleId);
   const price = parsePrice(priceInput, 'Prix');
@@ -724,18 +728,18 @@ function setClientPrice(clientId, articleId, priceInput, dateInput) {
   return db.transaction(() => {
     const r = writePrice(clientId, article, price, date);
     if (r.changed) log('client_price_set', { clientId, client: client.societe, articleId, article: article.name, sageCode: article.sage_code, from: r.from, to: price, effective: date, ...(r.superseded?.length ? { replaced: r.superseded } : {}) });
-    return { ...r, effective: date };
+    return { ...r, effective: date, repriced: r.changed && reprice ? repriceAfterTariff(clientId, date, [articleId], 'tarif') : null };
   })();
 }
 
-function removeClientPrice(clientId, articleId, dateInput) {
+function removeClientPrice(clientId, articleId, dateInput, { reprice = true } = {}) {
   const client = clientRow(clientId);
   const article = articleRow(articleId);
   const date = parseDate(dateInput, todayParis(), 'Date');
   return db.transaction(() => {
     const r = dropPrice(clientId, article, date);
     if (r.changed) log('client_price_removed', { clientId, client: client.societe, articleId, article: article.name, sageCode: article.sage_code, from: r.from, to: r.to, effective: date });
-    return { ...r, effective: date };
+    return { ...r, effective: date, repriced: r.changed && reprice ? repriceAfterTariff(clientId, date, [articleId], 'tarif') : null };
   })();
 }
 
@@ -758,6 +762,7 @@ function bulkPrices(clientId, opts, { apply = false } = {}) {
   const date = parseDate(o.from, todayParis(), "Date d'effet");
   const mode = o.mode;
   const changes = [];
+  let repriced = null;
   transact(apply, () => {
     if (mode === 'percent') {
       const pct = Number(o.percent);
@@ -804,9 +809,10 @@ function bulkPrices(clientId, opts, { apply = false } = {}) {
         ...(mode === 'copy' ? { sourceClientId: Number(o.sourceClientId) } : {}),
         changes: changes.slice(0, 60).map(c => ({ sageCode: c.sageCode, from: c.from, to: c.to })),
       });
+      if (o.reprice !== false) repriced = repriceAfterTariff(clientId, date, changes.map(c => c.articleId), 'tarif');
     }
   });
-  return { applied: !!apply, effective: date, count: changes.length, changes };
+  return { applied: !!apply, effective: date, count: changes.length, changes, repriced };
 }
 
 // ---- import des tarifs depuis un CSV ----
@@ -839,7 +845,7 @@ function mapHeaders(headers) {
  * proches. `clientMap` ({ nom écrit dans le fichier: id de fiche }) est le choix explicite de la personne : il l'emporte
  * sur le SIRET, jamais sur un nom identique à une fiche.
  */
-function importPrices(csvText, { apply = false, clientId = null, defaultDate = null, clientMap = null } = {}) {
+function importPrices(csvText, { apply = false, clientId = null, defaultDate = null, clientMap = null, reprice = true } = {}) {
   let parsed;
   try { parsed = parseCsv(String(csvText || '')); } catch (e) { throw new BillingError(`Fichier CSV illisible : ${e.message}`); }
   if (!parsed.rows.length) throw new BillingError('Le fichier ne contient aucune ligne de données.');
@@ -876,7 +882,14 @@ function importPrices(csvText, { apply = false, clientId = null, defaultDate = n
   const findArticle = (raw) => bySage.get(norm(raw)) || byCode.get(norm(raw)) || bySquashed.get(squash(raw)) || null;
 
   const lines = [];
+  const repricedList = [];
   const unknown = new Map();
+  const touched = new Map();   // hôtel → { from: première date d'effet, articleIds } des tarifs réellement modifiés
+  const touch = (c, a, date) => {
+    const t = touched.get(c.id) || { client: c, from: date, articleIds: new Set() };
+    if (date < t.from) t.from = date;
+    t.articleIds.add(a.id); touched.set(c.id, t);
+  };
   // Nom exact → choix de la personne → SIRET/SIREN. Renvoie { c, via } ; c vaut null si rien ne correspond.
   const findClient = (row) => {
     const name = String(row[map.client] ?? '').trim();
@@ -910,11 +923,13 @@ function importPrices(csvText, { apply = false, clientId = null, defaultDate = n
       if (wide && to === round3(a.price)) {                       // retour au catalogue
         const d = dropPrice(c.id, a, date);
         rec.status = d.changed ? 'ok' : 'same';
+        if (d.changed) touch(c, a, date);
         if (d.changed) log('client_price_removed', { clientId: c.id, client: c.societe, articleId: a.id, article: a.name, sageCode: a.sage_code, from: d.from, to: d.to, effective: date, via: 'import' });
         return;
       }
       const w = writePrice(c.id, a, to, date);
       rec.status = w.changed ? 'ok' : 'same';
+      if (w.changed) touch(c, a, date);
       if (w.changed) log('client_price_set', { clientId: c.id, client: c.societe, articleId: a.id, article: a.name, sageCode: a.sage_code, from: w.from, to, effective: date, via: 'import', ...(via !== 'nom' ? { hotelMatch: via } : {}) });
     } catch (e) {
       if (!(e instanceof BillingError)) throw e;
@@ -931,11 +946,20 @@ function importPrices(csvText, { apply = false, clientId = null, defaultDate = n
         else { const f = findClient(row); handle(line, f.c, row, row[map.prix], f.via); }
       }
     });
+    // BL non facturés des hôtels dont un tarif a changé : recalculés dans la même transaction (l'aperçu est donc exact)
+    if (reprice) {
+      for (const t of touched.values()) {
+        const r = repriceUnbilled(t.client.id, { from: t.from, articleIds: [...t.articleIds] }, { apply: true, via: 'import' });
+        if (r.orders.length || r.skippedInDraft) repricedList.push({ clientId: t.client.id, client: t.client.societe, ...repriceSummary(r) });
+      }
+    }
     return lines;
   });
   const n = (s) => lines.filter(l => l.status === s).length;
+  const repriced = { enabled: !!reprice, clients: repricedList.length, orders: repricedList.reduce((s, r) => s + r.orders, 0), lines: repricedList.reduce((s, r) => s + r.lines, 0),
+    deltaCents: repricedList.reduce((s, r) => s + r.deltaCents, 0), skippedInDraft: repricedList.reduce((s, r) => s + r.skippedInDraft, 0), detail: repricedList.sort((a, b) => a.client.localeCompare(b.client, 'fr')) };
   return {
-    applied: !!apply, format: wide ? 'grille' : 'liste', summary: { total: lines.length, changed: n('ok'), same: n('same'), errors: n('error') }, lines,
+    applied: !!apply, format: wide ? 'grille' : 'liste', summary: { total: lines.length, changed: n('ok'), same: n('same'), errors: n('error') }, lines, repriced,
     unknownClients: suggestClients([...unknown.values()], clients),
     matchedBy: { siret: lines.filter(l => l.via === 'siret').length, choix: lines.filter(l => l.via === 'choix').length },
   };
@@ -1037,7 +1061,7 @@ function repriceCandidates(clientId, from, articleIds) {
 }
 
 /** Aperçu, ou application, du recalcul des BL non facturés à partir de `from` au tarif en vigueur à leur date. */
-function repriceUnbilled(clientId, { from, articleIds } = {}, { apply = false } = {}) {
+function repriceUnbilled(clientId, { from, articleIds } = {}, { apply = false, via = null } = {}) {
   const date = parseDate(from, null, 'Date de départ');
   if (!date) throw new BillingError('Indiquez la date à partir de laquelle recalculer les BL.');
   const r = repriceCandidates(clientId, date, articleIds);
@@ -1045,10 +1069,18 @@ function repriceUnbilled(clientId, { from, articleIds } = {}, { apply = false } 
     db.transaction(() => {
       const upd = db.prepare('UPDATE order_items SET price = ? WHERE id = ?');
       for (const o of r.orders) for (const l of o.lines) upd.run(l.to, l.itemId);
-      log('orders_repriced', { clientId, client: r.client.societe, from: date, orders: r.orders.length, lines: r.orders.reduce((s, o) => s + o.lines.length, 0), deltaCents: r.deltaCents });
+      log('orders_repriced', { clientId, client: r.client.societe, from: date, orders: r.orders.length, lines: r.orders.reduce((s, o) => s + o.lines.length, 0), deltaCents: r.deltaCents, ...(via ? { via } : {}) });
     })();
   }
   return { applied: !!apply && r.orders.length > 0, from: date, skippedInDraft: r.skippedInDraft, deltaCents: r.deltaCents, orders: r.orders };
+}
+
+/** Résumé court d'un recalcul (sans le détail des lignes), pour les réponses des changements de tarif. */
+const repriceSummary = (r) => ({ orders: r.orders.length, lines: r.orders.reduce((s, o) => s + o.lines.length, 0), deltaCents: r.deltaCents, skippedInDraft: r.skippedInDraft, from: r.from });
+/** Recalcule (dans la transaction en cours) les BL non facturés d'un hôtel touchés par un changement de tarif. */
+function repriceAfterTariff(clientId, from, articleIds, via) {
+  if (!from || !articleIds.length) return null;
+  return repriceSummary(repriceUnbilled(clientId, { from, articleIds }, { apply: true, via }));
 }
 
 // ---- journal des prix ----

@@ -194,6 +194,7 @@ test('import de tarifs : hôtel retrouvé par SIRET ou choisi à l’aperçu, ap
   assert.equal(r.status, 200);
   assert.deepEqual(r.data.summary, { total: 2, changed: 1, same: 0, errors: 1 });
   assert.equal(r.data.lines[0].via, 'siret');
+  assert.equal(r.data.repriced.enabled, true, 'le recalcul des BL non facturés est actif par défaut');
   assert.equal(r.data.unknownClients.length, 1);
   assert.equal(r.data.unknownClients[0].name, 'Nom très différent');
   r = await call('POST', `${B}/catalog/prices/import`, { csv, clientMap: { 'Nom très différent': hotel } });

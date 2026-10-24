@@ -282,6 +282,67 @@ test('recalcul des BL non facturés : seulement ceux qui ne sont pas facturés, 
   rejects(() => catalog.repriceUnbilled(alpha, {}, {}), /date/i);
 });
 
+test('un changement de tarif recalcule tout seul les BL non facturés (import, une case, opération en masse) ; l’aperçu est exact', () => {
+  const hotel = addClient('Hôtel Auto', 'auto@exemple.fr');
+  db.prepare(`UPDATE clients SET siret='55210055400013' WHERE id=?`).run(hotel);
+  const mk = (ticket, date, status = 'livree', qty = 10) => {
+    const id = Number(db.prepare(`INSERT INTO orders (ticket, client_id, societe, contact, tel, adresse, livraison_prevue, status) VALUES (?,?,?,?,?,?,?,?)`).run(ticket, hotel, 'H', 'C', '06', 'adr', date, status).lastInsertRowid);
+    db.prepare(`INSERT INTO order_items (order_id, service_id, name, code, sage_code, price, qty, delivered_qty) VALUES (?,?,?,?,?,?,?,?)`).run(id, drap, 'Drap plat 2 pers.', 'DP2', 'B-DP2', 1.35, qty, qty);
+    return id;
+  };
+  const frozen = (id) => db.prepare('SELECT price FROM order_items WHERE order_id=?').get(id).price;
+  const early = mk('A-AVANT', '2026-10-05');
+  const open = mk('A-OUVERT', '2026-10-12', 'traitement');
+  const delivered = mk('A-LIVRE', '2026-10-15');
+  const billed = mk('A-FACTURE', '2026-10-16');
+  const inDraft = mk('A-BROUILLON', '2026-10-17');
+  engine.issueInvoice(engine.createDraftFromOrders(hotel, [billed]).id, { issueDate: '2026-10-21' });
+  engine.createDraftFromOrders(hotel, [inDraft]);
+
+  // import : l'aperçu annonce l'impact exact sans rien écrire ; la case décochée coupe le recalcul
+  const csv = 'client;code_sage;prix;date_debut\nHôtel Auto;B-DP2;1,00;2026-10-10';
+  const pv = catalog.importPrices(csv, { apply: false });
+  assert.equal(pv.repriced.enabled, true);
+  assert.equal(pv.repriced.orders, 2);
+  assert.equal(pv.repriced.deltaCents, -2 * 10 * 35, '2 BL × 10 pièces × -0,35 €');
+  assert.equal(pv.repriced.skippedInDraft, 1);
+  assert.deepEqual(pv.repriced.detail.map(d => [d.client, d.orders]), [['Hôtel Auto', 2]]);
+  assert.equal(frozen(delivered), 1.35, "l'aperçu ne modifie rien");
+  const off = catalog.importPrices(csv, { apply: false, reprice: false });
+  assert.equal(off.repriced.enabled, false); assert.equal(off.repriced.orders, 0);
+
+  const done = catalog.importPrices(csv, { apply: true });
+  assert.equal(done.repriced.orders, 2);
+  assert.equal(frozen(delivered), 1.0); assert.equal(frozen(open), 1.0);
+  for (const [id, label] of [[early, 'avant la date'], [billed, 'facturé'], [inDraft, 'dans un brouillon']]) assert.equal(frozen(id), 1.35, `BL ${label} : prix inchangé`);
+  assert.equal(events('orders_repriced').filter(e => e.d.clientId === hotel).at(-1).d.via, 'import', 'le journal garde l’origine du recalcul');
+  assert.equal(catalog.importPrices(csv, { apply: true }).repriced.orders, 0, 'réimporter ne recalcule plus rien');
+
+  // une case : seuls les BL datés à partir de la date d'effet sont recalculés
+  const noEffect = catalog.setClientPrice(hotel, drap, 0.9, '2026-10-16');
+  assert.equal(noEffect.repriced.orders, 0); assert.equal(noEffect.repriced.skippedInDraft, 1);
+  const late = mk('A-TARD', '2026-10-20');
+  const one = catalog.setClientPrice(hotel, drap, 0.8, '2026-10-18');
+  assert.equal(one.repriced.orders, 1); assert.equal(frozen(late), 0.8);
+  assert.equal(frozen(delivered), 1.0, 'un BL antérieur à la date d’effet garde son prix');
+
+  // sans recalcul à la demande
+  const late2 = mk('A-TARD2', '2026-10-25');
+  const quiet = catalog.setClientPrice(hotel, drap, 0.7, '2026-10-24', { reprice: false });
+  assert.equal(quiet.repriced, null); assert.equal(frozen(late2), 1.35);
+
+  // opération en masse : aperçu exact puis application
+  const bulkPv = catalog.bulkPrices(hotel, { mode: 'percent', percent: 10, from: '2026-10-24', articleIds: [drap] }, { apply: false });
+  assert.equal(bulkPv.repriced.orders, 1); assert.equal(frozen(late2), 1.35, "l'aperçu ne modifie rien");
+  assert.equal(bulkPv.repriced.deltaCents, Math.round((0.77 - 1.35) * 10 * 100));
+  catalog.bulkPrices(hotel, { mode: 'percent', percent: 10, from: '2026-10-24', articleIds: [drap] }, { apply: true });
+  assert.equal(frozen(late2), 0.77);
+
+  // retour au catalogue : les BL concernés reprennent le prix catalogue
+  const back = catalog.removeClientPrice(hotel, drap, '2026-10-24');
+  assert.equal(back.repriced.orders, 1); assert.equal(frozen(late2), 1.35);
+});
+
 test('journal des prix : filtrable par hôtel et par article', () => {
   const all = catalog.priceLog({}).events;
   assert.ok(all.length > 5);

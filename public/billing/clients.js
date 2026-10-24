@@ -256,15 +256,15 @@
           const r = await Bill.post(`/catalog/clients/${id}/prices/bulk`, payload);
           return {
             canApply: r.count > 0,
-            confirm: `${plural(r.count, 'tarif sera modifié', 'tarifs seront modifiés')} pour « ${C.societe} » à partir du ${dFr(r.effective)}. Les commandes déjà passées ne changent pas.`,
+            confirm: `${plural(r.count, 'tarif sera modifié', 'tarifs seront modifiés')} pour « ${C.societe} » à partir du ${dFr(r.effective)}${r.repriced && r.repriced.orders ? `, et ${plural(r.repriced.orders, 'BL non facturé sera recalculé', 'BL non facturés seront recalculés')} (écart ${Bill.eur(r.repriced.deltaCents)} HT)` : ''}. Les BL déjà facturés ne changent pas.`,
             html: r.count
-              ? `<div class="bl-alert ok"><b>${plural(r.count, 'tarif sera modifié', 'tarifs seront modifiés')}</b> à partir du ${dFr(r.effective)}.</div>
+              ? `<div class="bl-alert ok"><b>${plural(r.count, 'tarif sera modifié', 'tarifs seront modifiés')}</b> à partir du ${dFr(r.effective)}.</div>${Bill.repricedAlert(r.repriced)}
                  <div class="bl-tablewrap" style="max-height:260px;overflow:auto"><table class="bl-table"><thead><tr><th>Article</th><th class="r">Avant</th><th class="r">Après</th><th class="r">Écart</th></tr></thead><tbody>
                  ${r.changes.map(c => `<tr><td>${e(c.article)}</td><td class="r bl-num">${Bill.num3(c.from)}</td><td class="r bl-num"><b>${Bill.num3(c.to)}</b></td><td class="r bl-num">${Bill.pct(c.from, c.to)}</td></tr>`).join('')}</tbody></table></div>`
               : '<div class="bl-alert warn">Rien à modifier avec ces réglages : les prix sont déjà ceux-là.</div>',
           };
         },
-        apply: async () => { const r = await Bill.post(`/catalog/clients/${id}/prices/bulk`, { ...payload, apply: true }); Bill.toast(`${plural(r.count, 'tarif modifié', 'tarifs modifiés')}`); await afterWrite(); },
+        apply: async () => { const r = await Bill.post(`/catalog/clients/${id}/prices/bulk`, { ...payload, apply: true }); Bill.toast(`${plural(r.count, 'tarif modifié', 'tarifs modifiés')}${Bill.repricedToast(r.repriced)}`); await afterWrite(); },
       });
     }
 
@@ -272,7 +272,7 @@
       let payload = null;
       Bill.previewThenConfirm({
         title: 'Réappliquer les tarifs aux BL non facturés', applyLabel: 'Recalculer les BL', scope: () => `reprice:${id}`,
-        body: `<p class="bl-note">Utile quand un tarif négocié est rétroactif. Recalcule, au tarif en vigueur à leur date, les BL de « ${e(C.societe)} » (livrés ou en cours) qui ne figurent dans aucune facture ni aucun brouillon. Les BL déjà facturés ne sont jamais modifiés.</p>
+        body: `<p class="bl-note">Les changements de tarif recalculent déjà automatiquement les BL non facturés à partir de leur date d'effet ; cette action sert pour un recalcul à une autre date, ou après un changement de prix catalogue. Recalcule, au tarif en vigueur à leur date, les BL de « ${e(C.societe)} » (livrés ou en cours) qui ne figurent dans aucune facture ni aucun brouillon. Les BL déjà facturés ne sont jamais modifiés.</p>
           <div class="bl-field" style="max-width:240px"><label for="rp-from">BL datés à partir du</label><input id="rp-from" type="date" value="${firstOfMonth()}"></div>`,
         preview: async (m) => {
           payload = { from: m.$('#rp-from').value };

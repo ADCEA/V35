@@ -25,19 +25,19 @@
           <div class="bl-field"><label for="ep-date">À partir du</label><input id="ep-date" type="date" value="${Bill.today()}">
             <div class="bl-hint"><button type="button" class="bl-btn link small" data-d="today">Aujourd'hui</button> · <button type="button" class="bl-btn link small" data-d="som">1er du mois</button> · <button type="button" class="bl-btn link small" data-d="nom">1er du mois prochain</button></div></div>
         </div>
-        <p class="bl-hint">Les commandes déjà passées gardent le prix auquel elles ont été saisies. Pour corriger celles qui ne sont pas encore facturées, utilisez « Réappliquer aux BL non facturés » dans la fiche de l'hôtel.</p>`,
+        <p class="bl-hint">Les BL <b>non facturés</b> de cet hôtel datés à partir de cette date sont recalculés automatiquement au nouveau tarif. Les BL déjà facturés ne changent jamais ; ceux qui sont dans un brouillon de facture sont laissés tels quels.</p>`,
       buttons: [
         { label: 'Annuler', onClick: async () => {} },
         ...(nego || info.upcoming ? [{ label: 'Revenir au prix catalogue', danger: true, onClick: async (m) => {
           const from = m.$('#ep-date').value || Bill.today();
-          await Bill.del(`/catalog/clients/${info.clientId}/prices/${encodeURIComponent(info.articleId)}?from=${from}`);
-          Bill.toast('Prix catalogue rétabli'); if (onDone) onDone();
+          const r = await Bill.del(`/catalog/clients/${info.clientId}/prices/${encodeURIComponent(info.articleId)}?from=${from}`);
+          Bill.toast('Prix catalogue rétabli' + Bill.repricedToast(r.repriced)); if (onDone) onDone();
         } }] : []),
         { label: 'Enregistrer', primary: true, onClick: async (m) => {
           const price = m.$('#ep-price').value;
           if (!Number.isFinite(Bill.parsePrice(price))) throw new Error('Saisissez un prix, par exemple 1,35.');
           const r = await Bill.put(`/catalog/clients/${info.clientId}/prices/${encodeURIComponent(info.articleId)}`, { price, dateDebut: m.$('#ep-date').value || undefined });
-          Bill.toast(r.changed ? `Tarif enregistré — à partir du ${dFr(r.effective)}` : 'Ce tarif est déjà en vigueur'); if (onDone) onDone();
+          Bill.toast(r.changed ? `Tarif enregistré — à partir du ${dFr(r.effective)}${Bill.repricedToast(r.repriced)}` : 'Ce tarif est déjà en vigueur'); if (onDone) onDone();
         } },
       ],
       onOpen: (m) => {
@@ -145,9 +145,9 @@
       title: 'Importer des tarifs', path: '/catalog/prices/import', scope: 'prices-import',
       intro: 'Deux présentations au choix. <b>En grille</b> : partez de « Exporter la grille », modifiez les prix dans Excel puis réimportez — seules les cases changées sont prises en compte, une case vide est ignorée, et un prix égal au catalogue retire le tarif négocié. <b>En liste</b> : colonnes <b>client</b> (nom de l\'hôtel), <b>code_sage</b> (ou code), <b>prix</b> HT et, facultativement, <b>date_debut</b> (AAAA-MM-JJ) et <b>siret</b> (pour retrouver l\'hôtel quand son nom est écrit autrement) ; sans colonne « client », choisissez l\'hôtel ci-dessous. Les hôtels non reconnus se rapprochent d\'une fiche dans l\'aperçu.',
       template: { name: 'modele-tarifs.csv', text: 'client,code_sage,prix,date_debut\nHôtel Exemple,B-DP2,1.20,2027-01-01\n' },
-      extraFields: `<div class="bl-row2"><div class="bl-field"><label for="ip-c">Hôtel (si le fichier n'a pas de colonne client)</label><select id="ip-c">${Bill.clientOptions(clients)}</select></div>
+      extraFields: `<label class="bl-check" style="margin-bottom:10px"><input type="checkbox" id="ip-rp" checked> <span>Mettre à jour aussi les BL non facturés au nouveau tarif <span class="bl-muted">(jamais les BL déjà facturés ; l'aperçu montre l'impact)</span></span></label><div class="bl-row2"><div class="bl-field"><label for="ip-c">Hôtel (si le fichier n'a pas de colonne client)</label><select id="ip-c">${Bill.clientOptions(clients)}</select></div>
         <div class="bl-field"><label for="ip-d">Date d'effet par défaut</label><input id="ip-d" type="date" value="${Bill.today()}"><div class="bl-hint">Utilisée pour les lignes sans date_debut.</div></div></div>`,
-      extraBody: (m) => ({ clientId: m.$('#ip-c').value || undefined, defaultDate: m.$('#ip-d').value || undefined, clientMap: { ...clientMap } }),
+      extraBody: (m) => ({ clientId: m.$('#ip-c').value || undefined, defaultDate: m.$('#ip-d').value || undefined, clientMap: { ...clientMap }, reprice: m.$('#ip-rp').checked }),
       onOpen: (m) => {
         // Choix d'une fiche pour un hôtel du fichier : l'aperçu devient caduc, « Revérifier » le recalcule.
         m.el.addEventListener('change', (ev) => {
@@ -176,18 +176,22 @@
             <div class="bl-tablewrap" style="max-height:220px;overflow:auto;margin-top:8px"><table class="bl-table"><thead><tr><th>Dans le fichier</th><th class="r">Lignes</th><th>Fiche hôtel</th></tr></thead><tbody>
             ${unknown.map(u => `<tr><td>${e(u.name || '—')}${u.siret ? `<div class="bl-muted">SIRET ${e(u.siret)}</div>` : ''}</td><td class="r bl-num">${u.lines}</td><td><select class="ip-map" data-name="${e(u.name)}" aria-label="Fiche pour ${e(u.name)}">${options(u)}</select></td></tr>`).join('')}</tbody></table></div>
             <div style="margin-top:8px"><button type="button" class="bl-btn" id="ip-recheck">Revérifier avec ces choix</button></div></div>` : '';
+        const rp = r.repriced || {};
+        const rpHtml = !rp.enabled ? '<p class="bl-hint">Les BL non facturés ne seront pas recalculés (case décochée).</p>'
+          : !s.changed ? '' : `${Bill.repricedAlert(rp)}${rp.detail && rp.detail.length ? `<details class="bl-details"><summary>Détail par hôtel (${rp.detail.length})</summary><div class="bl-tablewrap" style="max-height:200px;overflow:auto"><table class="bl-table"><thead><tr><th>Hôtel</th><th class="r">BL recalculés</th><th class="r">Écart HT</th><th class="r">Dans un brouillon</th></tr></thead><tbody>
+            ${rp.detail.map(d => `<tr><td>${e(d.client)}</td><td class="r bl-num">${d.orders}</td><td class="r bl-num">${Bill.eur(d.deltaCents)}</td><td class="r bl-num">${d.skippedInDraft || '—'}</td></tr>`).join('')}</tbody></table></div></details>` : ''}`;
         const matched = r.matchedBy || {};
         const matchedHtml = (matched.siret || matched.choix) ? `<p class="bl-hint">${matched.siret ? `${plural(matched.siret, 'ligne rapprochée', 'lignes rapprochées')} par le SIRET. ` : ''}${matched.choix ? `${plural(matched.choix, 'ligne rapprochée', 'lignes rapprochées')} d'après votre choix.` : ''}</p>` : '';
         return {
           canApply: s.changed > 0,
-          confirm: `${plural(s.changed, 'tarif sera enregistré', 'tarifs seront enregistrés')}. Les commandes déjà passées ne changent pas.`,
+          confirm: `${plural(s.changed, 'tarif sera enregistré', 'tarifs seront enregistrés')}${rp.enabled && rp.orders ? `, et ${plural(rp.orders, 'BL non facturé sera recalculé', 'BL non facturés seront recalculés')} (écart ${Bill.eur(rp.deltaCents)} HT)` : ''}. Les BL déjà facturés ne changent pas.`,
           html: `${unknownHtml}<div class="bl-alert ${s.errors ? 'warn' : 'ok'}"><b>${plural(s.total, 'ligne lue', 'lignes lues')}</b> : ${s.changed} à enregistrer, ${s.same} déjà en vigueur${s.errors ? `, <b>${s.errors} en erreur</b> (non importées)` : ''}.</div>
-            <div class="bl-tablewrap" style="max-height:260px;overflow:auto"><table class="bl-table"><thead><tr><th>Ligne</th><th>Hôtel</th><th>Article</th><th class="r">Avant</th><th class="r">Après</th><th>Dès le</th><th></th></tr></thead><tbody>
+            ${rpHtml}<div class="bl-tablewrap" style="max-height:260px;overflow:auto"><table class="bl-table"><thead><tr><th>Ligne</th><th>Hôtel</th><th>Article</th><th class="r">Avant</th><th class="r">Après</th><th>Dès le</th><th></th></tr></thead><tbody>
             ${shown.map(l => `<tr><td class="bl-num">${l.line}</td><td>${e(l.client || '—')}${l.via === 'siret' ? ' <span class="bl-tag draft" title="Hôtel retrouvé grâce au SIRET du fichier">SIRET</span>' : l.via === 'choix' ? ' <span class="bl-tag draft" title="Hôtel choisi par vous">choisi</span>' : ''}</td><td>${e(l.article || '—')}</td><td class="r bl-num">${Bill.num3(l.from)}</td><td class="r bl-num"><b>${Bill.num3(l.to)}</b></td><td class="bl-num">${l.effective ? dFr(l.effective) : '—'}</td>
               <td>${l.status === 'error' ? `<span class="bl-tag bad">${e(l.error)}</span>` : `<span class="bl-tag ${STATUS[l.status][0]}">${STATUS[l.status][1]}</span>`}</td></tr>`).join('')}</tbody></table></div>${hidden ? `<p class="bl-hint">${plural(hidden, 'ligne inchangée non affichée', 'lignes inchangées non affichées')}.</p>` : ''}${matchedHtml}`,
         };
       },
-      onDone: (r) => { Bill.toast(`${plural(r.summary.changed, 'tarif enregistré', 'tarifs enregistrés')}`); done(); },
+      onDone: (r) => { Bill.toast(`${plural(r.summary.changed, 'tarif enregistré', 'tarifs enregistrés')}${Bill.repricedToast(r.repriced)}`); done(); },
     });
   }
 })();
