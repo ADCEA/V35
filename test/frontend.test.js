@@ -31,3 +31,11 @@ test('chaque page de la navigation est enregistrée', () => {
   for (const k of nav) assert.ok(registered.has(k), `page « ${k} » non enregistrée`);
   assert.ok(nav.length >= 10);
 });
+
+test('le tableau de bord journalier des Statistiques est chargé et valide', () => {
+  assert.ok(html.includes('<script src="/stats-daily.js"></script>'));
+  const file = path.join(PUBLIC, 'stats-daily.js');
+  assert.ok(fs.existsSync(file));
+  assert.doesNotThrow(() => new vm.Script(fs.readFileSync(file, 'utf8'), { filename: 'stats-daily.js' }));
+  assert.ok(html.indexOf('/app.js') < html.indexOf('/stats-daily.js'), 'chargé après app.js (il utilise api() et escHtml())');
+});

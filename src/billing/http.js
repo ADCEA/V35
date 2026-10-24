@@ -12,7 +12,7 @@ const wrap = (fn) => (req, res) => {
 };
 
 function fail(res, e) {
-  if (e instanceof engine.BillingError) return res.status(e.status).json({ error: e.message });
+  if (e instanceof engine.BillingError || (e && e.name === 'StatsError')) return res.status(e.status).json({ error: e.message });
   // Violation d'un trigger d'inaltérabilité (dernier rempart) : message clair, pas une 500.
   if (e && /interdite|interdit/.test(e.message || '')) return res.status(409).json({ error: e.message });
   console.error('[billing]', e);

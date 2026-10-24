@@ -66,6 +66,17 @@ router.get('/', (req, res) => {
   });
 });
 
+// GET /api/admin/stats/daily?from=AAAA-MM-JJ&to=AAAA-MM-JJ — exploitation jour par jour (sans montants :
+// ceux-ci sont dans /api/admin/billing/stats/daily, derrière le verrou de la Facturation).
+const dailyStats = require('../utils/dailyStats');
+const dailyFail = (res, e) => (e && e.name === 'StatsError' ? res.status(e.status).json({ error: e.message }) : (console.error('[stats]', e), res.status(500).json({ error: 'Erreur serveur.' })));
+router.get('/daily', (req, res) => {
+  try { res.json(dailyStats.daily(req.query.from, req.query.to)); } catch (e) { dailyFail(res, e); }
+});
+router.get('/daily/:date', (req, res) => {
+  try { res.json(dailyStats.dayDetail(req.params.date)); } catch (e) { dailyFail(res, e); }
+});
+
 // GET /api/admin/stats/nps — NPS calculé mois par mois (promoteurs 9-10,
 // passifs 7-8, détracteurs 0-6). NPS = % promoteurs − % détracteurs,
 // de -100 à +100. Un mois sans réponse n'apparaît simplement pas.

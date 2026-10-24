@@ -1660,6 +1660,7 @@ async function renderStats() {
   const maxArticle = Math.max(1, ...stats.topArticles.map(a => a.totalQty));
 
   el.innerHTML = `
+    <div id="daily-dashboard"></div>
     <div class="stats-grid">
       <div class="stats-card"><div class="eyebrow">Commandes totales</div><strong>${stats.totalOrders}</strong></div>
       <div class="stats-card"><div class="eyebrow">Articles traités</div><strong>${stats.totalItems}</strong></div>
@@ -1736,6 +1737,8 @@ async function renderStats() {
       </div>
     </div>
   `;
+  // Tableau de bord jour par jour (public/stats-daily.js) : chargé à part, ses erreurs ne cachent pas le reste.
+  if (typeof renderDailyDashboard === 'function') renderDailyDashboard(el.querySelector('#daily-dashboard')).catch(err => { el.querySelector('#daily-dashboard').innerHTML = `<p class="form-error" style="display:block;">${escHtml(err.message)}</p>`; });
 }
 
 // ---------- Chariots et camions (équipements de logistique) ----------
