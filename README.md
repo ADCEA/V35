@@ -379,6 +379,30 @@ de commandes depuis le planning des chambres continue d'utiliser le catalogue co
   **aperçu** exact s'affiche, puis l'enregistrement demande le code (`payments-bulk`). Tout ou rien : si une facture est refusée
   (déjà soldée, montant dépassé…), aucun règlement du lot n'est enregistré.
 
+### Escompte pour règlement anticipé
+
+Une remise accordée à l'hôtel qui paie vite (par exemple **1,5 % pour un règlement sous 48 h**). Éteint par défaut.
+
+- **Réglages** (Facturation → Coordonnées de l'émetteur → « Escompte pour règlement anticipé ») : taux (0 = aucun escompte, 10 % au plus),
+  délai en heures à compter de la date d'émission (48 h = règlement reçu au plus tard 2 jours après), et « tous les hôtels par défaut ».
+  Chaque **fiche hôtel** peut déroger : *selon le réglage général*, *toujours proposé* ou *jamais proposé*.
+- **Sur la facture** : à l'émission, l'offre (taux, date limite, montants HT / TVA / TTC) est **figée** dans les conditions de la facture,
+  donc dans son empreinte : changer ensuite le réglage ne touche pas les factures déjà émises. Elle apparaît dans un encadré du PDF
+  et dans les mentions légales, avec la phrase exigée : « seule la TVA correspondant au prix effectivement payé ouvre droit à
+  déduction chez l'acheteur ». Pas d'offre sur un avoir, ni si la date limite n'est pas antérieure à l'échéance. Le message d'envoi par
+  e-mail rappelle l'offre tant que la date limite n'est pas passée.
+- **À l'encaissement** : « Enregistrer un règlement » propose la case *avec escompte* (cochée par défaut dans le délai). Le montant à
+  recevoir est exact au centime (reste dû − escompte) ; hors délai la case est grisée et le moteur refuse. L'escompte s'enregistre comme
+  une ligne de règlement de mode *escompte*, à côté du virement : la facture est soldée, l'**argent reçu** reste le net. Le rapprochement
+  bancaire reconnaît un virement égal au net, arrivé à temps, et l'enregistre « avec escompte ». Si un avoir ou un règlement partiel est
+  intervenu avant, l'escompte est calculé sur le **reste dû**.
+- **Annulation** : annuler le règlement propose d'annuler aussi l'escompte (la facture se rouvre pour son montant complet) ; sinon
+  l'escompte reste acquis. L'écriture inverse est plafonnée à l'argent réellement reçu.
+- **Comptabilité** : l'escompte réduit la base de TVA (art. 267-II-1° du CGI). Il est ventilé en HT et TVA taux par taux. Dans le FEC il passe
+  en journal **OD** : débit 665000 *Escomptes accordés* (HT) et TVA collectée, crédit du compte client (TTC) ; le journal de banque ne
+  compte que l'argent reçu. Comptes à valider avec votre expert-comptable (`ACCOUNTS.discountGranted` dans `src/billing/fec.js`).
+- **Statistiques** : l'escompte n'est jamais compté comme encaissé (tableau de bord, journée, liste des règlements : il est affiché à part).
+
 ### Regrouper les bons de livraison à nom de client libre
 
 Certaines commandes ont été saisies avec un nom de client tapé à la main (pas de fiche hôtel). Facturation → Bons de livraison
@@ -553,7 +577,7 @@ relances. Sans SMTP, l'envoi répond « non configuré » (503) ; une relance fa
 
 ### Tests
 
-`npm test` (148 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
+`npm test` (172 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

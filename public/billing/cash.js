@@ -97,7 +97,7 @@
     if (l.alreadyImported || !l.credit) return { type: 'none' };
     if (l.multi) return { type: 'multi', allocations: l.multi.allocations };
     const top = l.candidates[0];
-    if (top && (l.confidence === 'high')) return { type: 'one', invoiceId: top.invoiceId, number: top.number, balanceCents: top.balanceCents };
+    if (top && (l.confidence === 'high')) return { type: 'one', invoiceId: top.invoiceId, number: top.number, balanceCents: top.balanceCents, withDiscount: !!top.withDiscount };
     return { type: 'none' };
   }
 
@@ -105,7 +105,7 @@
     const cur = R.choice.get(idx) || { type: 'none' };
     const opts = ['<option value="none">Ne pas rapprocher</option>'];
     if (l.multi) opts.push(`<option value="multi" ${cur.type === 'multi' ? 'selected' : ''}>${l.multi.allocations.map(a => e(a.number)).join(' + ')} (${e(l.multi.clientName)})</option>`);
-    l.candidates.forEach(c => opts.push(`<option value="c:${c.invoiceId}" ${cur.type === 'one' && cur.invoiceId === c.invoiceId ? 'selected' : ''}>${e(c.number)} · ${e(c.clientName)} · reste ${e(eur(c.balanceCents))}</option>`));
+    l.candidates.forEach(c => opts.push(`<option value="c:${c.invoiceId}" ${cur.type === 'one' && cur.invoiceId === c.invoiceId ? 'selected' : ''}>${e(c.number)} · ${e(c.clientName)} · reste ${e(eur(c.balanceCents))}${c.withDiscount ? ` · avec escompte de ${e(eur(c.discountCents))}` : ''}</option>`));
     if (cur.type === 'one' && !l.candidates.some(c => c.invoiceId === cur.invoiceId)) opts.push(`<option value="c:${cur.invoiceId}" selected>${e(cur.number)} (choisie)</option>`);
     opts.push('<option value="other">Autre facture…</option>');
     return opts.join('');
@@ -152,7 +152,7 @@
       if (v === 'none') R.choice.set(i, { type: 'none' });
       else if (v === 'multi') R.choice.set(i, { type: 'multi', allocations: l.multi.allocations });
       else if (v === 'other') { const picked = await pickInvoice(); if (picked) R.choice.set(i, { type: 'one', invoiceId: picked.id, number: picked.number, balanceCents: picked.balanceCents }); }
-      else { const c = l.candidates.find(x => x.invoiceId === Number(v.slice(2))); R.choice.set(i, { type: 'one', invoiceId: c.invoiceId, number: c.number, balanceCents: c.balanceCents }); }
+      else { const c = l.candidates.find(x => x.invoiceId === Number(v.slice(2))); R.choice.set(i, { type: 'one', invoiceId: c.invoiceId, number: c.number, balanceCents: c.balanceCents, withDiscount: !!c.withDiscount }); }
       paintLines(host, main);
       const cb = host.querySelector(`.rc-c[data-i="${i}"]`); if (cb && R.choice.get(i).type !== 'none') { cb.checked = true; sum(); }
     });
@@ -161,7 +161,7 @@
     host.querySelector('#rc-apply').onclick = async (ev) => {
       const items = [...host.querySelectorAll('.rc-c:checked')].map(cb => {
         const i = Number(cb.dataset.i); const l = lineBy.get(i); const c = R.choice.get(i);
-        const allocations = c.type === 'multi' ? c.allocations.map(a => ({ invoiceId: a.invoiceId, amountCents: a.amountCents })) : [{ invoiceId: c.invoiceId, amountCents: Math.min(l.amountCents, c.balanceCents) }];
+        const allocations = c.type === 'multi' ? c.allocations.map(a => ({ invoiceId: a.invoiceId, amountCents: a.amountCents })) : [{ invoiceId: c.invoiceId, amountCents: Math.min(l.amountCents, c.balanceCents), ...(c.withDiscount ? { withDiscount: true } : {}) }];
         return { fingerprint: l.fingerprint, date: l.date, label: l.label, method: R.method.get(i) || l.method || 'virement', allocations };
       });
       const modes = [...new Set(items.map(x => Bill.METHODS[x.method] || x.method))];

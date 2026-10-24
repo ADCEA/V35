@@ -178,6 +178,15 @@
     }
 
     const isCn = () => inv.kind === 'credit_note';
+    const pctFr = (r) => `${String(r).replace('.', ',')} %`;
+
+    // Offre d'escompte encore ouverte (ou dépassée) sur une facture non soldée.
+    function escompteNote() {
+      const x = inv.escompte;
+      if (!x || isCn() || inv.status !== 'issued' || !(inv.balanceCents > 0)) return '';
+      if (x.open) return `<div class="bl-alert ok" style="margin-top:12px"><b>Escompte de ${pctFr(x.ratePct)} possible jusqu'au ${dFr(x.deadline)}</b><div>${eur(x.netCents)} à encaisser au lieu de ${eur(inv.balanceCents)} (escompte de ${eur(x.discountCents)}). Cochez « avec escompte » en enregistrant le règlement.</div></div>`;
+      return `<p class="bl-hint" style="margin:12px 0">Escompte de ${pctFr(x.ratePct)} : délai dépassé depuis le ${dFr(x.deadline)}. Pour une remise exceptionnelle, créez un avoir.</p>`;
+    }
     const display = () => (inv.status === 'draft' ? (isCn() ? 'credit_draft' : 'draft') : isCn() ? 'credit_note' : (inv.overdueDays > 0 && inv.paymentStatus !== 'paid' && inv.paymentStatus !== 'credited' ? 'overdue' : inv.paymentStatus));
 
     function paint() {
@@ -224,6 +233,9 @@
       if (inv.creditsInvoiceNumber) kv.push(['Avoir sur', e(inv.creditsInvoiceNumber)], ['Motif', e(inv.creditReason || '—')]);
       kv.push(["Date d'émission", inv.issueDate ? dFr(inv.issueDate) : '—']);
       if (!isCn()) kv.push(['Échéance', inv.dueDate ? dFr(inv.dueDate) + (inv.overdueDays ? ` <span style="color:var(--bl-late)">(${plural(inv.overdueDays, 'jour', 'jours')} de retard)</span>` : '') : '—']);
+      const edDraft = inv.status === 'draft' && inv.preview && inv.preview.terms && inv.preview.terms.earlyDiscount;
+      if (edDraft) kv.push(['Escompte', `${pctFr(edDraft.ratePct)} pour un règlement reçu dans les ${edDraft.hours} h suivant l'émission <span class="bl-faint">(figé à l'émission)</span>`]);
+      if (inv.escompte) kv.push(['Escompte', `${pctFr(inv.escompte.ratePct)} pour un règlement reçu au plus tard le ${dFr(inv.escompte.deadline)}${inv.discountCents > 0 ? ' <span class="bl-tag ok">accordé</span>' : inv.escompte.expired ? ' <span class="bl-faint">(délai dépassé)</span>' : ''}`]);
       if (inv.periodStart) kv.push(['Période', `${dFr(inv.periodStart)} au ${dFr(inv.periodEnd)}`]);
       kv.push(['Nature', e(CATEGORY[inv.operationCategory] || inv.operationCategory)]);
       if (inv.reference) kv.push(['Référence', e(inv.reference)]);
@@ -241,9 +253,10 @@
           <div><span>Total HT</span><span class="bl-num">${eur(sign * inv.totalHtCents)}</span></div>
           ${(inv.vatBreakdown || []).map(v => `<div class="bl-muted"><span>TVA ${String(v.rate).replace('.', ',')} % sur ${eur(v.baseCents ?? v.base_cents ?? 0)}</span><span class="bl-num">${eur(sign * (v.vatCents ?? v.vat_cents ?? 0))}</span></div>`).join('')}
           <div class="grand"><span>Total TTC</span><span class="bl-num">${eur(sign * inv.totalTtcCents)}</span></div>
-          ${!isCn() && inv.status === 'issued' ? `${inv.creditedCents ? `<div><span>Avoirs</span><span class="bl-num">− ${eur(inv.creditedCents)}</span></div>` : ''}<div><span>Déjà réglé</span><span class="bl-num">${eur(inv.paidCents)}</span></div><div class="${inv.balanceCents > 0 ? 'due' : ''}"><span>Reste à payer</span><span class="bl-num">${eur(inv.balanceCents)}</span></div>` : ''}
+          ${!isCn() && inv.status === 'issued' ? `${inv.creditedCents ? `<div><span>Avoirs</span><span class="bl-num">− ${eur(inv.creditedCents)}</span></div>` : ''}${inv.discountCents ? `<div><span>Escompte accordé</span><span class="bl-num">− ${eur(inv.discountCents)}</span></div>` : ''}<div><span>Déjà réglé</span><span class="bl-num">${eur(inv.cashCents ?? inv.paidCents)}</span></div><div class="${inv.balanceCents > 0 ? 'due' : ''}"><span>Reste à payer</span><span class="bl-num">${eur(inv.balanceCents)}</span></div>` : ''}
         </div></div></div>
-        ${inv.payments && inv.payments.length ? `<div class="bl-panel"><div class="bl-panel-h"><h3>Règlements</h3></div><div class="bl-tablewrap"><table class="bl-table"><tbody>${inv.payments.map(p => `<tr><td class="bl-num">${dFr(p.paidOn)}</td><td>${e(Bill.METHODS[p.method] || p.method)}${p.reference ? `<span class="sub">${e(p.reference)}</span>` : ''}</td><td class="r bl-num" style="${p.amountCents < 0 ? 'color:var(--bl-late)' : ''}">${eur(p.amountCents)}</td><td class="r">${p.amountCents > 0 ? `<button class="bl-btn link small" data-undo="${p.id}">Annuler</button>` : '<span class="bl-faint">annulation</span>'}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
+        ${escompteNote()}
+        ${inv.payments && inv.payments.length ? `<div class="bl-panel"><div class="bl-panel-h"><h3>Règlements</h3></div><div class="bl-tablewrap"><table class="bl-table"><tbody>${inv.payments.map(p => `<tr><td class="bl-num">${dFr(p.paidOn)}</td><td>${p.method === 'escompte' ? '<i>Escompte accordé</i>' : e(Bill.METHODS[p.method] || p.method)}${p.reference ? `<span class="sub">${e(p.reference)}</span>` : ''}</td><td class="r bl-num" style="${p.amountCents < 0 ? 'color:var(--bl-late)' : p.method === 'escompte' ? 'color:#8C9DAE' : ''}">${p.method === 'escompte' ? `(${eur(p.amountCents)})` : eur(p.amountCents)}</td><td class="r">${p.method === 'escompte' ? `<span class="bl-faint">${p.amountCents > 0 ? 'avec le règlement' : 'annulation'}</span>` : p.amountCents > 0 ? `<button class="bl-btn link small" data-undo="${p.id}">Annuler</button>` : '<span class="bl-faint">annulation</span>'}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
         ${inv.creditNotes && inv.creditNotes.length ? `<div class="bl-panel"><div class="bl-panel-h"><h3>Avoirs liés</h3></div><div class="bl-tablewrap"><table class="bl-table"><tbody>${inv.creditNotes.map(c => `<tr class="bl-row" tabindex="0" data-cn="${c.id}"><td><b style="font-weight:600">${e(c.number)}</b></td><td class="bl-num">${dFr(c.issueDate)}</td><td class="r bl-num">− ${eur(c.totalTtcCents)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}`;
       const s = host.querySelector('[data-a2="settings"]'); if (s) s.onclick = () => Bill.go('issuer');
       host.querySelectorAll('[data-cn]').forEach(tr => tr.onclick = () => Bill.openInvoice(Number(tr.dataset.cn), onChange));
@@ -279,8 +292,25 @@
     // ----- actions -----
     async function undoPayment(paymentId) {
       const p = inv.payments.find(x => x.id === paymentId);
-      if (!(await Bill.confirm('Annuler ce règlement ?', `Une écriture inverse de ${eur(p.amountCents)} sera ajoutée. Le règlement d'origine reste visible dans l'historique, rien n'est effacé.`, 'Annuler le règlement', true))) return;
-      try { await Bill.post(`/invoices/${id}/payments`, { paidOn: today(), amount: -p.amountCents / 100, method: p.method, reference: `Annulation du règlement du ${dFr(p.paidOn)}` }); mark(); Bill.toast('Règlement annulé'); await reload(); } catch (err) { Bill.fail(err); }
+      const text = `Une écriture inverse de ${eur(p.amountCents)} sera ajoutée. Le règlement d'origine reste visible dans l'historique, rien n'est effacé.`;
+      const post = async (extra) => {
+        await Bill.post(`/invoices/${id}/payments`, { paidOn: today(), amount: -p.amountCents / 100, method: p.method, reference: `Annulation du règlement du ${dFr(p.paidOn)}`, ...extra });
+        mark(); Bill.toast('Règlement annulé'); await reload();
+      };
+      if (!(inv.discountCents > 0)) {
+        if (!(await Bill.confirm('Annuler ce règlement ?', text, 'Annuler le règlement', true))) return;
+        try { await post({}); } catch (err) { Bill.fail(err); }
+        return;
+      }
+      // Un escompte a été accordé : on propose de l'annuler avec le règlement (la facture se rouvre pour son montant complet).
+      Bill.modal({
+        title: 'Annuler ce règlement ?',
+        body: `<p class="bl-note">${e(text)}</p>
+          <div class="bl-field"><label class="bl-check"><input type="checkbox" id="un-esc" checked> Annuler aussi l'escompte accordé (${e(eur(inv.discountCents))})</label>
+          <div class="bl-hint">Décochez si l'escompte reste acquis à l'hôtel : il ne devra alors que le reste, sans l'escompte.</div></div>`,
+        buttons: [{ label: 'Garder le règlement', onClick: async () => {} },
+          { label: 'Annuler le règlement', danger: true, onClick: async (m) => { await post({ reverseDiscount: m.$('#un-esc').checked }); } }],
+      });
     }
 
     const ACTIONS = {
@@ -306,18 +336,42 @@
         });
       },
       pay() {
+        const x = inv.escompte && inv.balanceCents > 0 ? inv.escompte : null;
+        const net = x ? x.netCents : null;
         Bill.modal({
           title: 'Enregistrer un règlement',
           body: `<p class="bl-note">Reste à payer : <b>${eur(inv.balanceCents)}</b>. Pour un règlement partiel, indiquez le montant reçu.</p>
             <div class="bl-row2"><div class="bl-field"><label for="py-date">Date de réception</label><input id="py-date" type="date" value="${today()}"></div>
             <div class="bl-field"><label for="py-amt">Montant reçu (€)</label><input id="py-amt" inputmode="decimal" value="${(inv.balanceCents / 100).toFixed(2).replace('.', ',')}"></div></div>
+            ${x ? `<div class="bl-field"><label class="bl-check"><input type="checkbox" id="py-esc"> Règlement avec escompte de ${pctFr(x.ratePct)} : <b>${eur(net)}</b> soldent la facture</label>
+              <div class="bl-hint" id="py-esc-h"></div></div>` : ''}
             <div class="bl-row2"><div class="bl-field"><label for="py-m">Mode de paiement</label><select id="py-m">${Object.entries(Bill.METHODS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
             <div class="bl-field"><label for="py-ref">Référence (facultatif)</label><input id="py-ref" placeholder="N° de chèque, libellé du virement…"></div></div>`,
+          onOpen: (m) => {
+            if (!x) return;
+            const cb = m.$('#py-esc'); const date = m.$('#py-date'); const amt = m.$('#py-amt'); const hint = m.$('#py-esc-h');
+            const eligible = () => !!date.value && date.value <= x.deadline;
+            const fullAmount = (inv.balanceCents / 100).toFixed(2).replace('.', ',');
+            const sync = () => {
+              const ok = eligible();
+              cb.disabled = !ok; if (!ok) cb.checked = false;
+              hint.textContent = ok
+                ? (cb.checked ? `L'escompte de ${eur(x.discountCents)} est comptabilisé à part : l'argent reçu est de ${eur(net)}.` : `Possible pour un règlement reçu au plus tard le ${dFr(x.deadline)}.`)
+                : `Délai dépassé : l'escompte devait être réglé au plus tard le ${dFr(x.deadline)}.`;
+              amt.disabled = cb.checked;
+              amt.value = cb.checked ? (net / 100).toFixed(2).replace('.', ',') : (amt.dataset.touched ? amt.value : fullAmount);
+            };
+            cb.checked = eligible(); // par défaut : coché tant que le délai est tenu
+            cb.onchange = sync; date.onchange = sync; date.oninput = sync;
+            amt.oninput = () => { amt.dataset.touched = '1'; };
+            sync();
+          },
           buttons: [{ label: 'Annuler', onClick: async () => {} }, { label: 'Enregistrer', primary: true, onClick: async (m) => {
-            const amount = Number(m.$('#py-amt').value.replace(/\s/g, '').replace(',', '.'));
+            const withDiscount = !!(x && m.$('#py-esc').checked);
+            const amount = withDiscount ? net / 100 : Number(m.$('#py-amt').value.replace(/\s/g, '').replace(',', '.'));
             if (!(amount > 0)) throw new Error('Indiquez un montant supérieur à zéro.');
-            await Bill.post(`/invoices/${id}/payments`, { paidOn: m.$('#py-date').value, amount, method: m.$('#py-m').value, reference: m.$('#py-ref').value.trim() || undefined });
-            mark(); Bill.toast('Règlement enregistré'); await reload();
+            await Bill.post(`/invoices/${id}/payments`, { paidOn: m.$('#py-date').value, amount, method: m.$('#py-m').value, reference: m.$('#py-ref').value.trim() || undefined, ...(withDiscount ? { withDiscount: true } : {}) });
+            mark(); Bill.toast(withDiscount ? 'Règlement enregistré avec escompte' : 'Règlement enregistré'); await reload();
           } }],
         });
       },

@@ -324,3 +324,16 @@ test('statistiques : l\'escompte n\'est jamais compté comme encaissé', () => {
   assert.ok(row, 'facture payée');
   assert.equal(row.balanceCents, 0);
 });
+
+test('e-mail d\'envoi : l\'offre est rappelée tant que la date limite n\'est pas passée', () => {
+  const mail = require('../src/billing/mail');
+  const { inv } = issued({ issueDate: '2026-12-10' });
+  const within = mail.render('invoice', inv, 'Hôtel', '2026-12-11');
+  assert.match(within.body, /Escompte de 1,5 % : si le règlement nous parvient au plus tard le 12\/12\/2026, vous ne payez que 334,62 € TTC au lieu de 339,72 €/);
+  const after = mail.render('invoice', inv, 'Hôtel', '2026-12-13');
+  assert.ok(!/Escompte/.test(after.body), 'délai passé : plus de mention');
+  setEscompte(0);
+  const { inv: plain } = issued({ issueDate: '2026-12-10' });
+  assert.ok(!/Escompte/.test(mail.render('invoice', plain, 'Hôtel', '2026-12-11').body));
+  setEscompte(1.5, 48);
+});

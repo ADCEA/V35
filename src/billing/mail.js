@@ -30,6 +30,13 @@ function signature(settings) {
 }
 
 /** Texte prêt à envoyer. kind : 'invoice' | 'reminder-1' | 'reminder-2' | 'reminder-3' */
+// Rappel de l'escompte dans le message d'envoi, tant que la date limite n'est pas passée.
+function escompteLine(inv, today) {
+  const x = engine.escompteStatus(inv, today);
+  if (!x || !x.open || !x.discountCents) return '';
+  return `\nEscompte de ${String(x.ratePct).replace('.', ',')} % : si le règlement nous parvient au plus tard le ${dateFr(x.deadline)}, vous ne payez que ${eur(x.netCents)} TTC au lieu de ${eur(engine.balanceCents(inv))}.\n`;
+}
+
 function render(kind, inv, clientName, today = engine.todayParis()) {
   const s = engine.getSettings();
   const isCredit = inv.kind === 'credit_note';
@@ -42,7 +49,7 @@ function render(kind, inv, clientName, today = engine.todayParis()) {
     subject = `${isCredit ? 'Avoir' : 'Facture'} ${inv.number} — ${s.legal_name || 'Blanchisserie Cézanne'}`;
     body = isCredit
       ? `Bonjour,\n\nVeuillez trouver ci-joint l'avoir ${inv.number} du ${dateFr(inv.issue_date)}, d'un montant de ${eur(inv.total_ttc_cents)} TTC, qui vient en déduction de votre facture.\n\n${signature(s)}`
-      : `Bonjour,\n\nVeuillez trouver ci-joint la facture ${inv.number} du ${dateFr(inv.issue_date)}, d'un montant de ${eur(inv.total_ttc_cents)} TTC, payable avant le ${dateFr(inv.due_date)}.\n${bank}\n${signature(s)}`;
+      : `Bonjour,\n\nVeuillez trouver ci-joint la facture ${inv.number} du ${dateFr(inv.issue_date)}, d'un montant de ${eur(inv.total_ttc_cents)} TTC, payable avant le ${dateFr(inv.due_date)}.\n${escompteLine(inv, today)}${bank}\n${signature(s)}`;
   } else if (kind === 'reminder-1') {
     subject = `Rappel — facture ${inv.number} échue le ${dateFr(inv.due_date)}`;
     body = `Bonjour,\n\nSauf erreur de notre part, ${ref} du ${dateFr(inv.issue_date)}, d'un montant restant dû de ${eur(balance)} TTC, est arrivée à échéance le ${dateFr(inv.due_date)} et ne nous est pas encore parvenue.\n\nSi votre règlement a été effectué entre-temps, merci de ne pas tenir compte de ce message. Dans le cas contraire, nous vous remercions de bien vouloir y procéder dès que possible.\n${bank}\nLa facture est jointe à ce message pour mémoire.\n\n${signature(s)}`;
