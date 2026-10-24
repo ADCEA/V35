@@ -46,7 +46,7 @@ router.get('/catalog/prices/export.csv', wrap((req, res) => {
 }));
 router.post('/catalog/prices/import', stepUpWhen(applying, 'prices-import'), wrap((req, res) => {
   const b = req.body || {};
-  res.json(catalog.importPrices(csvOf(b), { apply: applying(req), clientId: b.clientId ? Number(b.clientId) : null, defaultDate: iso(b.defaultDate), clientMap: b.clientMap }));
+  res.json(catalog.importPrices(csvOf(b), { apply: applying(req), clientId: b.clientId ? Number(b.clientId) : null, defaultDate: iso(b.defaultDate), clientMap: b.clientMap, reprice: b.reprice !== false }));
 }));
 router.get('/catalog/prices/log', wrap((req, res) => {
   res.json(catalog.priceLog({ clientId: req.query.clientId ? Number(req.query.clientId) : undefined, articleId: req.query.articleId ? String(req.query.articleId) : undefined }));
@@ -78,10 +78,10 @@ router.put('/catalog/clients/:id/assignment', wrap((req, res) => res.json(catalo
 router.get('/catalog/clients/:id/prices', wrap((req, res) => res.json(catalog.priceGrid(clientId(req)))));
 router.put('/catalog/clients/:id/prices/:articleId', wrap((req, res) => {
   const b = req.body || {};
-  res.json(catalog.setClientPrice(clientId(req), req.params.articleId, b.price, b.dateDebut));
+  res.json(catalog.setClientPrice(clientId(req), req.params.articleId, b.price, b.dateDebut, { reprice: b.reprice !== false }));
 }));
 router.delete('/catalog/clients/:id/prices/:articleId', wrap((req, res) => {
-  res.json(catalog.removeClientPrice(clientId(req), req.params.articleId, iso(req.query.from)));
+  res.json(catalog.removeClientPrice(clientId(req), req.params.articleId, iso(req.query.from), { reprice: req.query.reprice !== 'false' }));
 }));
 router.post('/catalog/clients/:id/prices/bulk', stepUpWhen(applying, req => `prices-bulk:${req.params.id}`),
   wrap((req, res) => res.json(catalog.bulkPrices(clientId(req), req.body, { apply: applying(req) }))));

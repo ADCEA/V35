@@ -211,6 +211,16 @@
     ? `${Bill.plural(Math.round(pieces), 'pièce', 'pièces')} sur 12 mois · dernière commande le ${Bill.dFr(lastOrderAt)}`
     : lastOrderAt ? `Rien commandé depuis 12 mois (dernière commande le ${Bill.dFr(lastOrderAt)})` : 'Jamais commandé');
 
+  // Encadré « BL non facturés recalculés » d'un aperçu (changement de tarif) : { orders, lines, deltaCents, skippedInDraft }.
+  Bill.repricedAlert = (rp) => {
+    if (!rp || (!rp.orders && !rp.skippedInDraft)) return '<div class="bl-alert ok">Aucun BL non facturé à recalculer : ils sont déjà à ce tarif.</div>';
+    const draft = rp.skippedInDraft ? ` ${Bill.plural(rp.skippedInDraft, 'BL est déjà dans un brouillon de facture', 'BL sont déjà dans un brouillon de facture')} : laissé tel quel — supprimez le brouillon puis refaites-le pour qu'il prenne le nouveau tarif.` : '';
+    return `<div class="bl-alert ${rp.orders ? 'ok' : 'warn'}">${rp.orders
+      ? `<b>${Bill.plural(rp.orders, 'BL non facturé sera recalculé', 'BL non facturés seront recalculés')}</b> au nouveau tarif (${Bill.plural(rp.lines, 'ligne', 'lignes')}) — écart total ${Bill.eur(rp.deltaCents)} HT. Les BL déjà facturés ne changent jamais.`
+      : 'Aucun BL non facturé à recalculer.'}${draft}</div>`;
+  };
+  Bill.repricedToast = (rp) => (rp && rp.orders ? ` · ${Bill.plural(rp.orders, 'BL non facturé recalculé', 'BL non facturés recalculés')}` : '');
+
   // Phrase décrivant une ligne du journal des prix.
   Bill.describePriceEvent = (ev) => {
     const d = ev.detail || {}; const who = d.client ? `${d.client} — ` : '';
@@ -225,7 +235,7 @@
         const how = d.mode === 'percent' ? `${d.percent > 0 ? '+' : '−'}${Math.abs(d.percent)} %` : d.mode === 'copy' ? 'copie des tarifs d\'un autre hôtel' : 'retour au prix catalogue';
         return `${who}${Bill.plural(d.count, 'tarif modifié', 'tarifs modifiés')} (${how}) à partir du ${Bill.dFr(d.effective)}`;
       }
-      case 'orders_repriced': return `${who}${Bill.plural(d.orders, 'BL recalculé', 'BL recalculés')} depuis le ${Bill.dFr(d.from)} (écart ${Bill.eur(d.deltaCents)})`;
+      case 'orders_repriced': return `${who}${Bill.plural(d.orders, 'BL recalculé', 'BL recalculés')} depuis le ${Bill.dFr(d.from)} (écart ${Bill.eur(d.deltaCents)})${d.via ? ' — automatique, suite à un changement de tarif' : ''}`;
       case 'client_catalog_set': return `${who}${d.restricted ? `catalogue limité à ${Bill.plural(d.count, 'article', 'articles')}` : 'catalogue complet'}`;
       case 'client_article_access': return `${who}${d.article} : ${d.access ? 'de nouveau proposé' : 'retiré du catalogue'}${d.restricted ? ` (catalogue limité à ${Bill.plural(d.count, 'article', 'articles')})` : ' (catalogue complet)'}`;
       default: return ev.action;

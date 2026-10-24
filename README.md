@@ -296,9 +296,16 @@ l'administration ; la création rapide d'un hôtel depuis « Nouvelle commande �
 - chaque article a un **prix catalogue** (HT, 3 décimales) ; un hôtel paie ce prix, sauf là où il a un **tarif négocié** ;
 - un tarif négocié a une **date d'effet** (aujourd'hui, le 1er du mois, ou toute date) ; il ne s'applique
   jamais avant. Un nouveau tarif clôt le précédent la veille de sa date ; les périodes ne se chevauchent jamais ;
-- le prix est **figé sur la commande à sa création**. Modifier un prix ne change jamais les commandes passées ;
-  pour corriger celles qui ne sont ni facturées ni dans un brouillon, l'action explicite
-  « Réappliquer aux BL non facturés » (fiche de l'hôtel) les recalcule au tarif en vigueur à leur date ;
+- le prix est **figé sur la commande à sa création**, puis **mis à jour automatiquement** quand le tarif négocié change :
+  tout changement de tarif (modification d'un prix, retour au catalogue, import CSV, opération en masse) recalcule les
+  **BL non facturés** de l'hôtel dont la date (livraison prévue, sinon création) est égale ou postérieure à la date d'effet,
+  pour les seuls articles touchés. Un **BL déjà facturé ne change jamais** ; un BL **déjà dans un brouillon de facture** est
+  laissé tel quel et **signalé** (supprimez le brouillon puis recréez-le pour qu'il reprenne le nouveau tarif) ;
+- l'impact (nombre de BL et de lignes, écart en euros) est **affiché dans l'aperçu avant validation** (import, opérations en
+  masse) et rappelé dans la confirmation ; il est écrit dans le journal chaîné (`orders_repriced`, avec `via` = `import` ou `tarif`). Dans l'import, la case « Mettre à jour aussi
+  les BL non facturés » est cochée par défaut et peut être décochée ;
+- un changement du **prix catalogue** ne recalcule rien (le catalogue n'a pas d'historique) : l'action explicite
+  « Réappliquer aux BL non facturés » (fiche de l'hôtel) reste là pour ce cas, ou pour une autre date de départ ;
 - le **catalogue accessible** d'un hôtel est soit complet (y compris les futurs articles), soit une sélection d'articles ;
 - le tarif négocié s'applique partout où une commande se crée : espace client, commande saisie, import par API
   **et génération depuis le planning des chambres** (qui utilisait jusqu'ici le prix catalogue : corrigé) ;
@@ -539,7 +546,7 @@ relances. Sans SMTP, l'envoi répond « non configuré » (503) ; une relance fa
 
 ### Tests
 
-`npm test` (145 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
+`npm test` (146 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 
