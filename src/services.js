@@ -12,6 +12,13 @@
 
 const db = require('./db');
 
+// Date du jour à Paris (AAAA-MM-JJ). Les tarifs négociés ont des dates d'effet
+// « calendaires » : on les compare à la date française, pas à celle du serveur
+// (UTC), sinon un tarif prévu « à partir du 1er » s'appliquerait la veille au soir.
+function todayParis() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date());
+}
+
 const CATEGORIES = [
   { id: 'lit', label: 'Linge de lit' },
   { id: 'toilette', label: 'Linge de toilette' },
@@ -55,7 +62,7 @@ function getServicesForClient(clientId, date) {
 // doit être utilisée PARTOUT où un prix est appliqué à une commande —
 // jamais le prix catalogue en direct pour un client identifié.
 function resolveClientPrice(clientId, articleId, date) {
-  const d = date || new Date().toISOString().slice(0, 10);
+  const d = date || todayParis();
   if (clientId) {
     const override = db.prepare(`
       SELECT price FROM client_prices
@@ -85,7 +92,16 @@ function getServicesByIdForClient(clientId, date) {
   return Object.fromEntries(getServicesForClient(clientId, date).map(s => [s.id, s]));
 }
 
+// Catalogue COMPLET (sans la restriction « articles attribués ») avec les tarifs
+// de ce client appliqués — pour les calculs qui ne doivent pas perdre un article
+// en route, comme la génération d'une commande à partir des règles de chambres.
+function getServicesByIdPricedForClient(clientId, date) {
+  const all = getServices();
+  return Object.fromEntries((clientId ? applyClientPricing(all, clientId, date) : all).map(s => [s.id, s]));
+}
+
 module.exports = {
   getServices, getServicesById, getServicesBySageCode, getServicesForClient,
-  getServicesByIdForClient, resolveClientPrice, CATEGORIES,
+  getServicesByIdForClient, getServicesByIdPricedForClient, applyClientPricing,
+  resolveClientPrice, todayParis, CATEGORIES,
 };

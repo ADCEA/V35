@@ -1,11 +1,9 @@
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
-const multer = require('multer');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const db = require('../db');
-const { parseCsv } = require('../utils/csv');
 const { requireAdmin } = require('../middleware/auth');
 const { buildDeliveryNoteText, buildDeliveryNoteHtml } = require('../utils/deliveryNote');
 const { buildDeliveryNotePdf, buildInvoiceAnnexPdf, buildInvoiceSummaryPdf } = require('../utils/pdf');
@@ -72,19 +70,14 @@ router.post('/logout', (req, res) => {
 
 // Tout ce qui suit nécessite une session admin déverrouillée
 router.use(requireAdmin);
-// Stockage en mémoire EXPLICITE — voir la même remarque dans articles.js.
-const uploadCsv = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
-// GET /api/admin/clients — liste des comptes clients (hôtels), pour les
-// sélecteurs d'hôtel (commandes automatiques, etc.) et l'écran de gestion.
+// GET /api/admin/clients — liste des hôtels pour les sélecteurs de la production (nouvelle commande,
+// commandes automatiques…). Volontairement limitée aux coordonnées d'exploitation : SIRET, TVA,
+// adresse de facturation, tarifs, jetons et webhook ne se consultent que dans la Facturation protégée.
 router.get('/clients', (req, res) => {
   const rows = db.prepare(`
-    SELECT id, email, societe, contact, tel, adresse, code_postal as codePostal, ville,
-           odoo_partner_id as odooPartnerId,
-           siret, tva_number as tvaNumber, adresse_facturation as adresseFacturation,
-           invoice_detail_level as invoiceDetailLevel,
-           created_at as createdAt
-    FROM clients ORDER BY societe
+    SELECT id, email, societe, contact, tel, adresse, code_postal as codePostal, ville, created_at as createdAt
+    FROM clients ORDER BY societe COLLATE NOCASE
   `).all();
   res.json({ clients: rows });
 });
@@ -94,8 +87,8 @@ router.get('/clients', (req, res) => {
 // avant même que l'hôtel s'en serve, en lui communiquant le code choisi.
 router.post('/clients', (req, res) => {
   const { societe, contact, tel, adresse, codePostal, ville, code } = req.body || {};
-  // Seul le nom est obligatoire : le reste peut être complété plus tard
-  // depuis la fiche client (création rapide depuis « Nouvelle commande »).
+  // Seul le nom est obligatoire : le reste se complète ensuite dans Facturation → Hôtels
+  // (création rapide depuis « Nouvelle commande »).
   if (!societe || !societe.trim()) {
     return res.status(400).json({ error: 'Merci de renseigner le nom du client.' });
   }
@@ -123,333 +116,8 @@ router.post('/clients', (req, res) => {
   res.status(201).json({ client: row });
 });
 
-// PUT /api/admin/clients/:id — modifier les coordonnées d'un hôtel, et
-// éventuellement réinitialiser son code d'accès (champ "code" optionnel :
-// absent = inchangé). Nécessaire puisque le code n'est jamais récupérable
-// depuis l'inscription — c'est le seul moyen de dépanner un hôtel qui l'a
-// oublié.
-router.put('/clients/:id', (req, res) => {
-  const id = Number(req.params.id);
-  const existing = db.prepare('SELECT * FROM clients WHERE id = ?').get(id);
-  if (!existing) return res.status(404).json({ error: 'Hôtel introuvable.' });
-
-  const { societe, contact, tel, adresse, codePostal, ville, code, siret, tvaNumber, adresseFacturation } = req.body || {};
-  // Email facultatif : vide = aucun email (et donc pas d'accès à l'espace client).
-  const email = req.body?.email === undefined ? existing.email
-    : ((req.body.email || '').trim().toLowerCase() || null);
-  if (societe !== undefined && !String(societe).trim()) {
-    return res.status(400).json({ error: 'Le nom du client ne peut pas être vide.' });
-  }
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ error: 'Adresse email invalide.' });
-  }
-  if (email && email !== existing.email) {
-    const emailTaken = db.prepare('SELECT id FROM clients WHERE email = ? AND id != ?').get(email, id);
-    if (emailTaken) return res.status(409).json({ error: 'Cet email est déjà utilisé par un autre compte.' });
-  }
-  if (siret && !/^\d{14}$/.test(siret.replace(/\s/g, ''))) {
-    return res.status(400).json({ error: 'Le SIRET doit comporter exactement 14 chiffres.' });
-  }
-  let codeHash = existing.code_hash;
-  if (code) {
-    if (!/^\d{4,8}$/.test(code)) return res.status(400).json({ error: "Le code d'accès doit contenir entre 4 et 8 chiffres." });
-    codeHash = bcrypt.hashSync(code, 10);
-  }
-
-  db.prepare(`
-    UPDATE clients SET societe = ?, contact = ?, tel = ?, adresse = ?, code_postal = ?, ville = ?, email = ?, code_hash = ?,
-      siret = ?, tva_number = ?, adresse_facturation = ? WHERE id = ?
-  `).run(
-    (societe ?? existing.societe).trim(),
-    (contact ?? existing.contact ?? '').trim(),
-    (tel ?? existing.tel ?? '').trim(),
-    (adresse ?? existing.adresse ?? '').trim(),
-    codePostal !== undefined ? (codePostal.trim() || null) : existing.code_postal,
-    ville !== undefined ? (ville.trim() || null) : existing.ville,
-    email,
-    codeHash,
-    siret !== undefined ? (siret.replace(/\s/g, '') || null) : existing.siret,
-    tvaNumber !== undefined ? (tvaNumber || null) : existing.tva_number,
-    adresseFacturation !== undefined ? (adresseFacturation || null) : existing.adresse_facturation,
-    id
-  );
-
-  const row = db.prepare('SELECT id, email, societe, contact, tel, adresse, code_postal as codePostal, ville, created_at as createdAt FROM clients WHERE id = ?').get(id);
-  res.json({ client: row });
-});
-
-// DELETE /api/admin/clients/:id — les commandes déjà passées ne sont pas
-// supprimées (client_id repasse à NULL, elles gardent leur société/contact
-// figés au moment de la commande, voir schema.sql).
-router.delete('/clients/:id', (req, res) => {
-  db.prepare('DELETE FROM clients WHERE id = ?').run(Number(req.params.id));
-  res.json({ ok: true });
-});
-
-// POST /api/admin/clients/import — import en masse depuis un fichier
-// CSV. Colonnes attendues (première ligne = en-têtes) : societe, contact,
-// tel, adresse, email sont OBLIGATOIRES ; code_postal, ville, code sont
-// optionnelles. Si "code" est absent ou vide, un code d'accès à 6
-// chiffres est généré automatiquement et renvoyé dans le résultat pour
-// que vous puissiez le transmettre à l'hôtel. Si l'email correspond à un
-// compte déjà existant, ses coordonnées sont MISES À JOUR (le code
-// d'accès n'est changé QUE si la colonne "code" est explicitement
-// remplie sur cette ligne — jamais réinitialisé silencieusement).
-router.post('/clients/import', uploadCsv.single('file'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu (champ "file" attendu).' });
-
-  let parsed;
-  try {
-    parsed = parseCsv(req.file.buffer.toString('utf-8'));
-  } catch (err) {
-    return res.status(400).json({ error: `Fichier CSV illisible : ${err.message}` });
-  }
-  if (parsed.rows.length === 0) {
-    return res.status(400).json({ error: 'Le fichier ne contient aucune ligne de données (juste un en-tête, ou vide).' });
-  }
-  const requiredCols = ['societe', 'contact', 'tel', 'adresse', 'email'];
-  const missingCols = requiredCols.filter(c => !parsed.headers.includes(c));
-  if (missingCols.length > 0) {
-    return res.status(400).json({ error: `Colonne(s) obligatoire(s) manquante(s) dans l'en-tête : ${missingCols.join(', ')}. Colonnes trouvées : ${parsed.headers.join(', ')}.` });
-  }
-
-  const findByEmail = db.prepare('SELECT id, code_hash FROM clients WHERE email = ?');
-  // Détecte les doublons PROBABLES entre le fichier et la base : même
-  // société (normalisée), mais email différent — même principe que pour
-  // les articles, voir le commentaire équivalent dans articles.js.
-  const findByNormalizedSociete = db.prepare("SELECT email FROM clients WHERE LOWER(TRIM(societe)) = ?");
-  const insertClient = db.prepare(`
-    INSERT INTO clients (email, societe, contact, tel, adresse, code_postal, ville, code_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const updateClient = db.prepare(`
-    UPDATE clients SET societe=?, contact=?, tel=?, adresse=?, code_postal=?, ville=?, code_hash=? WHERE email=?
-  `);
-
-  const results = { created: [], updated: [], duplicates: [], possibleDuplicates: [], errors: [] };
-  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  // Suit les emails déjà rencontrés DANS ce fichier — même principe que
-  // pour les articles : la première occurrence est traitée normalement,
-  // toute occurrence suivante du même email est un doublon interne au
-  // fichier, ignoré et signalé distinctement.
-  const seenEmails = new Map();
-
-  const runImport = db.transaction(() => {
-    parsed.rows.forEach((row, idx) => {
-      const lineNum = idx + 2;
-      const societe = (row.societe || '').trim();
-      const contact = (row.contact || '').trim();
-      const tel = (row.tel || '').trim();
-      const adresse = (row.adresse || '').trim();
-      const email = (row.email || '').trim().toLowerCase();
-      if (!societe) return results.errors.push({ line: lineNum, error: 'Colonne "societe" vide.' });
-      if (!contact) return results.errors.push({ line: lineNum, error: 'Colonne "contact" vide.' });
-      if (!tel) return results.errors.push({ line: lineNum, error: 'Colonne "tel" vide.' });
-      if (!adresse) return results.errors.push({ line: lineNum, error: 'Colonne "adresse" vide.' });
-      if (!email || !EMAIL_RE.test(email)) return results.errors.push({ line: lineNum, error: `Email invalide : "${row.email}".` });
-
-      if (seenEmails.has(email)) {
-        return results.duplicates.push({ line: lineNum, email, error: `Doublon dans le fichier — même email qu'à la ligne ${seenEmails.get(email)}, ignoré.` });
-      }
-      seenEmails.set(email, lineNum);
-
-      const codePostal = (row.code_postal || '').trim() || null;
-      const ville = (row.ville || '').trim() || null;
-      const providedCode = (row.code || '').trim();
-      if (providedCode && !/^\d{4,8}$/.test(providedCode)) {
-        return results.errors.push({ line: lineNum, error: `Colonne "code" invalide : "${providedCode}" (attendu 4 à 8 chiffres).` });
-      }
-
-      const existing = findByEmail.get(email);
-      if (existing) {
-        const codeHash = providedCode ? bcrypt.hashSync(providedCode, 10) : existing.code_hash;
-        updateClient.run(societe, contact, tel, adresse, codePostal, ville, codeHash, email);
-        return results.updated.push({ line: lineNum, societe, email, codeChanged: !!providedCode });
-      }
-
-      // Pas de correspondance exacte par email, mais un hôtel du même nom
-      // existe déjà avec un AUTRE email — probablement le même hôtel saisi
-      // deux fois (adresse email différente selon la source). On ne
-      // bloque PAS la création (pourrait légitimement être une franchise
-      // à deux adresses distinctes), mais on le signale pour vérification
-      // manuelle plutôt que de laisser deux fiches coexister silencieusement.
-      const societeMatch = findByNormalizedSociete.get(societe.toLowerCase().trim());
-      if (societeMatch) {
-        results.possibleDuplicates.push({ line: lineNum, societe, error: `Un hôtel nommé "${societe}" existe déjà avec l'email "${societeMatch.email}" (celui-ci : "${email}") — à vérifier, créé quand même.` });
-      }
-
-      // Génère un code à 6 chiffres si non fourni — renvoyé en clair dans
-      // le résultat pour que vous puissiez le transmettre à l'hôtel ; il
-      // n'est ensuite plus jamais récupérable (seul le hash est stocké,
-      // comme pour une création manuelle).
-      const finalCode = providedCode || String(Math.floor(100000 + Math.random() * 900000));
-      const codeHash = bcrypt.hashSync(finalCode, 10);
-      insertClient.run(email, societe, contact, tel, adresse, codePostal, ville, codeHash);
-      results.created.push({ line: lineNum, societe, email, code: finalCode, codeWasGenerated: !providedCode });
-    });
-  });
-  runImport();
-
-  res.json({
-    summary: { total: parsed.rows.length, created: results.created.length, updated: results.updated.length, duplicates: results.duplicates.length, possibleDuplicates: results.possibleDuplicates.length, errors: results.errors.length },
-    ...results,
-  });
-});
-
-// ---------- jetons API (intégrations B2B) ----------
-
-// GET /api/admin/clients/:id/api-tokens — liste des jetons d'un hôtel.
-router.get('/clients/:id/api-tokens', (req, res) => {
-  const rows = db.prepare('SELECT id, token, label, created_at as createdAt, last_used_at as lastUsedAt FROM api_tokens WHERE client_id = ? ORDER BY created_at DESC')
-    .all(Number(req.params.id));
-  res.json({ tokens: rows });
-});
-
-// POST /api/admin/clients/:id/api-tokens — génère un nouveau jeton pour
-// cet hôtel (ex. pour une intégration avec son propre logiciel de
-// commande). Le jeton n'est affiché en clair qu'à cet instant — il reste
-// ensuite consultable mais pensé pour être copié tout de suite.
-router.post('/clients/:id/api-tokens', (req, res) => {
-  const clientId = Number(req.params.id);
-  const client = db.prepare('SELECT id FROM clients WHERE id = ?').get(clientId);
-  if (!client) return res.status(404).json({ error: 'Hôtel introuvable.' });
-
-  const { label } = req.body || {};
-  const token = crypto.randomBytes(24).toString('hex');
-  const info = db.prepare('INSERT INTO api_tokens (client_id, token, label) VALUES (?, ?, ?)')
-    .run(clientId, token, (label || '').trim() || null);
-  const row = db.prepare('SELECT id, token, label, created_at as createdAt, last_used_at as lastUsedAt FROM api_tokens WHERE id = ?').get(info.lastInsertRowid);
-  res.status(201).json({ token: row });
-});
-
-// DELETE /api/admin/api-tokens/:id — révoque un jeton (immédiat).
-router.delete('/api-tokens/:id', (req, res) => {
-  db.prepare('DELETE FROM api_tokens WHERE id = ?').run(Number(req.params.id));
-  res.json({ ok: true });
-});
-
-// ---------- tarifs négociés par client ----------
-
-// GET /api/admin/clients/:id/prices — catalogue complet avec, pour
-// chaque article, le prix catalogue ET le tarif négocié actif s'il y en
-// a un. Sert à afficher le prix catalogue en pré-rempli et un badge sur
-// les seuls articles dérogatoires.
-router.get('/clients/:id/prices', (req, res) => {
-  const clientId = Number(req.params.id);
-  const today = new Date().toISOString().slice(0, 10);
-  const articles = db.prepare('SELECT id, name, code, category, price FROM articles ORDER BY category, name').all();
-  const overrides = Object.fromEntries(
-    db.prepare(`
-      SELECT article_id, price, date_debut as dateDebut FROM client_prices
-      WHERE client_id = ? AND date_debut <= ? AND (date_fin IS NULL OR date_fin >= ?)
-    `).all(clientId, today, today).map(r => [r.article_id, r])
-  );
-  // Sémantique existante (voir getServicesForClient) : aucune ligne du
-  // tout pour cet hôtel = accès à tout le catalogue par défaut. Dès
-  // qu'au moins une ligne existe, SEULS les articles listés sont
-  // attribués — les autres devienent inaccessibles à cet hôtel.
-  const attributedRows = db.prepare('SELECT article_id FROM client_articles WHERE client_id = ?').all(clientId);
-  const hasRestriction = attributedRows.length > 0;
-  const attributedSet = new Set(attributedRows.map(r => r.article_id));
-
-  res.json({
-    hasRestriction,
-    articles: articles.map(a => ({
-      id: a.id, name: a.name, code: a.code, category: a.category,
-      catalogPrice: a.price,
-      negotiatedPrice: overrides[a.id]?.price ?? null,
-      negotiatedSince: overrides[a.id]?.dateDebut ?? null,
-      isAttributed: hasRestriction ? attributedSet.has(a.id) : true,
-    })),
-  });
-});
-
-// PUT /api/admin/clients/:id/articles/:articleId/attribution — bascule
-// l'attribution d'UN SEUL article pour cet hôtel (ajoute ou retire une
-// ligne), sans toucher aux autres. Voir la route ci-dessus pour la
-// sémantique "liste vide = catalogue complet".
-router.put('/clients/:id/articles/:articleId/attribution', (req, res) => {
-  const clientId = Number(req.params.id);
-  const articleId = req.params.articleId;
-  const { attributed } = req.body || {};
-  if (attributed) {
-    db.prepare('INSERT OR IGNORE INTO client_articles (client_id, article_id) VALUES (?, ?)').run(clientId, articleId);
-  } else {
-    db.prepare('DELETE FROM client_articles WHERE client_id = ? AND article_id = ?').run(clientId, articleId);
-  }
-  const remaining = db.prepare('SELECT COUNT(*) as n FROM client_articles WHERE client_id = ?').get(clientId).n;
-  res.json({ ok: true, hasRestriction: remaining > 0 });
-});
-
-// PUT /api/admin/clients/:id/prices/:articleId — définit un nouveau tarif
-// négocié pour cet article, effectif à partir d'une date donnée (aujourd'hui
-// par défaut). L'éventuel tarif actif précédent est clos la veille (pas
-// supprimé) — c'est ce qui permet de refacturer un mois passé au tarif
-// qui était réellement en vigueur à l'époque.
-router.put('/clients/:id/prices/:articleId', (req, res) => {
-  const clientId = Number(req.params.id);
-  const articleId = req.params.articleId;
-  const { price, dateDebut } = req.body || {};
-  const priceNum = parseFloat(price);
-  if (!Number.isFinite(priceNum) || priceNum < 0) return res.status(400).json({ error: 'Prix invalide.' });
-  const effectiveDate = dateDebut || new Date().toISOString().slice(0, 10);
-
-  const setPrice = db.transaction(() => {
-    const veille = new Date(effectiveDate);
-    veille.setDate(veille.getDate() - 1);
-    db.prepare(`
-      UPDATE client_prices SET date_fin = ?
-      WHERE client_id = ? AND article_id = ? AND (date_fin IS NULL OR date_fin >= ?)
-    `).run(veille.toISOString().slice(0, 10), clientId, articleId, effectiveDate);
-    db.prepare(`
-      INSERT INTO client_prices (client_id, article_id, price, date_debut) VALUES (?, ?, ?, ?)
-    `).run(clientId, articleId, priceNum, effectiveDate);
-  });
-  setPrice();
-  res.json({ ok: true });
-});
-
-// DELETE /api/admin/clients/:id/prices/:articleId — retire le tarif
-// négocié actif (clôturé à hier, pas supprimé — l'historique reste
-// consultable) : cet article retombe sur le prix catalogue dès aujourd'hui.
-router.delete('/clients/:id/prices/:articleId', (req, res) => {
-  const clientId = Number(req.params.id);
-  const articleId = req.params.articleId;
-  const today = new Date().toISOString().slice(0, 10);
-  db.prepare(`
-    UPDATE client_prices SET date_fin = ?
-    WHERE client_id = ? AND article_id = ? AND (date_fin IS NULL OR date_fin >= ?)
-  `).run(today, clientId, articleId, today);
-  res.json({ ok: true });
-});
-
-// POST /api/admin/clients/:id/prices/duplicate-from — copie les tarifs
-// négociés ACTIFS d'un autre client vers celui-ci (utile pour un
-// deuxième établissement du même groupe hôtelier).
-router.post('/clients/:id/prices/duplicate-from', (req, res) => {
-  const clientId = Number(req.params.id);
-  const { sourceClientId } = req.body || {};
-  if (!sourceClientId) return res.status(400).json({ error: 'Client source manquant.' });
-  const today = new Date().toISOString().slice(0, 10);
-  const sourcePrices = db.prepare(`
-    SELECT article_id, price FROM client_prices
-    WHERE client_id = ? AND date_debut <= ? AND (date_fin IS NULL OR date_fin >= ?)
-  `).all(Number(sourceClientId), today, today);
-
-  const insertOne = db.prepare('INSERT INTO client_prices (client_id, article_id, price, date_debut) VALUES (?, ?, ?, ?)');
-  const closeExisting = db.prepare(`
-    UPDATE client_prices SET date_fin = ?
-    WHERE client_id = ? AND article_id = ? AND (date_fin IS NULL OR date_fin >= ?)
-  `);
-  const duplicateAll = db.transaction(() => {
-    for (const p of sourcePrices) {
-      closeExisting.run(today, clientId, p.article_id, today);
-      insertOne.run(clientId, p.article_id, p.price, today);
-    }
-  });
-  duplicateAll();
-  res.json({ ok: true, count: sourcePrices.length });
-});
+// Gestion complète des hôtels (fiche, facturation, tarifs, jetons d'API, webhook, import) :
+// déplacée dans la partie protégée — voir routes/billingCatalog.js (/api/admin/billing/catalog/*).
 
 // ---------- intégration Odoo ----------
 
@@ -749,43 +417,6 @@ router.put('/odoo/settings', (req, res) => {
   db.prepare('UPDATE admin SET odoo_tax_id = ?, odoo_journal_id = ? WHERE id = 1')
     .run(odooTaxId || null, odooJournalId || null);
   res.json({ ok: true });
-});
-
-// PUT /api/admin/clients/:id/invoice-detail-level — niveau de détail des
-// lignes sur la facture Odoo générée pour cet hôtel (voir schema.sql pour
-// le détail des 3 niveaux).
-router.put('/clients/:id/invoice-detail-level', (req, res) => {
-  const { level } = req.body || {};
-  if (!['detail', 'per_bl', 'aggregated'].includes(level)) {
-    return res.status(400).json({ error: 'Niveau invalide.' });
-  }
-  db.prepare('UPDATE clients SET invoice_detail_level = ? WHERE id = ?').run(level, Number(req.params.id));
-  res.json({ ok: true });
-});
-
-// GET /api/admin/clients/:id/webhook — configuration webhook actuelle.
-router.get('/clients/:id/webhook', (req, res) => {
-  const row = db.prepare('SELECT webhook_url as webhookUrl, webhook_secret as webhookSecret FROM clients WHERE id = ?').get(Number(req.params.id));
-  if (!row) return res.status(404).json({ error: 'Hôtel introuvable.' });
-  res.json(row);
-});
-
-// PUT /api/admin/clients/:id/webhook — définit ou modifie l'URL à
-// notifier quand une commande de cet hôtel passe à "livrée". Un secret
-// est généré automatiquement à la première configuration (jamais
-// régénéré ensuite, sauf demande explicite via le paramètre regenerate).
-router.put('/clients/:id/webhook', (req, res) => {
-  const clientId = Number(req.params.id);
-  const existing = db.prepare('SELECT webhook_secret FROM clients WHERE id = ?').get(clientId);
-  if (!existing) return res.status(404).json({ error: 'Hôtel introuvable.' });
-
-  const { webhookUrl, regenerateSecret } = req.body || {};
-  if (webhookUrl) {
-    try { new URL(webhookUrl); } catch { return res.status(400).json({ error: 'URL invalide.' }); }
-  }
-  const secret = (regenerateSecret || !existing.webhook_secret) ? crypto.randomBytes(20).toString('hex') : existing.webhook_secret;
-  db.prepare('UPDATE clients SET webhook_url = ?, webhook_secret = ? WHERE id = ?').run(webhookUrl || null, secret, clientId);
-  res.json({ webhookUrl: webhookUrl || null, webhookSecret: secret });
 });
 
 // GET /api/admin/orders/:id/extra — hôtels supplémentaires + commentaires

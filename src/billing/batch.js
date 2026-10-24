@@ -3,17 +3,9 @@
 
 const db = require('../db');
 const engine = require('./engine');
+const { billingIssues } = require('./catalog');
 
 const { BillingError } = engine;
-
-function clientIssues(client) {
-  const issues = [];
-  const siren = engine.sirenFrom(client.siret);
-  if (siren.length !== 9) issues.push('SIREN/SIRET manquant');
-  else if (!engine.luhnOk(siren)) issues.push('SIREN/SIRET invalide');
-  if (!(client.adresse_facturation || client.adresse)) issues.push('adresse de facturation manquante');
-  return issues;
-}
 
 /** Hôtels ayant des BL livrés à facturer, livrés jusqu'à `upTo` (AAAA-MM-JJ, inclus). */
 function preview(upTo) {
@@ -28,7 +20,7 @@ function preview(upTo) {
     out.push({
       clientId: cid, clientName: client.societe, orders,
       estimatedHtCents: engine.estimateOrdersHtCents(orders.map(o => o.id)),
-      issues: clientIssues(client),
+      issues: billingIssues(client),
     });
   }
   return out.sort((a, b) => a.clientName.localeCompare(b.clientName, 'fr'));

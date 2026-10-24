@@ -3,7 +3,7 @@ const db = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const { computeStayLinen } = require('../utils/autoOrderRules');
 const { serializeOrder } = require('../utils/serializeOrder');
-const { getServicesById } = require('../services');
+const { getServicesByIdPricedForClient } = require('../services');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -119,10 +119,11 @@ router.post('/simulate', (req, res) => {
   if (!Array.isArray(stays) || stays.length === 0) {
     return res.status(400).json({ error: 'Merci de fournir au moins un séjour.' });
   }
-  const { byId, error } = loadStaysRoomTypes(stays);
+  const { byId, clientId, error } = loadStaysRoomTypes(stays);
   if (error) return res.status(400).json({ error });
 
-  const servicesById = getServicesById();
+  // Tarifs du client (négociés ou catalogue) : l'estimation doit montrer ce qui sera facturé.
+  const servicesById = getServicesByIdPricedForClient(clientId);
   const totals = {};
   for (const stay of stays) {
     const roomType = byId[stay.roomTypeId];
@@ -153,7 +154,8 @@ router.post('/generate-order', (req, res) => {
   if (!client) return res.status(404).json({ error: 'Hôtel introuvable pour ces chambres.' });
 
   const totals = {};
-  const servicesById = getServicesById();
+  // Tarif négocié du client s'il existe : c'est ce prix qui est figé sur la commande puis facturé.
+  const servicesById = getServicesByIdPricedForClient(clientId);
   for (const stay of stays) {
     const roomType = byId[stay.roomTypeId];
     if (!roomType) continue;
