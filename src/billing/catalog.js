@@ -1030,18 +1030,29 @@ function matrixCsv() {
 
 // ---- réappliquer les tarifs aux BL non facturés ----
 
-/** BL d'un hôtel avec leur date de référence et leur état de facturation (facturé / dans un brouillon). */
+/**
+ * BL d'un hôtel avec leur date de référence et leur état de facturation (facturé / dans un brouillon).
+ * Trois requêtes simples par hôtel plutôt qu'une sous-requête corrélée par BL : un aperçu d'import les enchaîne pour
+ * chaque hôtel, sur un historique qui peut compter des dizaines de milliers de BL.
+ */
 function ordersWithBilling(clientId) {
-  return db.prepare(`
-    SELECT o.id, o.ticket, o.status, COALESCE(NULLIF(substr(o.livraison_prevue, 1, 10), ''), substr(o.created_at, 1, 10)) AS refDate,
-      EXISTS (SELECT 1 FROM native_invoice_orders no JOIN native_invoices ni ON ni.id = no.invoice_id
-              WHERE no.order_id = o.id AND ni.kind = 'invoice' AND ni.status = 'draft') AS inDraft,
-      (o.id IN (SELECT order_id FROM invoice_orders)
-        OR EXISTS (SELECT 1 FROM native_invoice_orders no JOIN native_invoices ni ON ni.id = no.invoice_id
-                   WHERE no.order_id = o.id AND ni.kind = 'invoice' AND ni.status = 'issued'
-                     AND NOT EXISTS (SELECT 1 FROM native_invoices cn WHERE cn.credits_invoice_id = ni.id AND cn.status = 'issued' AND cn.is_full_credit = 1))) AS billed
-    FROM orders o WHERE o.client_id = ? ORDER BY refDate, o.id
+  const orders = db.prepare(`
+    SELECT o.id, o.ticket, o.status, COALESCE(NULLIF(substr(o.livraison_prevue, 1, 10), ''), substr(o.created_at, 1, 10)) AS refDate
+    FROM orders o WHERE o.client_id = ?
   `).all(clientId);
+  const legacy = new Set(db.prepare('SELECT io.order_id AS id FROM invoice_orders io JOIN orders o ON o.id = io.order_id WHERE o.client_id = ?').all(clientId).map(r => r.id));
+  const issued = new Set(); const drafts = new Set();
+  for (const l of db.prepare(`
+    SELECT no.order_id AS id, ni.status,
+           EXISTS (SELECT 1 FROM native_invoices cn WHERE cn.credits_invoice_id = ni.id AND cn.status = 'issued' AND cn.is_full_credit = 1) AS fullyCredited
+    FROM native_invoice_orders no JOIN native_invoices ni ON ni.id = no.invoice_id JOIN orders o ON o.id = no.order_id
+    WHERE o.client_id = ? AND ni.kind = 'invoice'
+  `).all(clientId)) {
+    if (l.status === 'draft') drafts.add(l.id);
+    else if (l.status === 'issued' && !l.fullyCredited) issued.add(l.id);
+  }
+  return orders.map(o => ({ ...o, inDraft: drafts.has(o.id) ? 1 : 0, billed: legacy.has(o.id) || issued.has(o.id) ? 1 : 0 }))
+    .sort((x, y) => (x.refDate < y.refDate ? -1 : x.refDate > y.refDate ? 1 : x.id - y.id));
 }
 
 /** Nombre de BL non facturés d'un hôtel (hors brouillons), le plus ancien, et ceux déjà dans un brouillon. */
@@ -1057,13 +1068,23 @@ function repriceCandidates(clientId, from, articleIds) {
   const wanted = Array.isArray(articleIds) && articleIds.length ? new Set(articleIds.map(String)) : null;
   const all = ordersWithBilling(clientId);
   const orders = all.filter(o => o.refDate >= from && !o.billed);
-  const itemsStmt = db.prepare('SELECT id, service_id, name, price, qty, delivered_qty FROM order_items WHERE order_id = ?');
+  // Lignes de tous les BL de l'hôtel en une requête ; prix applicable calculé une fois par (article, date).
+  const itemsByOrder = new Map();
+  for (const it of db.prepare('SELECT oi.id, oi.order_id, oi.service_id, oi.name, oi.price, oi.qty, oi.delivered_qty FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE o.client_id = ?').all(clientId)) {
+    if (wanted && !wanted.has(it.service_id)) continue;
+    const list = itemsByOrder.get(it.order_id); if (list) list.push(it); else itemsByOrder.set(it.order_id, [it]);
+  }
+  const priceCache = new Map();
+  const priceAt = (articleId, date) => {
+    const k = `${articleId}|${date}`;
+    if (!priceCache.has(k)) priceCache.set(k, resolveClientPrice(clientId, articleId, date));
+    return priceCache.get(k);
+  };
   const result = []; let skippedInDraft = 0;
   for (const o of orders) {
     const lines = [];
-    for (const it of itemsStmt.all(o.id)) {
-      if (wanted && !wanted.has(it.service_id)) continue;
-      const target = resolveClientPrice(clientId, it.service_id, o.refDate);
+    for (const it of itemsByOrder.get(o.id) || []) {
+      const target = priceAt(it.service_id, o.refDate);
       if (target == null || round3(target) === round3(it.price)) continue;
       lines.push({ itemId: it.id, name: it.name, from: round3(it.price), to: round3(target), qty: it.delivered_qty ?? it.qty });
     }
@@ -1080,9 +1101,8 @@ function repriceCandidates(clientId, from, articleIds) {
     for (const o of all) {
       if (o.refDate >= from || o.billed || o.inDraft) continue;
       let hit = 0;
-      for (const it of itemsStmt.all(o.id)) {
-        if (!wanted.has(it.service_id)) continue;
-        const target = resolveClientPrice(clientId, it.service_id, from);
+      for (const it of itemsByOrder.get(o.id) || []) {
+        const target = priceAt(it.service_id, from);
         if (target != null && round3(target) !== round3(it.price)) hit++;
       }
       if (hit) { older.orders++; older.lines += hit; if (!older.oldest || o.refDate < older.oldest) older.oldest = o.refDate; }

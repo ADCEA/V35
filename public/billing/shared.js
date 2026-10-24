@@ -165,7 +165,12 @@
         { label: 'Annuler', onClick: async () => {} },
         { label: previewLabel, primary: true, onClick: async (m) => {
           if (stage === 'check') {
-            const r = await preview(m);
+            m.$('#pv-out').innerHTML = '<div class="bl-spin">Analyse en cours… (quelques secondes, davantage si l\'historique est long)</div>';
+            let r;
+            // Jamais d'attente sans fin : au-delà de 2 minutes on rend la main avec un message clair.
+            let timer;
+            const tooLong = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Le serveur met trop de temps à répondre (plus de 2 minutes). Réessayez dans un instant ; si cela se reproduit, notez l\'heure et prévenez-moi.')), 120000); });
+            try { r = await Promise.race([preview(m), tooLong]); } catch (err) { m.$('#pv-out').innerHTML = ''; throw err; } finally { clearTimeout(timer); }
             m.$('#pv-out').innerHTML = r.html;
             if (r.canApply) { stage = 'apply'; confirmText = r.confirm || ''; setLabel(m, applyLabel); }
             return true;
