@@ -239,6 +239,40 @@ function createDraftFromOrders(clientId, orderIds, opts = {}) {
   return loadInvoice(create());
 }
 
+/**
+ * Brouillon de facture « libre » (sans BL) : prestation ponctuelle, ou conversion
+ * d'un devis. Mêmes règles de lignes que l'édition d'un brouillon.
+ */
+function createDraftFromLines(clientId, rawLines, opts = {}) {
+  const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(clientId);
+  if (!client) throw new BillingError('Hôtel introuvable.', 404);
+  const lines = sanitizeLines(rawLines);
+  if (lines.filter(l => !l.isSection).length === 0) throw new BillingError('La facture doit contenir au moins une ligne facturable.');
+  const category = opts.operationCategory || 'services';
+  if (!['services', 'goods', 'mixed'].includes(category)) throw new BillingError("Catégorie d'opération invalide.");
+  const totals = computeTotals(lines);
+  const create = db.transaction(() => {
+    const info = db.prepare(`
+      INSERT INTO native_invoices (kind, status, client_id, operation_category, detail_level, reference, notes,
+                                   total_ht_cents, total_vat_cents, total_ttc_cents, vat_breakdown_json)
+      VALUES ('invoice','draft',?,?,'detail',?,?,?,?,?,?)
+    `).run(clientId, category, opts.reference ? String(opts.reference).slice(0, 250) : null, opts.notes || null,
+      totals.totalHtCents, totals.totalVatCents, totals.totalTtcCents, JSON.stringify(totals.breakdown));
+    const id = Number(info.lastInsertRowid);
+    insertLines(id, lines, totals.lineCents);
+    logEvent('draft_created', id, { clientId, free: true, ...(opts.fromQuote ? { fromQuote: opts.fromQuote } : {}) });
+    return id;
+  });
+  return loadInvoice(create());
+}
+
+// Montant HT estimé (centimes) de commandes livrées, avant création du brouillon.
+function estimateOrdersHtCents(orderIds) {
+  if (!orderIds.length) return 0;
+  const rows = db.prepare(`SELECT qty, delivered_qty AS d, price FROM order_items WHERE order_id IN (${orderIds.map(() => '?').join(',')})`).all(...orderIds);
+  return rows.reduce((s, r) => s + lineCents(r.d ?? r.qty, r.price), 0);
+}
+
 function insertLines(invoiceId, lines, perLineCents) {
   const ins = db.prepare(`
     INSERT INTO native_invoice_lines (invoice_id, position, is_section, sage_code, description, quantity, unit_price, vat_rate, line_ht_cents, credit_of_line_id)
@@ -594,7 +628,7 @@ function paymentStatus(inv) {
   return inv.due_date && inv.due_date < todayParis() ? 'overdue' : 'unpaid';
 }
 
-function recordPayment(invoiceId, { paidOn, amount, method, reference }) {
+function recordPayment(invoiceId, { paidOn, amount, method, reference, bankFingerprint }) {
   const inv = loadInvoice(invoiceId);
   if (!inv) throw new BillingError('Facture introuvable.', 404);
   if (inv.status !== 'issued' || inv.kind !== 'invoice') throw new BillingError("Un règlement ne s'enregistre que sur une facture émise.");
@@ -608,9 +642,14 @@ function recordPayment(invoiceId, { paidOn, amount, method, reference }) {
     const bal = balanceCents(inv);
     if (amountCents > 0 && amountCents > bal) throw new BillingError(`Le règlement dépasse le reste à payer (${(bal / 100).toFixed(2)} €).`);
     if (amountCents < 0 && -amountCents > paidCents(invoiceId)) throw new BillingError("L'écriture inverse dépasse le total déjà réglé.");
-    db.prepare('INSERT INTO native_payments (invoice_id, paid_on, amount_cents, method, reference) VALUES (?,?,?,?,?)')
-      .run(invoiceId, date, amountCents, m, reference ? String(reference).slice(0, 120) : null);
-    logEvent(amountCents > 0 ? 'payment_recorded' : 'payment_reversed', invoiceId, { amountCents, method: m, paidOn: date });
+    try {
+      db.prepare('INSERT INTO native_payments (invoice_id, paid_on, amount_cents, method, reference, bank_fingerprint) VALUES (?,?,?,?,?,?)')
+        .run(invoiceId, date, amountCents, m, reference ? String(reference).slice(0, 120) : null, bankFingerprint || null);
+    } catch (e) {
+      if (/UNIQUE/.test(e.message) && /bank_fingerprint/.test(e.message)) throw new BillingError('Cette ligne de relevé a déjà été rapprochée.', 409);
+      throw e;
+    }
+    logEvent(amountCents > 0 ? 'payment_recorded' : 'payment_reversed', invoiceId, { amountCents, method: m, paidOn: date, ...(bankFingerprint ? { bank: true } : {}) });
   });
   run.immediate();
   return loadInvoice(invoiceId);
@@ -669,7 +708,8 @@ function previewDraft(invoiceId, issueDateOverride) {
 }
 
 module.exports = {
-  previewDraft, logEvent,
+  snapshotSeller, snapshotBuyer, snapshotTerms,
+  previewDraft, logEvent, createDraftFromLines, estimateOrdersHtCents, sanitizeLines, isIsoDate, sha256,
   BillingError, todayParis, addDays, lineCents, computeTotals, sirenFrom, luhnOk,
   getSettings, loadInvoice, listInvoiceableOrders,
   createDraftFromOrders, updateDraft, deleteDraft, createCreditNoteDraft, issueInvoice,

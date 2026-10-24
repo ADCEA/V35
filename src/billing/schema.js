@@ -128,6 +128,75 @@ module.exports = function applyBillingSchema(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_native_payments_invoice ON native_payments(invoice_id);
 
+    -- Devis : document commercial (non comptable), numéroté DE-AAAA-NNNN à la
+    -- finalisation, convertible en brouillon de facture.
+    CREATE TABLE IF NOT EXISTS native_quotes (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      status           TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','issued','accepted','refused','invoiced')),
+      number           TEXT UNIQUE,
+      seq_year         INTEGER,
+      seq_no           INTEGER,
+      client_id        INTEGER NOT NULL REFERENCES clients(id) ON DELETE RESTRICT,
+      issue_date       TEXT,
+      valid_until      TEXT,
+      reference        TEXT,
+      notes            TEXT,
+      operation_category TEXT NOT NULL DEFAULT 'services' CHECK (operation_category IN ('services','goods','mixed')),
+      total_ht_cents   INTEGER NOT NULL DEFAULT 0,
+      total_vat_cents  INTEGER NOT NULL DEFAULT 0,
+      total_ttc_cents  INTEGER NOT NULL DEFAULT 0,
+      vat_breakdown_json TEXT NOT NULL DEFAULT '[]',
+      seller_json      TEXT,
+      buyer_json       TEXT,
+      terms_json       TEXT,
+      invoice_id       INTEGER REFERENCES native_invoices(id) ON DELETE SET NULL,
+      decided_at       TEXT,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_native_quotes_client ON native_quotes(client_id);
+
+    CREATE TABLE IF NOT EXISTS native_quote_lines (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      quote_id      INTEGER NOT NULL REFERENCES native_quotes(id) ON DELETE CASCADE,
+      position      INTEGER NOT NULL,
+      is_section    INTEGER NOT NULL DEFAULT 0,
+      sage_code     TEXT,
+      description   TEXT NOT NULL,
+      quantity      REAL NOT NULL DEFAULT 0,
+      unit_price    REAL NOT NULL DEFAULT 0,
+      vat_rate      REAL NOT NULL DEFAULT 0,
+      line_ht_cents INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_native_quote_lines_quote ON native_quote_lines(quote_id);
+
+    -- Courriers envoyés (facture, relance, devis) : append-only. Sert de
+    -- chronologie sur la facture et de preuve de relance.
+    CREATE TABLE IF NOT EXISTS native_mail_log (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      invoice_id  INTEGER REFERENCES native_invoices(id) ON DELETE RESTRICT,
+      quote_id    INTEGER REFERENCES native_quotes(id) ON DELETE RESTRICT,
+      kind        TEXT NOT NULL,                 -- 'invoice' | 'reminder-1' | 'reminder-2' | 'reminder-3' | 'quote'
+      channel     TEXT NOT NULL DEFAULT 'email', -- 'email' | 'manual' (relance téléphonique, courrier…)
+      to_email    TEXT,
+      subject     TEXT,
+      status      TEXT NOT NULL,                 -- 'sent' | 'failed' | 'logged'
+      error       TEXT,
+      sent_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_native_mail_invoice ON native_mail_log(invoice_id);
+
+    -- Suivi de l'envoi des factures émises vers Pennylane (une ligne par document).
+    CREATE TABLE IF NOT EXISTS pennylane_sync (
+      invoice_id     INTEGER PRIMARY KEY REFERENCES native_invoices(id) ON DELETE RESTRICT,
+      status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','sent','error')),
+      attempts       INTEGER NOT NULL DEFAULT 0,
+      last_error     TEXT,
+      pennylane_id   TEXT,
+      customer_id    TEXT,
+      sent_at        TEXT,
+      updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     -- Verrou propre à l'espace Facturation : un code distinct du mot de passe
     -- administrateur (stocké haché), avec compteur d'échecs persistant pour
     -- résister à la force brute même après un redémarrage du serveur.
@@ -227,6 +296,16 @@ module.exports = function applyBillingSchema(db) {
     BEFORE DELETE ON native_payments
     BEGIN SELECT RAISE(ABORT, 'Règlement enregistré : suppression interdite. Saisissez une écriture inverse.'); END;
 
+    DROP TRIGGER IF EXISTS trg_native_mail_no_update;
+    CREATE TRIGGER trg_native_mail_no_update
+    BEFORE UPDATE ON native_mail_log
+    BEGIN SELECT RAISE(ABORT, 'Historique des envois : modification interdite.'); END;
+
+    DROP TRIGGER IF EXISTS trg_native_mail_no_delete;
+    CREATE TRIGGER trg_native_mail_no_delete
+    BEFORE DELETE ON native_mail_log
+    BEGIN SELECT RAISE(ABORT, 'Historique des envois : suppression interdite.'); END;
+
     DROP TRIGGER IF EXISTS trg_billing_events_no_update;
     CREATE TRIGGER trg_billing_events_no_update
     BEFORE UPDATE ON billing_events
@@ -237,6 +316,17 @@ module.exports = function applyBillingSchema(db) {
     BEFORE DELETE ON billing_events
     BEGIN SELECT RAISE(ABORT, 'Journal de facturation : suppression interdite.'); END;
   `);
+
+  // Empreinte d'une ligne de relevé bancaire déjà rapprochée : empêche qu'un même
+  // relevé importé deux fois enregistre deux fois le même règlement.
+  const payCols = db.prepare("PRAGMA table_info(native_payments)").all().map(c => c.name);
+  if (!payCols.includes('bank_fingerprint')) db.exec('ALTER TABLE native_payments ADD COLUMN bank_fingerprint TEXT');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_native_payments_bank ON native_payments(bank_fingerprint) WHERE bank_fingerprint IS NOT NULL');
+
+  // Envoi automatique vers Pennylane : date d'activation (NULL = désactivé). Seuls les
+  // documents émis APRÈS cette date partent automatiquement, jamais l'historique.
+  const setCols = db.prepare('PRAGMA table_info(billing_settings)').all().map(c => c.name);
+  if (!setCols.includes('pennylane_auto_since')) db.exec('ALTER TABLE billing_settings ADD COLUMN pennylane_auto_since TEXT');
 
   // ---------- réglages par défaut ----------
   // Ligne unique, créée au premier démarrage. Toute la facturation passe par

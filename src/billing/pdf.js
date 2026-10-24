@@ -34,12 +34,13 @@ function buildInvoicePdf(inv, preview = null, extra = {}) {
     const seller = inv.seller || preview?.seller;
     const buyer = inv.buyer || preview?.buyer;
     const terms = inv.terms || preview?.terms;
+    const isQuote = inv.kind === 'quote';
     const isDraft = inv.status === 'draft';
     const isCredit = inv.kind === 'credit_note';
     const sign = isCredit ? -1 : 1; // un avoir s'affiche en négatif
 
     const doc = new PDFDocument({ size: 'A4', margin: 50, bufferPages: true, info: {
-      Title: isDraft ? 'Brouillon' : `${isCredit ? 'Avoir' : 'Facture'} ${inv.number}`,
+      Title: isDraft ? 'Brouillon' : `${isQuote ? 'Devis' : isCredit ? 'Avoir' : 'Facture'} ${inv.number}`,
       Author: seller?.legalName || 'Blanchisserie Cézanne',
     } });
     const chunks = [];
@@ -68,14 +69,16 @@ function buildInvoicePdf(inv, preview = null, extra = {}) {
     const sellerBottom = doc.y;
 
     // ---------- titre + numéro (à droite) ----------
-    const title = isCredit ? 'AVOIR' : 'FACTURE';
+    const title = isQuote ? 'DEVIS' : isCredit ? 'AVOIR' : 'FACTURE';
     doc.font('Helvetica-Bold').fontSize(22).fillColor(INK).text(title, left + width * 0.6, 45, { width: width * 0.4, align: 'right' });
     doc.font('Helvetica-Bold').fontSize(11).fillColor(isDraft ? RUST : INK)
       .text(isDraft ? 'BROUILLON — sans valeur' : `N° ${inv.number}`, left + width * 0.6, doc.y + 2, { width: width * 0.4, align: 'right' });
     doc.font('Helvetica').fontSize(9).fillColor(GRAY);
     const meta = [];
-    meta.push(`Date d'émission : ${dateFr(inv.issue_date)}`);
-    if (!isCredit && inv.due_date) meta.push(`Échéance : ${dateFr(inv.due_date)}`);
+    const quoteValidUntil = inv.valid_until || preview?.validUntil;
+    meta.push(`${isQuote ? 'Date du devis' : "Date d'émission"} : ${dateFr(inv.issue_date || (isQuote ? preview?.issueDate : null))}`);
+    if (isQuote && quoteValidUntil) meta.push(`Valable jusqu'au : ${dateFr(quoteValidUntil)}`);
+    if (!isCredit && !isQuote && inv.due_date) meta.push(`Échéance : ${dateFr(inv.due_date)}`);
     if (inv.period_start) meta.push(`Période : ${dateFr(inv.period_start)} au ${dateFr(inv.period_end)}`);
     if (isCredit && extra.creditedInvoiceNumber) meta.push(`Rectifie la facture ${extra.creditedInvoiceNumber}`);
     doc.text(meta.join('\n'), left + width * 0.6, doc.y + 4, { width: width * 0.4, align: 'right', lineGap: 1 });
@@ -85,7 +88,7 @@ function buildInvoicePdf(inv, preview = null, extra = {}) {
     y += 14;
 
     // ---------- bloc client ----------
-    doc.font('Helvetica').fontSize(8).fillColor(GRAY).text('FACTURÉ À', left, y, { characterSpacing: 1 });
+    doc.font('Helvetica').fontSize(8).fillColor(GRAY).text(isQuote ? 'DESTINATAIRE' : 'FACTURÉ À', left, y, { characterSpacing: 1 });
     doc.font('Helvetica-Bold').fontSize(11).fillColor(INK).text(buyer.name || '', left, y + 12, { width: width * 0.55 });
     doc.font('Helvetica').fontSize(9).fillColor(INK);
     const buyerLines = [
@@ -177,7 +180,7 @@ function buildInvoicePdf(inv, preview = null, extra = {}) {
     doc.text('Total HT', tx, y, { width: 100 }); doc.text(eur(inv.total_ht_cents * sign), tx + 100, y, { width: tw - 100, align: 'right' }); y += 14;
     doc.text('Total TVA', tx, y, { width: 100 }); doc.text(eur(inv.total_vat_cents * sign), tx + 100, y, { width: tw - 100, align: 'right' }); y += 16;
     doc.font('Helvetica-Bold').fontSize(12).fillColor(INK);
-    doc.text(isCredit ? 'Total TTC à déduire' : 'Total TTC à payer', tx, y, { width: 130 });
+    doc.text(isCredit ? 'Total TTC à déduire' : isQuote ? 'Total TTC' : 'Total TTC à payer', tx, y, { width: 130 });
     doc.text(eur(inv.total_ttc_cents * sign), tx + 120, y, { width: tw - 120, align: 'right' });
     y += 22;
     if (!isCredit && !isDraft && extra.paidCents > 0) {
@@ -188,7 +191,17 @@ function buildInvoicePdf(inv, preview = null, extra = {}) {
 
     // ---------- conditions de règlement et mentions légales ----------
     const legal = [];
-    if (!isCredit) {
+    if (isQuote) {
+      // Bloc « bon pour accord » : le devis ne vaut engagement qu'une fois signé par le client.
+      y += 4;
+      doc.save().roundedRect(left, y, 250, 62, 3).strokeColor(LINE).lineWidth(0.6).stroke().restore();
+      doc.font('Helvetica-Bold').fontSize(8).fillColor(GRAY).text('BON POUR ACCORD', left + 8, y + 7, { characterSpacing: 1 });
+      doc.font('Helvetica').fontSize(8).fillColor(GRAY).text('Date, signature et cachet du client\nprécédés de « Bon pour accord »', left + 8, y + 20, { width: 234 });
+      y += 72;
+      legal.push(`Devis valable jusqu'au ${dateFr(quoteValidUntil)}. Délai de paiement : ${terms.paymentTermsDays} jours à compter de la date de facture.`);
+      legal.push(terms.latePenaltyText);
+      legal.push(`Indemnité forfaitaire pour frais de recouvrement en cas de retard de paiement : ${eur(terms.recoveryIndemnityCents)} (art. D441-5 du Code de commerce).`);
+    } else if (!isCredit) {
       legal.push(`Échéance de règlement : ${dateFr(inv.due_date)} (${terms.paymentTermsDays} jours).`);
       if (seller.iban) legal.push(`Règlement par virement — IBAN ${seller.iban}${seller.bic ? ` — BIC ${seller.bic}` : ''}.`);
       legal.push(terms.earlyPaymentDiscount);

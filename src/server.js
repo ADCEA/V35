@@ -104,4 +104,5 @@ app.listen(PORT, () => {
   console.log(`Blanchisserie Cézanne — serveur lancé sur http://localhost:${PORT}`);
   startInvoiceStatusScheduler();
   require('./backup').startScheduler();
+  require('./billing/pennylane').startScheduler();
 });

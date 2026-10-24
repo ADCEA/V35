@@ -11,6 +11,11 @@ const { buildInvoicePdf } = require('../billing/pdf');
 const { buildFec } = require('../billing/fec');
 const lock = require('../billing/lock');
 const backup = require('../backup');
+const queries = require('../billing/queries');
+const mail = require('../billing/mail');
+const docs = require('../billing/documents');
+const pennylane = require('../billing/pennylane');
+const { wrap, present } = require('../billing/http');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -19,47 +24,6 @@ router.use(requireAdmin);
 // déverrouillage récent. Les actes sensibles exigent en plus une ressaisie.
 router.use('/lock', lock.router);
 router.use(lock.requireUnlocked);
-
-const wrap = (fn) => (req, res) => {
-  try {
-    const out = fn(req, res);
-    if (out && typeof out.then === 'function') {
-      out.catch(e => fail(res, e));
-    }
-  } catch (e) {
-    fail(res, e);
-  }
-};
-function fail(res, e) {
-  if (e instanceof engine.BillingError) return res.status(e.status).json({ error: e.message });
-  // Violation d'un trigger d'inaltérabilité (dernier rempart) : message clair, pas une 500.
-  if (e && /interdite|interdit/.test(e.message || '')) return res.status(409).json({ error: e.message });
-  console.error('[billing]', e);
-  return res.status(500).json({ error: 'Erreur serveur.' });
-}
-
-// Représentation JSON d'une facture pour l'écran.
-function present(inv) {
-  const issued = inv.status === 'issued';
-  return {
-    id: inv.id, kind: inv.kind, status: inv.status, number: inv.number,
-    clientId: inv.client_id, creditsInvoiceId: inv.credits_invoice_id, isFullCredit: !!inv.is_full_credit, creditReason: inv.credit_reason,
-    issueDate: inv.issue_date, dueDate: inv.due_date, periodStart: inv.period_start, periodEnd: inv.period_end,
-    operationCategory: inv.operation_category, detailLevel: inv.detail_level, reference: inv.reference, notes: inv.notes,
-    totalHtCents: inv.total_ht_cents, totalVatCents: inv.total_vat_cents, totalTtcCents: inv.total_ttc_cents,
-    vatBreakdown: inv.vatBreakdown, orderIds: inv.orderIds,
-    buyerName: inv.buyer?.name || null,
-    paidCents: issued && inv.kind === 'invoice' ? engine.paidCents(inv.id) : 0,
-    creditedCents: issued && inv.kind === 'invoice' ? engine.creditedCents(inv.id) : 0,
-    balanceCents: issued ? engine.balanceCents(inv) : null,
-    paymentStatus: engine.paymentStatus(inv),
-    hash: inv.hash, issuedAt: inv.issued_at, paStatus: inv.pa_status,
-    lines: inv.lines.map(l => ({
-      id: l.id, position: l.position, isSection: !!l.is_section, sageCode: l.sage_code, description: l.description,
-      quantity: l.quantity, unitPrice: l.unit_price, vatRate: l.vat_rate, lineHtCents: l.line_ht_cents, creditOfLineId: l.credit_of_line_id,
-    })),
-  };
-}
 
 // ---------- réglages ----------
 
@@ -124,39 +88,42 @@ router.get('/clients/:id/invoiceable-orders', wrap((req, res) => {
   res.json({ orders: engine.listInvoiceableOrders(Number(req.params.id)) });
 }));
 
-// ---------- liste / détail ----------
+// ---------- tableau de bord, liste, détail ----------
+
+router.get('/dashboard', wrap((req, res) => {
+  const d = queries.dashboard();
+  d.backup = (() => { const b = backup.getStatus(); return { health: b.health, message: b.message }; })();
+  res.json(d);
+}));
 
 router.get('/invoices', wrap((req, res) => {
-  const where = []; const args = [];
-  if (req.query.clientId) { where.push('client_id = ?'); args.push(Number(req.query.clientId)); }
-  if (['draft', 'issued'].includes(req.query.status)) { where.push('status = ?'); args.push(req.query.status); }
-  if (['invoice', 'credit_note'].includes(req.query.kind)) { where.push('kind = ?'); args.push(req.query.kind); }
-  if (req.query.year) { where.push("substr(COALESCE(issue_date, created_at),1,4) = ?"); args.push(String(req.query.year)); }
-  const rows = db.prepare(`SELECT id FROM native_invoices ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY COALESCE(chain_no, 1e12) DESC, id DESC LIMIT 500`).all(...args);
-  const names = new Map(db.prepare('SELECT id, societe FROM clients').all().map(c => [c.id, c.societe]));
-  const invoices = rows.map(r => {
-    const p = present(engine.loadInvoice(r.id));
-    p.buyerName = p.buyerName || names.get(p.clientId) || '—';
-    delete p.lines;
-    return p;
-  });
-  res.json({ invoices });
+  const q = req.query;
+  const tab = ['all', 'draft', 'open', 'overdue', 'paid', 'credit_notes'].includes(q.tab) ? q.tab : 'all';
+  res.json(queries.listInvoices({
+    tab, clientId: q.clientId, q: q.q ? String(q.q).slice(0, 80) : '',
+    from: engine.isIsoDate(q.from) ? q.from : undefined, to: engine.isIsoDate(q.to) ? q.to : undefined,
+    sort: q.sort, dir: q.dir, limit: q.limit, offset: q.offset,
+  }));
 }));
 
 router.get('/invoices/:id', wrap((req, res) => {
   const inv = engine.loadInvoice(Number(req.params.id));
   if (!inv) throw new engine.BillingError('Facture introuvable.', 404);
   const out = present(inv);
-  const names = db.prepare('SELECT societe FROM clients WHERE id = ?').get(inv.client_id);
-  out.buyerName = out.buyerName || names?.societe || '—';
+  const client = db.prepare('SELECT societe, email FROM clients WHERE id = ?').get(inv.client_id);
+  out.buyerName = out.buyerName || client?.societe || '—';
+  out.clientEmail = client?.email || '';
   if (inv.status === 'draft') out.preview = engine.previewDraft(inv.id);
   if (inv.status === 'issued' && inv.kind === 'invoice') {
     out.payments = db.prepare('SELECT id, paid_on AS paidOn, amount_cents AS amountCents, method, reference FROM native_payments WHERE invoice_id = ? ORDER BY paid_on, id').all(inv.id);
     out.creditNotes = db.prepare("SELECT id, number, issue_date AS issueDate, total_ttc_cents AS totalTtcCents FROM native_invoices WHERE credits_invoice_id = ? AND status='issued' ORDER BY chain_no").all(inv.id);
+    out.overdueDays = inv.due_date && inv.due_date < engine.todayParis() && out.balanceCents > 0 ? queries.daysBetween(inv.due_date, engine.todayParis()) : 0;
   }
   if (inv.credits_invoice_id) {
     out.creditsInvoiceNumber = db.prepare('SELECT number FROM native_invoices WHERE id = ?').get(inv.credits_invoice_id)?.number || null;
   }
+  out.timeline = queries.timeline(inv.id);
+  out.pennylane = db.prepare('SELECT status, attempts, last_error AS lastError, pennylane_id AS pennylaneId, sent_at AS sentAt FROM pennylane_sync WHERE invoice_id = ?').get(inv.id) || null;
   res.json({ invoice: out });
 }));
 
@@ -166,6 +133,13 @@ router.post('/invoices', wrap((req, res) => {
   const { clientId, orderIds, detailLevel, operationCategory, notes } = req.body || {};
   if (detailLevel && !['detail', 'per_bl', 'aggregated'].includes(detailLevel)) throw new engine.BillingError('Niveau de détail invalide.');
   const inv = engine.createDraftFromOrders(Number(clientId), (orderIds || []).map(Number), { detailLevel, operationCategory, notes });
+  res.status(201).json({ invoice: present(inv) });
+}));
+
+// Facture libre (sans BL) : prestation ponctuelle.
+router.post('/invoices/free', wrap((req, res) => {
+  const { clientId, lines, operationCategory, reference, notes } = req.body || {};
+  const inv = engine.createDraftFromLines(Number(clientId), lines, { operationCategory, reference, notes });
   res.status(201).json({ invoice: present(inv) });
 }));
 
@@ -184,6 +158,7 @@ router.delete('/invoices/:id', wrap((req, res) => {
 router.post('/invoices/:id/issue', lock.requireStepUp(req => `issue:${req.params.id}`), wrap((req, res) => {
   const issueDate = req.body?.issueDate || undefined;
   const inv = engine.issueInvoice(Number(req.params.id), { issueDate });
+  pennylane.kickAuto();
   res.json({ invoice: present(inv) });
 }));
 
@@ -205,17 +180,35 @@ router.post('/invoices/:id/payments', wrap((req, res) => {
 // ---------- PDF ----------
 
 router.get('/invoices/:id/pdf', wrap(async (req, res) => {
+  const { buffer, filename } = await docs.invoicePdf(Number(req.params.id));
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+  res.send(buffer);
+}));
+
+// ---------- envoi par e-mail et relances ----------
+
+router.get('/invoices/:id/mail-preview', wrap((req, res) => {
   const inv = engine.loadInvoice(Number(req.params.id));
   if (!inv) throw new engine.BillingError('Facture introuvable.', 404);
-  const preview = inv.status === 'draft' ? engine.previewDraft(inv.id) : null;
-  const extra = {};
-  if (inv.credits_invoice_id) extra.creditedInvoiceNumber = db.prepare('SELECT number FROM native_invoices WHERE id = ?').get(inv.credits_invoice_id)?.number;
-  if (inv.status === 'issued' && inv.kind === 'invoice') { extra.paidCents = engine.paidCents(inv.id); extra.balanceCents = engine.balanceCents(inv); }
-  const pdf = await buildInvoicePdf(inv, preview, extra);
-  const name = inv.number ? `${inv.number}.pdf` : `brouillon-${inv.id}.pdf`;
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename="${name}"`);
-  res.send(pdf);
+  if (inv.status !== 'issued') throw new engine.BillingError("Seul un document émis peut être envoyé.");
+  const kind = ['invoice', 'reminder-1', 'reminder-2', 'reminder-3'].includes(req.query.kind) ? req.query.kind : 'invoice';
+  const client = db.prepare('SELECT societe, email FROM clients WHERE id = ?').get(inv.client_id);
+  res.json({ ...mail.render(kind, inv, client?.societe), to: client?.email || '', smtp: require('../utils/mailer').isConfigured() });
+}));
+
+router.post('/invoices/:id/send', wrap(async (req, res) => {
+  const r = await mail.sendInvoice(Number(req.params.id), req.body || {});
+  res.json({ ok: true, to: r.to });
+}));
+
+router.post('/invoices/:id/remind', wrap(async (req, res) => {
+  const r = await mail.sendReminder(Number(req.params.id), req.body || {});
+  res.json({ ok: true, ...r });
+}));
+
+router.get('/reminders', wrap((req, res) => {
+  res.json({ invoices: mail.remindersOverview(), smtp: require('../utils/mailer').isConfigured() });
 }));
 
 // ---------- contrôle d'intégrité et exports ----------
@@ -255,5 +248,40 @@ router.get('/backup/:id/download', lock.requireStepUp(req => `backup:${req.param
   if (!f) throw new engine.BillingError('Fichier de sauvegarde introuvable (purgé ?).', 404);
   res.download(f.path, f.name);
 }));
+
+// ---------- Pennylane ----------
+
+router.get('/pennylane/status', wrap((req, res) => { res.json(pennylane.getStatus()); }));
+
+router.post('/pennylane/test', wrap(async (req, res) => { res.json(await pennylane.testConnection()); }));
+
+// Envoi immédiat d'une sélection de documents émis (20 au plus à la fois).
+router.post('/pennylane/send', wrap(async (req, res) => {
+  const ids = ((req.body || {}).invoiceIds || []).map(Number).filter(Number.isInteger);
+  if (!ids.length) throw new engine.BillingError('Sélectionnez au moins un document.');
+  if (ids.length > 20) throw new engine.BillingError('20 documents au plus par envoi (les suivants peuvent être envoyés ensuite).');
+  const results = [];
+  for (const id of ids) {
+    const r = await pennylane.sendOne(id);
+    results.push({ invoiceId: id, status: r.status, error: r.last_error || null });
+  }
+  res.json({ results });
+}));
+
+router.post('/pennylane/retry', wrap(async (req, res) => {
+  const n = pennylane.retryFailed();
+  pennylane.kickAuto(true);
+  res.json({ requeued: n });
+}));
+
+router.post('/pennylane/auto', lock.requireStepUp('pennylane-auto'), wrap((req, res) => {
+  const enabled = Boolean((req.body || {}).enabled);
+  if (enabled && !pennylane.config().configured) throw new engine.BillingError("Renseignez d'abord PENNYLANE_API_TOKEN sur le serveur.", 503);
+  pennylane.setAuto(enabled);
+  res.json(pennylane.getStatus());
+}));
+
+// Ventes : encaissements, rapprochement, facturation en lot, devis.
+router.use(require('./billingSales'));
 
 module.exports = router;
