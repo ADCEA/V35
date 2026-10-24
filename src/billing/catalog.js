@@ -844,8 +844,9 @@ function mapHeaders(headers) {
  * jamais si deux fiches ont le même SIREN) ; sinon la ligne reste en erreur et `unknownClients` propose les fiches les plus
  * proches. `clientMap` ({ nom écrit dans le fichier: id de fiche }) est le choix explicite de la personne : il l'emporte
  * sur le SIRET, jamais sur un nom identique à une fiche.
+ * `forceDate` : la date d'effet choisie (defaultDate) s'applique à toutes les lignes, la colonne date_debut est ignorée.
  */
-function importPrices(csvText, { apply = false, clientId = null, defaultDate = null, clientMap = null, reprice = true } = {}) {
+function importPrices(csvText, { apply = false, clientId = null, defaultDate = null, clientMap = null, reprice = true, forceDate = false } = {}) {
   let parsed;
   try { parsed = parseCsv(String(csvText || '')); } catch (e) { throw new BillingError(`Fichier CSV illisible : ${e.message}`); }
   if (!parsed.rows.length) throw new BillingError('Le fichier ne contient aucune ligne de données.');
@@ -916,7 +917,8 @@ function importPrices(csvText, { apply = false, clientId = null, defaultDate = n
       if (!a) throw new BillingError(`Article inconnu : « ${row[map.article] || ''} ».`);
       rec.article = a.name;
       const to = parsePrice(priceRaw, 'Prix');
-      const date = parseDate(map.date ? String(row[map.date] || '').trim() : '', fallbackDate, "Date d'effet");
+      // forceDate : la date d'effet choisie vaut pour TOUTES les lignes (la colonne date_debut du fichier est ignorée)
+      const date = forceDate ? fallbackDate : parseDate(map.date ? String(row[map.date] || '').trim() : '', fallbackDate, "Date d'effet");
       rec.to = to; rec.effective = date;
       rec.from = resolveClientPrice(c.id, a.id, date);
       if (wide && to === rec.from) { rec.status = 'same'; return; }
