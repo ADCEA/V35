@@ -217,7 +217,8 @@
             <button id="admin-more-toggle" type="button">Plus ▾</button>
             <div class="admin-subnav-more-menu" id="admin-more-menu">
               <button data-admin-view="stats">Statistiques</button>
-              <button data-admin-view="facture">Facture</button>
+              <button data-admin-view="billing">Facturation</button>
+              <button data-admin-view="facture">Facture (Odoo)</button>
               <button data-admin-view="historique">Historique des livraisons</button>
               <button data-admin-view="articles">Gestion des articles</button>
               <button data-admin-view="garage">Garage</button>
@@ -389,6 +390,10 @@
           </div>
         </div>
 
+        <div id="admin-view-billing" class="admin-subview" style="display:none;">
+          <div id="billing-root"><p class="empty-note">Chargement…</p></div>
+        </div>
+
         <div id="admin-view-facture" class="admin-subview" style="display:none;">
           <div class="card" style="margin-bottom:20px;">
             <h4 class="card-subhead">Réglages Odoo</h4>
@@ -547,5 +552,6 @@
 <footer>Blanchisserie Cézanne — application connectée à une base de données SQLite · <button id="footer-admin-link" style="background:none;border:none;padding:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer;">Administration</button></footer>
 
 <script src="/app.js"></script>
+<script src="/billing.js"></script>
 </body>
 </html>

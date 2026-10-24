@@ -6,6 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "node src/server.js",
+    "test": "node --test \"test/*.test.js\"",
     "dev": "node --watch src/server.js"
   },
   "dependencies": {

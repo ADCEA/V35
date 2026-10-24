@@ -395,6 +395,9 @@ if (driversWithoutToken.length > 0) {
 // Ligne unique pour le compteur de tickets, si absente
 db.prepare(`INSERT OR IGNORE INTO order_seq (id, value) VALUES (1, 0)`).run();
 
+// Facturation intégrée (tables native_*, triggers d'inaltérabilité, réglages).
+require('./billing/schema')(db);
+
 module.exports = db;
 // Attaché à l'export existant (pas de changement de forme, pour ne
 // casser aucun des fichiers qui font déjà `const db = require('../db')`

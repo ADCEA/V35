@@ -118,7 +118,50 @@ router.get('/invoices', requireClient, (req, res) => {
     WHERE client_id = ? AND pdf_path IS NOT NULL
     ORDER BY period_start DESC
   `).all(req.session.clientId);
-  res.json({ invoices });
+
+  // Factures et avoirs de la facturation intégrée — uniquement une fois
+  // ÉMIS (un brouillon n'existe pas pour le client).
+  const native = db.prepare(`
+    SELECT id, number, kind, total_ht_cents, period_start as periodStart, period_end as periodEnd, issue_date as issueDate
+    FROM native_invoices
+    WHERE client_id = ? AND status = 'issued'
+  `).all(req.session.clientId).map(n => ({
+    id: `n${n.id}`,
+    odooNumber: n.number,
+    kind: n.kind,
+    totalHt: (n.kind === 'credit_note' ? -1 : 1) * n.total_ht_cents / 100,
+    periodStart: n.periodStart || n.issueDate,
+    periodEnd: n.periodEnd || n.issueDate,
+    createdAt: n.issueDate,
+    pdfUrl: `/api/clients/native-invoices/${n.id}/pdf`,
+  }));
+
+  const all = [...invoices, ...native].sort((a, b) => String(b.periodStart || '').localeCompare(String(a.periodStart || '')));
+  res.json({ invoices: all });
+});
+
+// GET /api/clients/native-invoices/:id/pdf — PDF d'une facture/avoir ÉMIS de
+// la facturation intégrée, après vérification stricte de l'appartenance au
+// client connecté.
+router.get('/native-invoices/:id/pdf', requireClient, async (req, res) => {
+  const engine = require('../billing/engine');
+  const { buildInvoicePdf } = require('../billing/pdf');
+  const inv = engine.loadInvoice(Number(req.params.id));
+  if (!inv || inv.client_id !== req.session.clientId || inv.status !== 'issued') {
+    return res.status(404).json({ error: 'Facture introuvable.' });
+  }
+  const extra = {};
+  if (inv.credits_invoice_id) extra.creditedInvoiceNumber = db.prepare('SELECT number FROM native_invoices WHERE id = ?').get(inv.credits_invoice_id)?.number;
+  if (inv.kind === 'invoice') { extra.paidCents = engine.paidCents(inv.id); extra.balanceCents = engine.balanceCents(inv); }
+  try {
+    const pdf = await buildInvoicePdf(inv, null, extra);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${inv.number}.pdf"`);
+    res.send(pdf);
+  } catch (err) {
+    console.error('[billing] PDF client', err);
+    res.status(500).json({ error: 'Erreur lors de la génération du PDF.' });
+  }
 });
 
 // GET /api/clients/invoices/:id/pdf — télécharge le PDF d'UNE facture,

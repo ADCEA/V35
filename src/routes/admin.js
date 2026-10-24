@@ -485,6 +485,14 @@ router.get('/clients/:id/invoiceable-orders', (req, res) => {
     FROM orders o
     WHERE o.client_id = ? AND o.status = 'livree'
       AND o.id NOT IN (SELECT order_id FROM invoice_orders)
+      AND o.id NOT IN (
+        -- BL déjà pris par une facture de la facturation intégrée (sauf si
+        -- cette facture a été intégralement annulée par un avoir émis).
+        SELECT no.order_id FROM native_invoice_orders no
+        JOIN native_invoices ni ON ni.id = no.invoice_id
+        WHERE ni.kind = 'invoice'
+          AND NOT EXISTS (SELECT 1 FROM native_invoices cn WHERE cn.credits_invoice_id = ni.id AND cn.status = 'issued' AND cn.is_full_credit = 1)
+      )
     ORDER BY o.livraison_prevue ASC, o.created_at ASC
   `).all(clientId);
   res.json({ orders });
@@ -614,6 +622,20 @@ router.post('/clients/:id/invoices', async (req, res) => {
   for (const o of orders) {
     if (o.client_id !== clientId) return res.status(400).json({ error: `La commande ${o.ticket} n'appartient pas à cet hôtel.` });
     if (o.status !== 'livree') return res.status(400).json({ error: `La commande ${o.ticket} n'est pas encore livrée.` });
+  }
+  const engineRow = db.prepare('SELECT engine FROM billing_settings WHERE id = 1').get();
+  if (engineRow && engineRow.engine === 'native') {
+    return res.status(409).json({ error: "La facturation intégrée est active : le circuit Odoo est désactivé pour éviter une double facturation. Changez de moteur dans l'onglet Facturation → Réglages." });
+  }
+  const alreadyNative = db.prepare(`
+    SELECT DISTINCT no.order_id FROM native_invoice_orders no
+    JOIN native_invoices ni ON ni.id = no.invoice_id
+    WHERE no.order_id IN (${placeholders}) AND ni.kind = 'invoice'
+      AND NOT EXISTS (SELECT 1 FROM native_invoices cn WHERE cn.credits_invoice_id = ni.id AND cn.status = 'issued' AND cn.is_full_credit = 1)
+  `).all(...orderIds);
+  if (alreadyNative.length > 0) {
+    const ids = alreadyNative.map(r => r.order_id);
+    return res.status(400).json({ error: `Déjà inclus dans une facture de la facturation intégrée, à décocher : ${orders.filter(o => ids.includes(o.id)).map(o => o.ticket).join(', ')}.` });
   }
   const alreadyInvoiced = db.prepare(`SELECT order_id FROM invoice_orders WHERE order_id IN (${placeholders})`).all(...orderIds);
   if (alreadyInvoiced.length > 0) {

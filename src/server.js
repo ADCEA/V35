@@ -19,6 +19,7 @@ const articlesRouter = require('./routes/articles');
 const driverPortalRouter = require('./routes/driverPortal');
 const garageRouter = require('./routes/garage');
 const apiV1Router = require('./routes/apiV1');
+const billingRouter = require('./routes/billing');
 const { startInvoiceStatusScheduler } = require('./utils/invoiceStatusSync');
 
 const app = express();
@@ -84,6 +85,7 @@ app.use('/api/admin/stats', statsRouter);
 app.use('/api/admin/articles', articlesRouter);
 app.use('/api/driver-portal', driverPortalRouter);
 app.use('/api/admin/garage', garageRouter);
+app.use('/api/admin/billing', billingRouter);
 app.use('/api/v1', apiV1Router);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));

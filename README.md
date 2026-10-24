@@ -236,3 +236,39 @@ En production, quel que soit l'hébergeur, pensez à :
 - si vous êtes derrière un reverse proxy, ajouter `app.set('trust proxy', 1)`
   ainsi que `cookie: { secure: true }` dans `src/server.js` pour que les
   cookies de session fonctionnent correctement en HTTPS.
+
+## Facturation intégrée
+
+Moteur de facturation natif (onglet **Administration → Plus → Facturation**),
+qui remplace à terme le circuit Odoo. Les deux coexistent : un réglage
+(**Facturation → Réglages → Moteur actif**) choisit lequel est actif, pour
+qu'un BL ne soit jamais facturé deux fois. À la première installation, le
+moteur reste **Odoo** si `ODOO_URL` / `ODOO_API_KEY` sont définis (aucun
+changement de comportement), sinon c'est le moteur intégré.
+
+**Avant la première facture** : renseigner Facturation → Réglages (raison
+sociale, forme, capital, SIREN, RCS, n° de TVA, IBAN). L'émission est refusée
+tant qu'une mention obligatoire manque, et la fiche de chaque hôtel doit avoir
+un SIREN/SIRET valide (obligatoire sur les factures B2B depuis le 1er sept. 2026).
+
+Principes :
+- montants calculés en **centimes entiers** ; TVA calculée par taux sur la base HT ;
+- brouillon librement modifiable → **émission** = numéro continu (`FA-AAAA-000001`),
+  empreinte SHA-256 chaînée, identités vendeur/acheteur figées ;
+- une facture émise **ne peut plus être modifiée ni supprimée** (triggers SQL,
+  y compris depuis la console SQLite) : correction par **avoir**, partiel ou total ;
+- règlements et journal d'événements en **ajout seul** (annulation = écriture inverse) ;
+- PDF régénéré à l'identique depuis les données figées ; visible dans l'espace client ;
+- Facturation → Contrôle et exports : vérification d'intégrité + export **FEC**.
+
+Tests : `npm test` (base SQLite jetable, aucun effet sur vos données).
+
+Limites connues — à traiter avant d'utiliser en production :
+- **Pas de transmission à une plateforme agréée (PA)** : l'obligation d'émission
+  électronique pour les PME démarre au 1er septembre 2027 (à vérifier, le calendrier
+  a déjà bougé). Il faudra choisir une PA et brancher son API ; le champ
+  `pa_status` est déjà prévu sur chaque facture. Pas de Factur-X/UBL non plus.
+- **Certification NF525 / attestation éditeur** : non fournie. Le moteur applique
+  les principes (inaltérabilité, chaînage, traçabilité) mais n'est pas certifié.
+- **Numéros de comptes du FEC** (411, 706000, 445710, 512000) : usuels, à valider
+  avec votre expert-comptable (constantes dans `src/billing/fec.js`).

@@ -345,10 +345,10 @@ async function renderOwnInvoices() {
   box.innerHTML = invoices.map(inv => `
     <div class="own-ticket" style="display:flex;justify-content:space-between;align-items:center;">
       <div>
-        <span class="mini-num">${inv.odooNumber || 'Facture #' + inv.id}</span>
+        <span class="mini-num">${inv.odooNumber || 'Facture #' + inv.id}${inv.kind === 'credit_note' ? ' (avoir)' : ''}</span>
         <span class="mini-sub">${new Date(inv.periodStart).toLocaleDateString('fr-FR')} au ${new Date(inv.periodEnd).toLocaleDateString('fr-FR')} · ${inv.totalHt?.toFixed(2)} € HT</span>
       </div>
-      <a href="/api/clients/invoices/${inv.id}/pdf" target="_blank" style="color:var(--brand);text-decoration:underline;font-size:12.5px;white-space:nowrap;margin-left:10px;">Télécharger</a>
+      <a href="${inv.pdfUrl || '/api/clients/invoices/' + inv.id + '/pdf'}" target="_blank" style="color:var(--brand);text-decoration:underline;font-size:12.5px;white-space:nowrap;margin-left:10px;">Télécharger</a>
     </div>
   `).join('');
 }
@@ -2977,7 +2977,7 @@ async function submitManualOrder(context) {
 document.getElementById('btn-new-manual-order').addEventListener('click', () => openManualOrderModal('kanban'));
 document.getElementById('btn-new-manual-production').addEventListener('click', () => openManualOrderModal('production'));
 
-const ADMIN_VIEWS = ['production', 'kanban', 'logistics', 'stats', 'historique', 'articles', 'garage', 'clients', 'facture', 'settings'];
+const ADMIN_VIEWS = ['production', 'kanban', 'logistics', 'stats', 'historique', 'articles', 'garage', 'clients', 'facture', 'billing', 'settings'];
 
 function switchAdminView(view) {
   const allButtons = document.querySelectorAll('.admin-subnav > button, .admin-subnav-more-menu button');
@@ -2994,6 +2994,7 @@ function switchAdminView(view) {
   if (view === 'historique') renderHistoryView();
   if (view === 'articles') renderArticlesView();
   if (view === 'facture') renderFactureTab();
+  if (view === 'billing') renderBillingTab().catch(err => { document.getElementById('billing-root').innerHTML = `<p style="color:var(--rust);font-size:12.5px;">${escHtml(err.message)}</p>`; });
   if (view === 'garage') renderGarageView();
   if (view === 'clients') renderClientsView();
   if (view === 'settings') renderSettingsPanel();
