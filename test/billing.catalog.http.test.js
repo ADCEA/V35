@@ -184,6 +184,27 @@ test('accès par article : verrouillé, aperçu puis application, article retir�
   assert.equal((await call('GET', `${B}/catalog/articles`)).data.articles.find(a => a.id === serviette).hiddenFor, 0);
 });
 
+test('import de tarifs : hôtel retrouvé par SIRET ou choisi à l’aperçu, application avec ressaisie du code', async () => {
+  // fiche neuve, avec un SIREN qu'aucune autre n'a (les autres tests en partagent un : il serait ambigu)
+  const made = await call('POST', `${B}/catalog/clients`, { societe: 'Hôtel Rapproché', email: 'rapproche@exemple.fr', siret: '98765432100019' });
+  assert.equal(made.status, 201);
+  const hotel = made.data.client.id;
+  const csv = ['client;siret;code_sage;prix;date_debut', 'SAS TARIFE HOTEL;987 654 321;T-DT;1,80;2026-10-01', 'Nom très différent;;T-ST;0,60;2026-10-01'].join('\n');
+  let r = await call('POST', `${B}/catalog/prices/import`, { csv });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.data.summary, { total: 2, changed: 1, same: 0, errors: 1 });
+  assert.equal(r.data.lines[0].via, 'siret');
+  assert.equal(r.data.unknownClients.length, 1);
+  assert.equal(r.data.unknownClients[0].name, 'Nom très différent');
+  r = await call('POST', `${B}/catalog/prices/import`, { csv, clientMap: { 'Nom très différent': hotel } });
+  assert.deepEqual(r.data.summary, { total: 2, changed: 2, same: 0, errors: 0 });
+  assert.equal((await call('POST', `${B}/catalog/prices/import`, { csv, clientMap: { 'Nom très différent': hotel }, apply: true })).status, 403, 'application : code exigé');
+  r = await sensitive('prices-import', 'POST', `${B}/catalog/prices/import`, { csv, clientMap: { 'Nom très différent': hotel }, apply: true });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.summary.changed, 2);
+  assert.equal((await call('POST', `${B}/catalog/prices/import`, { csv, clientMap: { 'Nom très différent': '999999' } })).status, 400, 'fiche choisie inexistante');
+});
+
 test('export de la grille tarifaire et intégrité du journal', async () => {
   const res = await call('GET', `${B}/catalog/prices/export.csv`, undefined, true);
   assert.equal(res.status, 200);

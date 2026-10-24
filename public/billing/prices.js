@@ -140,24 +140,51 @@
 
   async function importPrices(done) {
     const clients = await Bill.clients();
+    const clientMap = {};   // nom écrit dans le fichier → fiche choisie, conservé d'un aperçu à l'autre
     Bill.csvImport({
       title: 'Importer des tarifs', path: '/catalog/prices/import', scope: 'prices-import',
-      intro: 'Deux présentations au choix. <b>En grille</b> : partez de « Exporter la grille », modifiez les prix dans Excel puis réimportez — seules les cases changées sont prises en compte, une case vide est ignorée, et un prix égal au catalogue retire le tarif négocié. <b>En liste</b> : colonnes <b>client</b> (nom de l\'hôtel), <b>code_sage</b> (ou code), <b>prix</b> HT et, facultativement, <b>date_debut</b> (AAAA-MM-JJ) ; sans colonne « client », choisissez l\'hôtel ci-dessous.',
+      intro: 'Deux présentations au choix. <b>En grille</b> : partez de « Exporter la grille », modifiez les prix dans Excel puis réimportez — seules les cases changées sont prises en compte, une case vide est ignorée, et un prix égal au catalogue retire le tarif négocié. <b>En liste</b> : colonnes <b>client</b> (nom de l\'hôtel), <b>code_sage</b> (ou code), <b>prix</b> HT et, facultativement, <b>date_debut</b> (AAAA-MM-JJ) et <b>siret</b> (pour retrouver l\'hôtel quand son nom est écrit autrement) ; sans colonne « client », choisissez l\'hôtel ci-dessous. Les hôtels non reconnus se rapprochent d\'une fiche dans l\'aperçu.',
       template: { name: 'modele-tarifs.csv', text: 'client,code_sage,prix,date_debut\nHôtel Exemple,B-DP2,1.20,2027-01-01\n' },
       extraFields: `<div class="bl-row2"><div class="bl-field"><label for="ip-c">Hôtel (si le fichier n'a pas de colonne client)</label><select id="ip-c">${Bill.clientOptions(clients)}</select></div>
         <div class="bl-field"><label for="ip-d">Date d'effet par défaut</label><input id="ip-d" type="date" value="${Bill.today()}"><div class="bl-hint">Utilisée pour les lignes sans date_debut.</div></div></div>`,
-      extraBody: (m) => ({ clientId: m.$('#ip-c').value || undefined, defaultDate: m.$('#ip-d').value || undefined }),
+      extraBody: (m) => ({ clientId: m.$('#ip-c').value || undefined, defaultDate: m.$('#ip-d').value || undefined, clientMap: { ...clientMap } }),
+      onOpen: (m) => {
+        // Choix d'une fiche pour un hôtel du fichier : l'aperçu devient caduc, « Revérifier » le recalcule.
+        m.el.addEventListener('change', (ev) => {
+          const sel = ev.target.closest && ev.target.closest('select.ip-map');
+          if (!sel) return;
+          if (sel.value) clientMap[sel.dataset.name] = sel.value; else delete clientMap[sel.dataset.name];
+          m.invalidate();
+          const b = m.$('#ip-recheck'); if (b) { b.classList.add('primary'); b.textContent = 'Revérifier avec ces choix'; }
+        });
+        m.el.addEventListener('click', (ev) => { if (ev.target.closest && ev.target.closest('#ip-recheck')) m.recheck(); });
+      },
       renderPreview: (r) => {
         const s = r.summary;
         const shown = r.lines.length > 30 ? r.lines.filter(l => l.status !== 'same') : r.lines;
         const hidden = r.lines.length - shown.length;
+        const unknown = r.unknownClients || [];
+        const options = (u) => {
+          const sug = u.suggestions.map(x => x.id);
+          const rest = clients.filter(c => !sug.includes(c.id));
+          const chosen = clientMap[u.name] || '';
+          const opt = (c, tag) => `<option value="${c.id}" ${String(c.id) === String(chosen) ? 'selected' : ''}>${e(c.societe)}${tag}</option>`;
+          return `<option value="">— ignorer cet hôtel —</option>${u.suggestions.map(x => opt({ id: x.id, societe: x.societe }, ' (proposé)')).join('')}${rest.map(c => opt(c, '')).join('')}`;
+        };
+        const unknownHtml = unknown.length ? `<div class="bl-alert warn"><b>${plural(unknown.length, 'hôtel du fichier n\'est pas reconnu', 'hôtels du fichier ne sont pas reconnus')}.</b>
+            Choisissez la fiche qui correspond (les plus proches sont proposées en premier), puis « Revérifier ». Un hôtel laissé sur « ignorer » n'est pas importé.
+            <div class="bl-tablewrap" style="max-height:220px;overflow:auto;margin-top:8px"><table class="bl-table"><thead><tr><th>Dans le fichier</th><th class="r">Lignes</th><th>Fiche hôtel</th></tr></thead><tbody>
+            ${unknown.map(u => `<tr><td>${e(u.name || '—')}${u.siret ? `<div class="bl-muted">SIRET ${e(u.siret)}</div>` : ''}</td><td class="r bl-num">${u.lines}</td><td><select class="ip-map" data-name="${e(u.name)}" aria-label="Fiche pour ${e(u.name)}">${options(u)}</select></td></tr>`).join('')}</tbody></table></div>
+            <div style="margin-top:8px"><button type="button" class="bl-btn" id="ip-recheck">Revérifier avec ces choix</button></div></div>` : '';
+        const matched = r.matchedBy || {};
+        const matchedHtml = (matched.siret || matched.choix) ? `<p class="bl-hint">${matched.siret ? `${plural(matched.siret, 'ligne rapprochée', 'lignes rapprochées')} par le SIRET. ` : ''}${matched.choix ? `${plural(matched.choix, 'ligne rapprochée', 'lignes rapprochées')} d'après votre choix.` : ''}</p>` : '';
         return {
           canApply: s.changed > 0,
           confirm: `${plural(s.changed, 'tarif sera enregistré', 'tarifs seront enregistrés')}. Les commandes déjà passées ne changent pas.`,
-          html: `<div class="bl-alert ${s.errors ? 'warn' : 'ok'}"><b>${plural(s.total, 'ligne lue', 'lignes lues')}</b> : ${s.changed} à enregistrer, ${s.same} déjà en vigueur${s.errors ? `, <b>${s.errors} en erreur</b> (non importées)` : ''}.</div>
+          html: `${unknownHtml}<div class="bl-alert ${s.errors ? 'warn' : 'ok'}"><b>${plural(s.total, 'ligne lue', 'lignes lues')}</b> : ${s.changed} à enregistrer, ${s.same} déjà en vigueur${s.errors ? `, <b>${s.errors} en erreur</b> (non importées)` : ''}.</div>
             <div class="bl-tablewrap" style="max-height:260px;overflow:auto"><table class="bl-table"><thead><tr><th>Ligne</th><th>Hôtel</th><th>Article</th><th class="r">Avant</th><th class="r">Après</th><th>Dès le</th><th></th></tr></thead><tbody>
-            ${shown.map(l => `<tr><td class="bl-num">${l.line}</td><td>${e(l.client || '—')}</td><td>${e(l.article || '—')}</td><td class="r bl-num">${Bill.num3(l.from)}</td><td class="r bl-num"><b>${Bill.num3(l.to)}</b></td><td class="bl-num">${l.effective ? dFr(l.effective) : '—'}</td>
-              <td>${l.status === 'error' ? `<span class="bl-tag bad">${e(l.error)}</span>` : `<span class="bl-tag ${STATUS[l.status][0]}">${STATUS[l.status][1]}</span>`}</td></tr>`).join('')}</tbody></table></div>${hidden ? `<p class="bl-hint">${plural(hidden, 'ligne inchangée non affichée', 'lignes inchangées non affichées')}.</p>` : ''}`,
+            ${shown.map(l => `<tr><td class="bl-num">${l.line}</td><td>${e(l.client || '—')}${l.via === 'siret' ? ' <span class="bl-tag draft" title="Hôtel retrouvé grâce au SIRET du fichier">SIRET</span>' : l.via === 'choix' ? ' <span class="bl-tag draft" title="Hôtel choisi par vous">choisi</span>' : ''}</td><td>${e(l.article || '—')}</td><td class="r bl-num">${Bill.num3(l.from)}</td><td class="r bl-num"><b>${Bill.num3(l.to)}</b></td><td class="bl-num">${l.effective ? dFr(l.effective) : '—'}</td>
+              <td>${l.status === 'error' ? `<span class="bl-tag bad">${e(l.error)}</span>` : `<span class="bl-tag ${STATUS[l.status][0]}">${STATUS[l.status][1]}</span>`}</td></tr>`).join('')}</tbody></table></div>${hidden ? `<p class="bl-hint">${plural(hidden, 'ligne inchangée non affichée', 'lignes inchangées non affichées')}.</p>` : ''}${matchedHtml}`,
         };
       },
       onDone: (r) => { Bill.toast(`${plural(r.summary.changed, 'tarif enregistré', 'tarifs enregistrés')}`); done(); },

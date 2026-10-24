@@ -310,6 +310,16 @@ copie des tarifs d'un autre hôtel, retour au catalogue, import CSV (articles, h
 **aperçu exact** (le même calcul que l'application, simplement annulé) puis demande le code pour appliquer.
 Les CSV acceptent `;` ou `,`, la virgule décimale, l'UTF-8 (avec ou sans BOM) et le format Excel Windows.
 
+**Import de tarifs en liste** (colonnes `client`, `code_sage`, `prix`, facultativement `date_debut` et `siret`) — l'hôtel et l'article
+sont retrouvés avec tolérance, sans jamais deviner en silence :
+- **hôtel** : nom identique à une fiche (accents et casse ignorés) ; sinon **SIRET/SIREN** de la colonne `siret` s'il n'appartient qu'à
+  une seule fiche ; sinon la ligne reste en erreur et l'aperçu propose les **fiches les plus proches** (même méthode que le regroupement
+  des BL à nom libre). Pour chaque hôtel non reconnu, on choisit la fiche dans une liste (ou « ignorer »), puis « Revérifier » ; le
+  choix prime sur le SIRET, jamais sur un nom identique. Rien n'est choisi d'office ;
+- **article** : code Sage identique, sinon comparaison sans les espaces (« B- TAPIS » = « B-TAPIS ») sauf si deux articles ne se
+  distinguent que par leurs espaces ;
+- le journal chaîné note comment chaque hôtel a été retrouvé (`hotelMatch` : `siret` ou `choix`).
+
 ### Bons de livraison
 
 Page **Facturation → Bons de livraison** (juste sous « Factures »). Un bon de livraison (BL) est une commande au
@@ -529,7 +539,7 @@ relances. Sans SMTP, l'envoi répond « non configuré » (503) ; une relance fa
 
 ### Tests
 
-`npm test` (143 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
+`npm test` (145 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

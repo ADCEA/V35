@@ -179,20 +179,23 @@
         // Toute modification du formulaire rend l'aperçu caduc : on repart de la vérification.
         const reset = (ev) => { if (ev.target.closest('#pv-out') || stage === 'check') return; stage = 'check'; setLabel(m, previewLabel); m.$('#pv-out').innerHTML = ''; };
         m.el.addEventListener('input', reset); m.el.addEventListener('change', reset);
+        // Pour un choix fait DANS l'aperçu : rend l'aperçu caduc (invalidate) ou le relance tout de suite (recheck).
+        m.invalidate = () => { stage = 'check'; setLabel(m, previewLabel); };
+        m.recheck = () => { m.invalidate(); m.el.querySelector('.bl-foot .primary').click(); };
         if (onOpen) onOpen(m);
       },
     });
   };
 
   // Import d'un fichier CSV avec aperçu, puis application après ressaisie du code.
-  Bill.csvImport = function ({ title, intro, template, path, scope, extraFields = '', extraBody = () => ({}), renderPreview, onDone }) {
+  Bill.csvImport = function ({ title, intro, template, path, scope, extraFields = '', extraBody = () => ({}), renderPreview, onDone, onOpen }) {
     let csv = ''; let extra = {};
     return Bill.previewThenConfirm({
       title, applyLabel: 'Importer', previewLabel: 'Vérifier le fichier', scope,
       body: `<p class="bl-note">${intro}</p>${extraFields}
         <div class="bl-field"><label for="ci-f">Fichier CSV</label><input id="ci-f" type="file" accept=".csv,text/csv,text/plain">
         ${template ? `<div class="bl-hint"><button type="button" class="bl-btn link small" id="ci-tpl">Télécharger un modèle de fichier</button> — s'ouvre dans Excel ; séparateur « , » ou « ; » accepté.</div>` : ''}</div>`,
-      onOpen: (m) => { if (template) m.$('#ci-tpl').onclick = () => Bill.saveText(template.name, template.text); },
+      onOpen: (m) => { if (template) m.$('#ci-tpl').onclick = () => Bill.saveText(template.name, template.text); if (onOpen) onOpen(m); },
       preview: async (m) => {
         csv = await Bill.readText(m.$('#ci-f').files[0]);
         extra = extraBody(m);   // relevé à ce moment : la fenêtre est refermée au moment d'appliquer

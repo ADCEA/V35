@@ -816,6 +816,7 @@ const HEADER_ALIASES = {
   article: ['code_sage', 'sage', 'code', 'article', 'reference', 'ref'],
   prix: ['prix', 'tarif', 'price', 'prix_ht', 'tarif_ht'],
   date: ['date_debut', 'date', 'debut', 'effet', 'date_effet', 'a_partir_du'],
+  siret: ['siret', 'siren'],
 };
 function mapHeaders(headers) {
   const keyed = headers.map(h => ({ raw: h, k: norm(h).replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') }));
@@ -833,14 +834,28 @@ function mapHeaders(headers) {
  *  - en grille (celle de l'export) : code_sage puis une colonne par hôtel. Une case vide est ignorée, une case égale
  *    au prix déjà applicable ne change rien, une case égale au prix catalogue retire le tarif négocié.
  * Les lignes sont rapprochées par nom d'hôtel / code Sage sans tenir compte des accents ni de la casse.
+ * En liste, un hôtel dont le nom n'est pas reconnu est cherché par SIRET (colonne « siret » facultative, SIREN accepté,
+ * jamais si deux fiches ont le même SIREN) ; sinon la ligne reste en erreur et `unknownClients` propose les fiches les plus
+ * proches. `clientMap` ({ nom écrit dans le fichier: id de fiche }) est le choix explicite de la personne : il l'emporte
+ * sur le SIRET, jamais sur un nom identique à une fiche.
  */
-function importPrices(csvText, { apply = false, clientId = null, defaultDate = null } = {}) {
+function importPrices(csvText, { apply = false, clientId = null, defaultDate = null, clientMap = null } = {}) {
   let parsed;
   try { parsed = parseCsv(String(csvText || '')); } catch (e) { throw new BillingError(`Fichier CSV illisible : ${e.message}`); }
   if (!parsed.rows.length) throw new BillingError('Le fichier ne contient aucune ligne de données.');
   const map = mapHeaders(parsed.headers);
-  const clients = db.prepare('SELECT id, societe FROM clients').all();
+  const clients = db.prepare('SELECT id, societe, tel, adresse, siret FROM clients').all();
   const clientByName = new Map(clients.map(c => [norm(c.societe), c]));
+  const clientById = new Map(clients.map(c => [c.id, c]));
+  const bySiren = new Map();
+  for (const c of clients) { const sn = engine.sirenFrom(c.siret); if (sn) bySiren.set(sn, bySiren.has(sn) ? null : c); }   // null : SIREN partagé, pas de rapprochement
+  const chosen = new Map();
+  for (const [k, v] of Object.entries(clientMap && typeof clientMap === 'object' ? clientMap : {})) {
+    if (v === '' || v == null) continue;
+    const c = clientById.get(Number(v));
+    if (!c) throw new BillingError(`Hôtel choisi introuvable pour « ${k} ».`);
+    chosen.set(norm(k), c);
+  }
   const wideCols = !map.prix && map.article ? parsed.headers.filter(h => h !== map.article && clientByName.has(norm(h))) : [];
   const wide = wideCols.length > 0;
   if (!map.article || (!map.prix && !wide)) {
@@ -853,15 +868,38 @@ function importPrices(csvText, { apply = false, clientId = null, defaultDate = n
   const articles = db.prepare('SELECT id, name, code, sage_code, price FROM articles').all();
   const bySage = new Map(articles.map(a => [norm(a.sage_code), a]));
   const byCode = new Map(articles.map(a => [norm(a.code), a]));
+  // Sage écrit parfois « B- TAPIS » ou « B - ST » : à défaut de code identique, on compare sans les espaces
+  // (sauf si deux articles ne se distinguent que par leurs espaces : alors aucun rapprochement).
+  const squash = (v) => norm(v).replace(/\s+/g, '');
+  const bySquashed = new Map();
+  for (const a of articles) for (const k of [squash(a.sage_code), squash(a.code)]) if (k) bySquashed.set(k, bySquashed.has(k) && bySquashed.get(k) !== a ? null : a);
+  const findArticle = (raw) => bySage.get(norm(raw)) || byCode.get(norm(raw)) || bySquashed.get(squash(raw)) || null;
 
   const lines = [];
-  const handle = (line, c, row, priceRaw) => {
-    const rec = { line, client: c ? c.societe : '', article: '', from: null, to: null, effective: null, status: 'error', error: null };
+  const unknown = new Map();
+  // Nom exact → choix de la personne → SIRET/SIREN. Renvoie { c, via } ; c vaut null si rien ne correspond.
+  const findClient = (row) => {
+    const name = String(row[map.client] ?? '').trim();
+    const exact = clientByName.get(norm(name));
+    if (exact) return { c: exact, via: 'nom' };
+    const pick = chosen.get(norm(name));
+    if (pick) return { c: pick, via: 'choix' };
+    const sn = map.siret ? engine.sirenFrom(row[map.siret]) : null;
+    const bySn = sn ? bySiren.get(sn) : null;
+    if (bySn) return { c: bySn, via: 'siret' };
+    return { c: null, via: null };
+  };
+  const handle = (line, c, row, priceRaw, via = 'nom') => {
+    const rec = { line, client: c ? c.societe : '', article: '', from: null, to: null, effective: null, status: 'error', error: null, via };
     lines.push(rec);
     try {
-      if (!c) throw new BillingError(`Hôtel inconnu : « ${row[map.client] || ''} ».`);
-      const ref = norm(row[map.article]);
-      const a = bySage.get(ref) || byCode.get(ref);
+      if (!c) {
+        const name = String(row[map.client] ?? '').trim();
+        const u = unknown.get(norm(name)) || { name, lines: 0, siret: map.siret ? String(row[map.siret] ?? '').trim() : '' };
+        u.lines++; unknown.set(norm(name), u);
+        throw new BillingError(`Hôtel inconnu : « ${row[map.client] || ''} ».`);
+      }
+      const a = findArticle(row[map.article]);
       if (!a) throw new BillingError(`Article inconnu : « ${row[map.article] || ''} ».`);
       rec.article = a.name;
       const to = parsePrice(priceRaw, 'Prix');
@@ -877,7 +915,7 @@ function importPrices(csvText, { apply = false, clientId = null, defaultDate = n
       }
       const w = writePrice(c.id, a, to, date);
       rec.status = w.changed ? 'ok' : 'same';
-      if (w.changed) log('client_price_set', { clientId: c.id, client: c.societe, articleId: a.id, article: a.name, sageCode: a.sage_code, from: w.from, to, effective: date, via: 'import' });
+      if (w.changed) log('client_price_set', { clientId: c.id, client: c.societe, articleId: a.id, article: a.name, sageCode: a.sage_code, from: w.from, to, effective: date, via: 'import', ...(via !== 'nom' ? { hotelMatch: via } : {}) });
     } catch (e) {
       if (!(e instanceof BillingError)) throw e;
       rec.error = e.message;
@@ -889,13 +927,30 @@ function importPrices(csvText, { apply = false, clientId = null, defaultDate = n
       if (wide) {
         for (const col of wideCols) if (String(row[col] ?? '').trim() !== '') handle(line, clientByName.get(norm(col)), row, row[col]);
       } else {
-        handle(line, fixedClient || clientByName.get(norm(row[map.client])), row, row[map.prix]);
+        if (fixedClient) handle(line, fixedClient, row, row[map.prix]);
+        else { const f = findClient(row); handle(line, f.c, row, row[map.prix], f.via); }
       }
     });
     return lines;
   });
   const n = (s) => lines.filter(l => l.status === s).length;
-  return { applied: !!apply, format: wide ? 'grille' : 'liste', summary: { total: lines.length, changed: n('ok'), same: n('same'), errors: n('error') }, lines };
+  return {
+    applied: !!apply, format: wide ? 'grille' : 'liste', summary: { total: lines.length, changed: n('ok'), same: n('same'), errors: n('error') }, lines,
+    unknownClients: suggestClients([...unknown.values()], clients),
+    matchedBy: { siret: lines.filter(l => l.via === 'siret').length, choix: lines.filter(l => l.via === 'choix').length },
+  };
+}
+
+// Fiches les plus proches d'un nom écrit dans un fichier (même méthode que le regroupement des BL à nom libre).
+function suggestClients(list, clients) {
+  if (!list.length) return [];
+  const unlinked = require('./unlinked');   // chargé ici : unlinked.js a besoin de catalog.js
+  return list.map(u => ({
+    name: u.name, lines: u.lines, siret: u.siret || '',
+    suggestions: clients.map(c => ({ id: c.id, societe: c.societe, ...unlinked.scoreClient({ name: u.name, key: unlinked.keyOf(u.name), tel: '', adresse: '' }, { societe: c.societe, tel: '', adresse: '' }) }))
+      .filter(x => x.score >= 0.55).sort((a, b) => b.score - a.score || a.societe.localeCompare(b.societe, 'fr')).slice(0, 3)
+      .map(x => ({ id: x.id, societe: x.societe, score: x.score })),
+  })).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 }
 
 // ---- grille articles × hôtels ----

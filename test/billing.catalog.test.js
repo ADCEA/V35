@@ -176,6 +176,64 @@ test('import des tarifs : aperçu exact, lignes en erreur isolées', () => {
   assert.equal(price(alpha, serviette, '2026-10-24'), 0.5);
 });
 
+test('import des tarifs : hôtel retrouvé par SIRET, par choix explicite, suggestions pour les autres', () => {
+  const alphaPrices = db.prepare('SELECT * FROM client_prices WHERE client_id = ?').all(alpha);   // pour tout remettre à la fin
+  const gamma = addClient('Domaine Gamma', 'gamma@exemple.fr');
+  const delta1 = addClient('Delta Un', 'delta1@exemple.fr');
+  const delta2 = addClient('Delta Deux', 'delta2@exemple.fr');
+  db.prepare('UPDATE clients SET siret = ? WHERE id = ?').run('12345678900011', gamma);
+  db.prepare('UPDATE clients SET siret = ? WHERE id = ?').run('55555555500011', delta1);   // même SIREN sur deux fiches : jamais de rapprochement automatique
+  db.prepare('UPDATE clients SET siret = ? WHERE id = ?').run('55555555500029', delta2);
+  const csv = [
+    'client;siret;code_sage;prix;date_debut',
+    'SAS GAMMA HOTEL;123 456 789;B-DP2;1,11;2026-10-01',       // nom différent, SIREN identique → fiche Gamma
+    'Hotel Alpha SAS;;B-DP2;1,22;2026-10-01',                  // nom proche d'Alpha, sans SIRET : proposé, pas appliqué
+    'Complètement Inconnu;;B-DP2;1,33;2026-10-01',
+    'Groupe Delta;555555555;B-DP2;1,44;2026-10-01',            // SIREN partagé par deux fiches
+  ].join('\n');
+  const before = db.prepare('SELECT COUNT(*) c FROM client_prices').get().c;
+  const pv = catalog.importPrices(csv, { apply: false });
+  assert.deepEqual(pv.summary, { total: 4, changed: 1, same: 0, errors: 3 });
+  assert.equal(pv.lines[0].client, 'Domaine Gamma');
+  assert.equal(pv.lines[0].via, 'siret');
+  assert.deepEqual(pv.matchedBy, { siret: 1, choix: 0 });
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM client_prices').get().c, before, "l'aperçu n'écrit rien");
+  const names = pv.unknownClients.map(u => u.name);
+  assert.deepEqual(names, ['Complètement Inconnu', 'Groupe Delta', 'Hotel Alpha SAS']);
+  const alphaSug = pv.unknownClients.find(u => u.name === 'Hotel Alpha SAS');
+  assert.equal(alphaSug.suggestions[0].id, alpha, "« Hotel Alpha SAS » est proposé pour la fiche « Hôtel Alpha »");
+  assert.equal(pv.unknownClients.find(u => u.name === 'Complètement Inconnu').suggestions.length, 0);
+  assert.equal(pv.unknownClients.find(u => u.name === 'Groupe Delta').siret, '555555555');
+
+  // choix explicite : prime sur le SIRET, jamais sur un nom identique à une fiche
+  const chosen = catalog.importPrices(csv, { apply: false, clientMap: { 'Hotel Alpha SAS': alpha, 'Groupe Delta': delta2, 'Complètement Inconnu': '' } });
+  assert.deepEqual(chosen.summary, { total: 4, changed: 3, same: 0, errors: 1 });
+  assert.deepEqual(chosen.matchedBy, { siret: 1, choix: 2 });
+  assert.equal(chosen.lines[1].client, 'Hôtel Alpha');
+  assert.equal(chosen.lines[3].client, 'Delta Deux');
+  assert.equal(chosen.unknownClients.length, 1);
+  rejects(() => catalog.importPrices(csv, { apply: false, clientMap: { 'Hotel Alpha SAS': 999999 } }), /introuvable/);
+
+  const done = catalog.importPrices(csv, { apply: true, clientMap: { 'Hotel Alpha SAS': alpha, 'Groupe Delta': delta2 } });
+  assert.equal(done.summary.changed, 3);
+  assert.equal(price(gamma, drap, '2026-10-24'), 1.11);
+  assert.equal(price(alpha, drap, '2026-10-24'), 1.22);
+  assert.equal(price(delta2, drap, '2026-10-24'), 1.44);
+  assert.equal(price(delta1, drap, '2026-10-24'), 1.35, 'la fiche non choisie garde le prix catalogue');
+  const ev = events('client_price_set').filter(x => x.d.via === 'import' && x.d.hotelMatch);
+  assert.deepEqual(ev.map(x => x.d.hotelMatch).sort(), ['choix', 'choix', 'siret'], 'le journal garde la façon dont chaque hôtel a été retrouvé');
+
+  // code Sage écrit avec des espaces (« B - DP2 », comme dans certaines factures Sage)
+  const sp = catalog.importPrices('client;code_sage;prix;date_debut\nBeta Resort;B - DP2;1,01;2026-10-01', { apply: false });
+  assert.deepEqual(sp.summary, { total: 1, changed: 1, same: 0, errors: 0 });
+  assert.equal(sp.lines[0].article, 'Drap plat 2 pers.');
+
+  // remise en état pour les tests suivants (grille, exports…)
+  db.prepare('DELETE FROM client_prices WHERE client_id = ?').run(alpha);
+  for (const r of alphaPrices) db.prepare('INSERT INTO client_prices (id, client_id, article_id, price, date_debut, date_fin) VALUES (?,?,?,?,?,?)').run(r.id, r.client_id, r.article_id, r.price, r.date_debut, r.date_fin);
+  for (const id of [gamma, delta1, delta2]) { db.prepare('DELETE FROM client_prices WHERE client_id = ?').run(id); db.prepare('DELETE FROM clients WHERE id = ?').run(id); }
+});
+
 test('grille articles × hôtels et export CSV', () => {
   const m = catalog.priceMatrix();
   assert.equal(m.articles.length, 2);
