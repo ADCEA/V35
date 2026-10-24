@@ -61,19 +61,22 @@ function getServicesForClient(clientId, date) {
 // cette date s'il existe, sinon prix catalogue. C'est cette fonction qui
 // doit être utilisée PARTOUT où un prix est appliqué à une commande —
 // jamais le prix catalogue en direct pour un client identifié.
+let stmtOverride = null; let stmtCatalog = null;
 function resolveClientPrice(clientId, articleId, date) {
   const d = date || todayParis();
   if (clientId) {
-    const override = db.prepare(`
+    stmtOverride = stmtOverride || db.prepare(`
       SELECT price FROM client_prices
       WHERE client_id = ? AND article_id = ?
         AND date_debut <= ?
         AND (date_fin IS NULL OR date_fin >= ?)
       ORDER BY date_debut DESC LIMIT 1
-    `).get(clientId, articleId, d, d);
+    `);
+    const override = stmtOverride.get(clientId, articleId, d, d);
     if (override) return override.price;
   }
-  const catalog = db.prepare('SELECT price FROM articles WHERE id = ?').get(articleId);
+  stmtCatalog = stmtCatalog || db.prepare('SELECT price FROM articles WHERE id = ?');
+  const catalog = stmtCatalog.get(articleId);
   return catalog ? catalog.price : null;
 }
 
