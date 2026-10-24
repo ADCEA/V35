@@ -6,6 +6,7 @@ const db = require('../db');
 const engine = require('../billing/engine');
 const queries = require('../billing/queries');
 const bank = require('../billing/bank');
+const bulkPayments = require('../billing/bulkPayments');
 const batch = require('../billing/batch');
 const quotes = require('../billing/quotes');
 const mail = require('../billing/mail');
@@ -16,6 +17,9 @@ const { wrap, present, presentQuote } = require('../billing/http');
 
 const router = express.Router();
 const iso = (s) => (engine.isIsoDate(s) ? s : undefined);
+// Les aperçus sont libres ; l'enregistrement exige la ressaisie du code de la Facturation.
+const stepUpWhen = (pred, scopeOf) => (req, res, next) => (pred(req) ? lock.requireStepUp(scopeOf)(req, res, next) : next());
+const applying = (req) => !!(req.body && req.body.apply);
 
 // ---------- encaissements ----------
 
@@ -39,6 +43,15 @@ router.post('/reconcile/parse', wrap((req, res) => {
 router.post('/reconcile/apply', wrap((req, res) => {
   const results = bank.apply((req.body || {}).items);
   res.json({ results, applied: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length });
+}));
+
+// Règlements en lot : plusieurs factures soldées d'un coup (prélèvements déjà passés, lot de chèques…).
+// Sans « apply » : aperçu seulement. Avec « apply » : tout est enregistré, ou rien.
+router.post('/payments/bulk', stepUpWhen(applying, 'payments-bulk'), wrap((req, res) => {
+  if (applying(req)) {
+    const r = bulkPayments.apply(req.body);
+    res.status(201).json(r);
+  } else res.json(bulkPayments.preview(req.body));
 }));
 
 // ---------- facturation en lot ----------

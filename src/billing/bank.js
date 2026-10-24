@@ -12,6 +12,21 @@ const queries = require('./queries');
 
 const { BillingError } = engine;
 
+/** Modes de règlement acceptés (mêmes valeurs que engine.recordPayment). */
+const METHODS = ['virement', 'cheque', 'prelevement', 'carte', 'especes', 'autre'];
+
+/**
+ * Devine le mode de règlement d'après le libellé de la banque : « PRLV SEPA », « REMISE PRELEVEMENT »…
+ * → prélèvement ; « REMISE CHEQUE » → chèque ; sinon virement. Ce n'est qu'une proposition affichée
+ * dans la liste déroulante : l'utilisateur la change d'un clic avant de valider.
+ */
+function detectMethod(label) {
+  const t = plain(label);
+  if (/\b(prlv|prelev\w*|sdd|sepa direct\w*)\b/.test(t)) return 'prelevement';
+  if (/\b(cheques?|chq|chque)\b/.test(t)) return 'cheque';
+  return 'virement';
+}
+
 // ---------- lecture du CSV ----------
 
 function tokenize(text, delimiter) {
@@ -177,7 +192,7 @@ function matchLines(lines, today = engine.todayParis()) {
   const fps = fingerprints(lines);
 
   return lines.map((l, index) => {
-    const out = { index, date: l.date, label: l.label, amountCents: l.amountCents, fingerprint: fps[index], alreadyImported: false, credit: l.amountCents > 0, candidates: [], multi: null, confidence: 'none' };
+    const out = { index, date: l.date, label: l.label, amountCents: l.amountCents, fingerprint: fps[index], method: detectMethod(l.label), alreadyImported: false, credit: l.amountCents > 0, candidates: [], multi: null, confidence: 'none' };
     if (l.amountCents <= 0) return out;
     out.alreadyImported = !!db.prepare("SELECT 1 FROM native_payments WHERE bank_fingerprint LIKE ? LIMIT 1").get(`${fps[index]}:%`);
     if (out.alreadyImported) return out;
@@ -226,7 +241,9 @@ function matchLines(lines, today = engine.todayParis()) {
 
 /**
  * Enregistre les règlements validés.
- * items : [{ fingerprint, date, label, allocations: [{ invoiceId, amountCents }] }]
+ * items : [{ fingerprint, date, label, method?, allocations: [{ invoiceId, amountCents }] }]
+ * method : virement (défaut), cheque, prelevement, carte, especes, autre. Une valeur inconnue est refusée
+ * (jamais remplacée en silence) pour que le journal et les exports comptables restent exacts.
  */
 function apply(items) {
   if (!Array.isArray(items) || !items.length) throw new BillingError('Rien à enregistrer.');
@@ -236,8 +253,10 @@ function apply(items) {
     for (const a of it.allocations || []) {
       try {
         if (!/^[0-9a-f]{32}$/.test(String(it.fingerprint))) throw new BillingError('Empreinte de ligne invalide.');
+        const method = it.method === undefined || it.method === null || it.method === '' ? 'virement' : String(it.method);
+        if (!METHODS.includes(method)) throw new BillingError(`Mode de règlement inconnu : « ${method.slice(0, 30)} ».`);
         engine.recordPayment(Number(a.invoiceId), {
-          paidOn: it.date, amount: Number(a.amountCents) / 100, method: 'virement',
+          paidOn: it.date, amount: Number(a.amountCents) / 100, method,
           reference: String(it.label || '').slice(0, 120), bankFingerprint: `${it.fingerprint}:${Number(a.invoiceId)}`,
         });
         results.push({ fingerprint: it.fingerprint, invoiceId: Number(a.invoiceId), ok: true });
@@ -250,4 +269,4 @@ function apply(items) {
   return results;
 }
 
-module.exports = { parseBankCsv, matchLines, apply, parseAmount, parseDate, fingerprints };
+module.exports = { parseBankCsv, matchLines, apply, parseAmount, parseDate, fingerprints, detectMethod, METHODS };

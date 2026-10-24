@@ -17,8 +17,8 @@
   }
   Bill.register('payments', {
     async render(main) {
-      main.innerHTML = `<div class="bl-head"><div><h2>Règlements</h2><p>Tout ce qui a été encaissé. Pour enregistrer plusieurs virements d'un coup, utilisez le rapprochement bancaire.</p></div>
-        <div class="bl-actions"><button class="bl-btn primary" id="pa-rec">Rapprocher un relevé</button></div></div>
+      main.innerHTML = `<div class="bl-head"><div><h2>Règlements</h2><p>Tout ce qui a été encaissé. Pour enregistrer d'un coup des prélèvements ou des virements déjà reçus, utilisez « en lot » (vous cochez les factures) ou le rapprochement bancaire (vous importez le relevé).</p></div>
+        <div class="bl-actions"><button class="bl-btn" id="pa-bulk">Enregistrer des règlements en lot</button><button class="bl-btn primary" id="pa-rec">Rapprocher un relevé</button></div></div>
         <div class="bl-panel"><div class="bl-filters"><div class="bl-field grow"><label for="pa-q">Rechercher</label><input id="pa-q" type="search" value="${e(P.q)}" placeholder="Hôtel, numéro de facture, référence"></div>
         <div class="bl-field"><label for="pa-f">Du</label><input id="pa-f" type="date" value="${e(P.from)}"></div><div class="bl-field"><label for="pa-t">Au</label><input id="pa-t" type="date" value="${e(P.to)}"></div>
         <div class="bl-muted" id="pa-sum" style="padding-bottom:8px"></div></div><div id="pa-table"><div class="bl-spin">Chargement…</div></div></div>`;
@@ -26,12 +26,67 @@
       main.querySelector('#pa-f').onchange = (ev) => { P.from = ev.target.value; loadPayments(main); };
       main.querySelector('#pa-t').onchange = (ev) => { P.to = ev.target.value; loadPayments(main); };
       main.querySelector('#pa-rec').onclick = () => Bill.go('reconcile');
+      main.querySelector('#pa-bulk').onclick = () => bulkPayments(() => loadPayments(main));
       await loadPayments(main);
     },
   });
 
+  // ---------- Règlements en lot ----------
+  // On coche des factures ouvertes, on indique la date, le mode et une référence : chaque facture est réglée en totalité.
+  // Aperçu d'abord ; tout est enregistré ou rien (une facture refusée annule le lot).
+  async function bulkPayments(onDone) {
+    let open;
+    try { open = (await Bill.get('/invoices?tab=open&limit=500&sort=client&dir=asc')).invoices; } catch (err) { return Bill.fail(err); }
+    if (!open.length) return Bill.toast('Aucune facture à régler.', true);
+    const rowOf = (d) => `<tr data-q="${e(`${d.clientName} ${d.number}`.toLowerCase())}"><td><input type="checkbox" class="bk-c" value="${d.id}" data-cents="${d.balanceCents}" aria-label="Régler ${e(d.number)}"></td>
+      <td class="client">${e(d.clientName)}</td><td class="bl-num">${e(d.number)}</td><td class="bl-num">${dFr(d.dueDate)}</td><td class="r bl-num"><b>${eur(d.balanceCents)}</b></td></tr>`;
+    let ids = []; let form = {};
+    Bill.previewThenConfirm({
+      title: 'Enregistrer des règlements en lot', applyLabel: 'Enregistrer', previewLabel: 'Voir le résultat', scope: 'payments-bulk',
+      body: `<p class="bl-note">Cochez les factures déjà réglées : chacune est soldée pour son reste dû. Utile pour des prélèvements passés avant le module SEPA, ou un lot de chèques. Le résultat s'affiche avant que rien ne soit écrit ; si une facture pose problème, aucune n'est enregistrée.</p>
+        <div class="bl-row3"><div class="bl-field"><label for="bk-d">Date d'encaissement</label><input id="bk-d" type="date" value="${Bill.today()}" max="${Bill.today()}"></div>
+        <div class="bl-field"><label for="bk-m">Mode de règlement</label><select id="bk-m">${Object.entries(Bill.METHODS).map(([k, v]) => `<option value="${k}" ${k === 'prelevement' ? 'selected' : ''}>${e(v)}</option>`).join('')}</select></div>
+        <div class="bl-field"><label for="bk-r">Référence (facultatif)</label><input id="bk-r" maxlength="120" placeholder="Ex. Prélèvement du 05/10"></div></div>
+        <div class="bl-field"><label for="bk-q">Filtrer la liste</label><input id="bk-q" type="search" placeholder="Hôtel ou numéro de facture"></div>
+        <div class="bl-tablewrap" style="max-height:300px;overflow:auto"><table class="bl-table"><thead><tr><th style="width:34px"><input type="checkbox" id="bk-all" aria-label="Tout cocher (liste affichée)"></th><th>Hôtel</th><th>Facture</th><th>Échéance</th><th class="r">Reste dû</th></tr></thead><tbody id="bk-rows">${open.map(rowOf).join('')}</tbody></table></div>
+        <div class="bl-muted" id="bk-sum" style="margin-top:6px"></div>`,
+      onOpen: (m) => {
+        m.el.classList.add('xl');
+        const rows = () => [...m.el.querySelectorAll('#bk-rows tr')];
+        const sum = () => {
+          const on = [...m.el.querySelectorAll('.bk-c:checked')];
+          m.$('#bk-sum').textContent = on.length ? `${plural(on.length, 'facture cochée', 'factures cochées')} · ${eur(on.reduce((t, x) => t + Number(x.dataset.cents), 0))}` : 'Aucune facture cochée';
+        };
+        m.$('#bk-q').addEventListener('input', (ev) => { const q = ev.target.value.trim().toLowerCase(); rows().forEach(tr => { tr.hidden = !!q && !tr.dataset.q.includes(q); }); });
+        m.$('#bk-all').addEventListener('change', (ev) => { rows().filter(tr => !tr.hidden).forEach(tr => { tr.querySelector('.bk-c').checked = ev.target.checked; }); sum(); });
+        m.el.addEventListener('change', (ev) => { if (ev.target.classList.contains('bk-c')) sum(); });
+        sum();
+      },
+      preview: async (m) => {
+        ids = [...m.el.querySelectorAll('.bk-c:checked')].map(x => Number(x.value));
+        form = { paidOn: m.$('#bk-d').value, method: m.$('#bk-m').value, reference: m.$('#bk-r').value.trim() };
+        if (!ids.length) throw new Error('Cochez au moins une facture.');
+        const r = await Bill.post('/payments/bulk', { invoiceIds: ids, ...form });
+        const label = Bill.METHODS[r.method] || r.method;
+        return {
+          canApply: r.refused === 0 && r.count > 0,
+          confirm: `${plural(r.count, 'facture sera soldée', 'factures seront soldées')} (${label.toLowerCase()}, le ${dFr(r.paidOn)}) pour un total de ${eur(r.totalCents)}. Une erreur se corrige ensuite en annulant le règlement sur la facture.`,
+          html: `${r.refused ? `<div class="bl-alert bad"><b>${plural(r.refused, 'facture ne peut pas être réglée', 'factures ne peuvent pas être réglées')}</b> : décochez-les pour continuer.</div>` : `<div class="bl-alert ok"><b>${plural(r.count, 'facture sera soldée', 'factures seront soldées')}</b> — ${label.toLowerCase()} du ${dFr(r.paidOn)} · ${eur(r.totalCents)}. Rien n'est encore enregistré.</div>`}
+            <div class="bl-tablewrap" style="max-height:240px;overflow:auto"><table class="bl-table"><thead><tr><th>Hôtel</th><th>Facture</th><th class="r">Montant réglé</th></tr></thead><tbody>
+            ${r.lines.map(l => `<tr><td class="client">${e(l.clientName || '')}</td><td class="bl-num">${e(l.number || '#' + l.invoiceId)}</td><td class="r bl-num">${l.ok ? `<b>${eur(l.amountCents)}</b>` : `<span style="color:var(--bl-late)">${e(l.error)}</span>`}</td></tr>`).join('')}</tbody></table></div>`,
+        };
+      },
+      apply: async () => {
+        const r = await Bill.post('/payments/bulk', { invoiceIds: ids, ...form, apply: true });
+        Bill.toast(`${plural(r.count, 'règlement enregistré', 'règlements enregistrés')} · ${eur(r.totalCents)}`);
+        Bill.refreshBadges();
+        if (onDone) await onDone();
+      },
+    });
+  }
+
   // ================= Rapprochement bancaire =================
-  const R = { csv: null, parsed: null, choice: new Map(), openInv: null };
+  const R = { csv: null, parsed: null, choice: new Map(), method: new Map(), openInv: null };
 
   async function readFile(file) {
     const buf = await file.arrayBuffer();
@@ -66,7 +121,7 @@
     const p = R.parsed;
     const credits = p.lines.filter(l => l.credit);
     const todo = credits.filter(l => !l.alreadyImported);
-    if (!credits.length) { host.innerHTML = '<div class="bl-empty"><b>Aucun encaissement dans ce relevé</b>Seules les lignes créditrices (virements reçus) sont rapprochées.</div>'; return; }
+    if (!credits.length) { host.innerHTML = '<div class="bl-empty"><b>Aucun encaissement dans ce relevé</b>Seules les lignes créditrices (sommes reçues) sont rapprochées.</div>'; return; }
     host.innerHTML = `<div class="bl-panel-b" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
         <span class="bl-muted">${plural(credits.length, 'encaissement', 'encaissements')}${p.skippedDebits ? ` · ${plural(p.skippedDebits, 'débit ignoré', 'débits ignorés')}` : ''}${credits.length - todo.length ? ` · ${credits.length - todo.length} déjà enregistré(s)` : ''}</span>
         <button class="bl-btn small" id="rc-map">Ajuster les colonnes</button></div>
@@ -76,6 +131,7 @@
         return `<tr style="${done ? 'opacity:.55' : ''}"><td><input type="checkbox" class="rc-c" data-i="${idx}" ${cur.type !== 'none' ? 'checked' : ''} ${done ? 'disabled' : ''} aria-label="Valider cette ligne"></td>
           <td class="bl-num">${dFr(l.date)}</td><td style="max-width:320px">${e(l.label)}</td><td class="r bl-num"><b>${eur(l.amountCents)}</b></td>
           <td>${done ? '<span class="bl-ind">Déjà enregistré lors d\'un import précédent</span>' : `<select class="bl-input rc-s" data-i="${idx}" aria-label="Facture pour ${e(l.label)}">${optionsFor(l, idx)}</select>
+            <div class="rc-mode"><label for="rc-m-${idx}">Reçu par</label><select class="bl-input rc-m" id="rc-m-${idx}" data-i="${idx}">${Object.entries(Bill.METHODS).map(([k, v]) => `<option value="${k}" ${(R.method.get(idx) || l.method) === k ? 'selected' : ''}>${e(v)}</option>`).join('')}</select>${l.method !== 'virement' && (R.method.get(idx) || l.method) === l.method ? ' <span class="bl-ind">d\'après le libellé</span>' : ''}</div>
             <div class="bl-hint"><span class="bl-conf ${l.confidence}">${{ high: 'Sûr', medium: 'Probable', low: 'À vérifier', none: 'Aucune piste' }[l.confidence]}</span> ${e(why(l))}${cur.type === 'one' && cur.balanceCents < l.amountCents ? ` <span style="color:var(--bl-wait)">· ${eur(l.amountCents - cur.balanceCents)} non affectés</span>` : ''}</div>`}</td></tr>`;
       }).join('')}</tbody></table></div>
       <div class="bl-panel-b" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;border-top:1px solid var(--line)"><span class="bl-muted" id="rc-sum"></span><button class="bl-btn primary" id="rc-apply">Enregistrer les règlements cochés</button></div>`;
@@ -100,14 +156,16 @@
       paintLines(host, main);
       const cb = host.querySelector(`.rc-c[data-i="${i}"]`); if (cb && R.choice.get(i).type !== 'none') { cb.checked = true; sum(); }
     });
+    host.querySelectorAll('.rc-m').forEach(sel => sel.onchange = () => { R.method.set(Number(sel.dataset.i), sel.value); });
     host.querySelector('#rc-map').onclick = () => mappingModal(main);
     host.querySelector('#rc-apply').onclick = async (ev) => {
       const items = [...host.querySelectorAll('.rc-c:checked')].map(cb => {
         const i = Number(cb.dataset.i); const l = lineBy.get(i); const c = R.choice.get(i);
         const allocations = c.type === 'multi' ? c.allocations.map(a => ({ invoiceId: a.invoiceId, amountCents: a.amountCents })) : [{ invoiceId: c.invoiceId, amountCents: Math.min(l.amountCents, c.balanceCents) }];
-        return { fingerprint: l.fingerprint, date: l.date, label: l.label, allocations };
+        return { fingerprint: l.fingerprint, date: l.date, label: l.label, method: R.method.get(i) || l.method || 'virement', allocations };
       });
-      if (!(await Bill.confirm('Enregistrer ces règlements ?', `${plural(items.length, 'ligne', 'lignes')} du relevé ${items.length > 1 ? 'seront enregistrées' : 'sera enregistrée'} comme règlements. Une erreur se corrige ensuite en annulant le règlement sur la facture.`, 'Enregistrer'))) return;
+      const modes = [...new Set(items.map(x => Bill.METHODS[x.method] || x.method))];
+      if (!(await Bill.confirm('Enregistrer ces règlements ?', `${plural(items.length, 'ligne', 'lignes')} du relevé ${items.length > 1 ? 'seront enregistrées' : 'sera enregistrée'} comme règlements (${modes.join(', ').toLowerCase()}). Une erreur se corrige ensuite en annulant le règlement sur la facture.`, 'Enregistrer'))) return;
       ev.target.disabled = true;
       try {
         const r = await Bill.post('/reconcile/apply', { items });
@@ -136,7 +194,7 @@
     const host = main.querySelector('#rc-result');
     host.innerHTML = '<div class="bl-spin">Analyse du relevé…</div>';
     let p; try { p = await Bill.post('/reconcile/parse', { csv, mapping: mapping || {} }); } catch (err) { host.innerHTML = ''; return Bill.fail(err, main.querySelector('#rc-err')); }
-    R.csv = csv; R.mapping = mapping || {}; R.parsed = p; R.choice = new Map();
+    R.csv = csv; R.mapping = mapping || {}; R.parsed = p; R.choice = new Map(); R.method = new Map();
     main.querySelector('#rc-err').textContent = '';
     if (!p.complete) { host.innerHTML = '<div class="bl-alert warn" style="margin:16px">Les colonnes du relevé n\'ont pas été reconnues automatiquement. Indiquez-les ci-dessous.</div>'; return mappingModal(main); }
     p.lines.forEach(l => R.choice.set(l.index, defaultChoice(l)));
@@ -167,7 +225,7 @@
   Bill.register('reconcile', {
     async render(main) {
       R.parsed = null;
-      main.innerHTML = `<div class="bl-head"><div><h2>Rapprochement bancaire</h2><p>Importez le relevé de votre banque (fichier CSV). Le logiciel propose la facture de chaque virement reçu ; rien n'est enregistré sans votre validation.</p></div></div>
+      main.innerHTML = `<div class="bl-head"><div><h2>Rapprochement bancaire</h2><p>Importez le relevé de votre banque (fichier CSV). Le logiciel propose la facture et le mode de chaque encaissement (virement, prélèvement, chèque) ; rien n'est enregistré sans votre validation.</p></div></div>
         <div class="bl-panel"><div class="bl-panel-b">
           <div class="bl-field"><label for="rc-file">Relevé de compte (CSV)</label><input id="rc-file" type="file" accept=".csv,.txt,text/csv,text/plain">
           <div class="bl-hint">Exportez-le depuis l'espace en ligne de votre banque. Vos données restent sur votre serveur. Un virement déjà enregistré n'est jamais compté deux fois.</div></div>
