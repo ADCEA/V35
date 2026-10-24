@@ -179,6 +179,7 @@ document.getElementById('btn-submit').addEventListener('click', async () => {
     });
 
     showConfirmation(order);
+    document.getElementById('reorder-note').style.display = 'none';
     cart = {};
     ['f-societe', 'f-contact', 'f-tel', 'f-livraison', 'f-adresse', 'f-notes'].forEach(id => document.getElementById(id).value = '');
     renderServiceList();
@@ -212,16 +213,16 @@ function showConfirmation(order) {
 document.getElementById('btn-new-order').addEventListener('click', () => switchView('commander'));
 
 // ---------- comptes clients ----------
-document.querySelectorAll('.auth-toggle button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.auth-toggle button').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    document.querySelectorAll('.auth-form').forEach(f => f.classList.remove('active'));
-    document.getElementById('form-' + btn.dataset.auth).classList.add('active');
-    clearAuthErrors();
-  });
-});
+const AUTH_MODES = ['connexion', 'inscription', 'oubli', 'reset'];
+let portalOptions = { resetByEmail: false, contact: { phone: null, email: null } };
+let resetToken = null; // jeton du lien « code oublié » (lu dans l'adresse, jamais gardé dans la barre d'adresse)
+
 function showAuthError(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.classList.add('show');
+}
+function showAuthInfo(id, msg) {
   const el = document.getElementById(id);
   el.textContent = msg;
   el.classList.add('show');
@@ -229,6 +230,77 @@ function showAuthError(id, msg) {
 function clearAuthErrors() {
   document.querySelectorAll('.auth-error').forEach(e => { e.classList.remove('show'); e.textContent = ''; });
 }
+function setAuthMode(mode) {
+  AUTH_MODES.forEach(m => document.getElementById('form-' + m).classList.toggle('active', m === mode));
+  document.getElementById('auth-toggle').style.display = (mode === 'connexion' || mode === 'inscription') ? '' : 'none';
+  document.querySelectorAll('.auth-toggle button').forEach(b => b.classList.toggle('active', b.dataset.auth === mode));
+  clearAuthErrors();
+  document.querySelectorAll('.auth-info').forEach(e => { e.classList.remove('show'); e.textContent = ''; });
+}
+document.querySelectorAll('.auth-toggle button').forEach(btn => {
+  btn.addEventListener('click', () => setAuthMode(btn.dataset.auth));
+});
+// Entrée valide le formulaire en cours.
+[['login-email', 'btn-login'], ['login-code', 'btn-login'], ['oubli-email', 'btn-oubli-send'], ['reset-code2', 'btn-reset-save'],
+ ['code-new2', 'btn-save-code'], ['prof-current-code', 'btn-save-profile']].forEach(([input, button]) => {
+  document.getElementById(input).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById(button).click(); } });
+});
+
+// Ce que la page de connexion peut proposer (réinitialisation par e-mail ou non) et les coordonnées de la blanchisserie.
+function contactLinks(c) {
+  const parts = [];
+  if (c.phone) parts.push(`<a href="tel:${escapeHtml(String(c.phone).replace(/[^\d+]/g, ''))}">${escapeHtml(c.phone)}</a>`);
+  if (c.email) parts.push(`<a href="mailto:${escapeHtml(c.email)}">${escapeHtml(c.email)}</a>`);
+  return parts.join(' · ');
+}
+async function loadPortalOptions() {
+  try { portalOptions = await api('GET', '/api/clients/auth-options'); } catch (e) { /* on garde les valeurs par défaut */ }
+  const links = contactLinks(portalOptions.contact || {});
+  document.getElementById('footer-contact').innerHTML = `Blanchisserie Cézanne${links ? ' · ' + links : ''}`;
+}
+
+document.getElementById('btn-forgot').addEventListener('click', () => {
+  const typed = document.getElementById('login-email').value.trim();
+  setAuthMode('oubli');
+  if (typed) document.getElementById('oubli-email').value = typed;
+  const byMail = portalOptions.resetByEmail;
+  document.getElementById('oubli-email-box').style.display = byMail ? '' : 'none';
+  const box = document.getElementById('oubli-contact-box');
+  box.style.display = byMail ? 'none' : '';
+  if (!byMail) {
+    const links = contactLinks(portalOptions.contact || {});
+    box.innerHTML = `<p class="auth-lead">Pour retrouver l'accès à votre espace, contactez Blanchisserie Cézanne${links ? ' : ' + links : ''}. Nous vous attribuerons un nouveau code.</p>`;
+  }
+});
+document.getElementById('btn-oubli-back').addEventListener('click', () => setAuthMode('connexion'));
+document.getElementById('btn-oubli-send').addEventListener('click', async () => {
+  clearAuthErrors();
+  const btn = document.getElementById('btn-oubli-send');
+  btn.disabled = true;
+  try {
+    const r = await api('POST', '/api/clients/forgot-code', { email: document.getElementById('oubli-email').value.trim() });
+    document.getElementById('oubli-email-box').style.display = 'none';
+    showAuthInfo('info-oubli', r.message);
+  } catch (err) {
+    showAuthError('err-oubli', err.message);
+  } finally { btn.disabled = false; }
+});
+document.getElementById('btn-reset-back').addEventListener('click', () => { resetToken = null; setAuthMode('connexion'); });
+document.getElementById('btn-reset-save').addEventListener('click', async () => {
+  clearAuthErrors();
+  const code = document.getElementById('reset-code').value.trim();
+  const code2 = document.getElementById('reset-code2').value.trim();
+  if (code !== code2) { showAuthError('err-reset', 'Les deux codes ne correspondent pas.'); return; }
+  try {
+    await api('POST', '/api/clients/reset-code', { token: resetToken, code });
+    resetToken = null;
+    document.getElementById('reset-code').value = ''; document.getElementById('reset-code2').value = '';
+    setAuthMode('connexion');
+    showAuthInfo('info-connexion', 'Votre nouveau code est enregistré. Vous pouvez vous connecter.');
+  } catch (err) {
+    showAuthError('err-reset', err.message);
+  }
+});
 
 document.getElementById('btn-register').addEventListener('click', async () => {
   clearAuthErrors();
@@ -270,11 +342,18 @@ document.getElementById('btn-login').addEventListener('click', async () => {
 document.getElementById('btn-logout').addEventListener('click', async () => {
   await api('POST', '/api/clients/logout');
   currentClient = null;
+  document.getElementById('reorder-note').style.display = 'none';
+  setAuthMode('connexion');
   renderEspace();
 });
 
 document.getElementById('btn-espace-new-order').addEventListener('click', () => {
+  document.getElementById('reorder-note').style.display = 'none';
   switchView('commander');
+});
+document.getElementById('btn-open-account').addEventListener('click', () => {
+  document.getElementById('acct-profile').open = true;
+  document.getElementById('account-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
 // Pré-remplit le formulaire de commande avec les coordonnées du compte
@@ -336,21 +415,226 @@ async function renderNpsCard() {
   });
 }
 
+// ---------- formats ----------
+const portalEurFmt = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
+const portalEur = (cents) => portalEurFmt.format(cents / 100);
+const portalDay = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '');
+const portalPct = (p) => String(p).replace('.', ',');
+const plural = (n, one, many) => `${n} ${n > 1 ? many : one}`;
+
+// ---------- factures ----------
+const INVOICE_PILLS = {
+  unpaid: ['À régler', 'due'], partial: ['Réglée en partie', 'partial'], paid: ['Réglée', 'paid'],
+  overdue: ['En retard', 'late'], credit_note: ['Avoir', 'credit'],
+};
+let invoiceShowAll = false;
+
+function legacyInvoiceHtml(inv) {
+  const period = inv.periodStart && inv.periodEnd
+    ? `${new Date(inv.periodStart).toLocaleDateString('fr-FR')} au ${new Date(inv.periodEnd).toLocaleDateString('fr-FR')}` : '';
+  const ht = inv.totalHt != null ? `${portalEur(Math.round(inv.totalHt * 100))} HT` : '';
+  return `
+    <div class="inv-row">
+      <div class="inv-main">
+        <span class="inv-num">${escapeHtml(inv.odooNumber || 'Facture #' + inv.id)}</span>
+        <span class="inv-meta">${[period, ht].filter(Boolean).join(' · ')}</span>
+      </div>
+      <a class="inv-pdf" href="/api/clients/invoices/${inv.id}/pdf" target="_blank" rel="noopener">Télécharger</a>
+    </div>`;
+}
+
+function invoiceHtml(inv) {
+  if (inv.legacy) return legacyInvoiceHtml(inv);
+  const [label, tone] = INVOICE_PILLS[inv.status] || ['', 'paid'];
+  const isCn = inv.kind === 'credit_note';
+  const open = inv.balanceCents > 0;
+  const meta = [`Émise le ${portalDay(inv.issueDate)}`];
+  if (open && inv.dueDate) meta.push(inv.overdueDays > 0 ? `échéance dépassée de ${plural(inv.overdueDays, 'jour', 'jours')}` : `à régler avant le ${portalDay(inv.dueDate)}`);
+  let side = `<strong class="inv-amount">${portalEur(inv.totalTtcCents)}</strong><span class="inv-sub">TTC</span>`;
+  if (!isCn && inv.status === 'partial') side += `<span class="inv-rest">Reste ${portalEur(inv.balanceCents)}</span>`;
+  const esc = inv.escompte
+    ? `<div class="inv-escompte">Payez <strong>${portalEur(inv.escompte.netCents)}</strong> au lieu de ${portalEur(inv.balanceCents)} en réglant avant le <strong>${portalDay(inv.escompte.deadline)}</strong> : escompte de ${portalPct(inv.escompte.ratePct)} % (${portalEur(inv.escompte.discountCents)} en moins).</div>` : '';
+  const granted = inv.grantedDiscountCents > 0 ? `<div class="inv-granted">Escompte accordé : ${portalEur(inv.grantedDiscountCents)}</div>` : '';
+  return `
+    <div class="inv-row ${tone}">
+      <div class="inv-line">
+        <div class="inv-main">
+          <span class="inv-num">${isCn ? 'Avoir' : 'Facture'} ${escapeHtml(inv.number)}</span>
+          <span class="inv-meta">${meta.join(' · ')}</span>
+        </div>
+        <div class="inv-side">
+          <span class="inv-pill ${tone}">${label}</span>
+          <div class="inv-figures">${side}</div>
+        </div>
+      </div>
+      ${esc}${granted}
+      <a class="inv-pdf" href="${escapeHtml(inv.pdfUrl)}" target="_blank" rel="noopener">Télécharger le PDF</a>
+    </div>`;
+}
+
+function renderInvoiceSummary(invoices, summary) {
+  const box = document.getElementById('invoice-summary');
+  if (summary && summary.openCount > 0) {
+    box.innerHTML = `
+      <div class="inv-summary ${summary.overdueCents > 0 ? 'late' : ''}">
+        <div><span class="inv-sum-label">Reste à régler</span><strong>${portalEur(summary.dueCents)}</strong></div>
+        <div class="inv-sum-detail">${plural(summary.openCount, 'facture ouverte', 'factures ouvertes')}${summary.overdueCents > 0 ? ` · dont <strong>${portalEur(summary.overdueCents)}</strong> en retard` : ''}</div>
+      </div>`;
+  } else if (invoices.some(i => !i.legacy && i.kind !== 'credit_note')) {
+    box.innerHTML = '<div class="inv-summary ok">Toutes vos factures sont réglées. Merci !</div>';
+  } else {
+    box.innerHTML = '';
+  }
+}
+
+function renderPaymentBox(payment, invoices) {
+  const box = document.getElementById('invoice-payment');
+  if (!payment) { box.innerHTML = ''; return; }
+  const row = (label, value, copy) => `<dt>${label}</dt><dd><span class="mono">${escapeHtml(value)}</span>${copy ? `<button type="button" class="copy-btn" data-copy="${escapeHtml(value)}">Copier</button>` : ''}</dd>`;
+  const nums = invoices.filter(i => !i.legacy && i.balanceCents > 0).map(i => i.number);
+  box.innerHTML = `
+    <details class="pay-box">
+      <summary>Coordonnées bancaires pour le virement</summary>
+      <dl>
+        ${row('Bénéficiaire', payment.holder, false)}
+        ${row('IBAN', payment.iban, true)}
+        ${payment.bic ? row('BIC', payment.bic, true) : ''}
+        ${row('Référence', nums.length === 1 ? nums[0] : 'le numéro de la facture réglée', false)}
+      </dl>
+    </details>`;
+  box.querySelectorAll('.copy-btn').forEach(btn => btn.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(btn.dataset.copy); btn.textContent = 'Copié ✓'; }
+    catch (e) { btn.textContent = 'Sélectionnez et copiez'; }
+    setTimeout(() => { btn.textContent = 'Copier'; }, 2000);
+  }));
+}
+
 async function renderOwnInvoices() {
   const section = document.getElementById('own-invoices-section');
   const box = document.getElementById('own-invoices');
-  const { invoices } = await api('GET', '/api/clients/invoices');
+  const { invoices, summary, payment } = await api('GET', '/api/clients/invoices');
   if (invoices.length === 0) { section.style.display = 'none'; return; }
   section.style.display = 'block';
-  box.innerHTML = invoices.map(inv => `
-    <div class="own-ticket" style="display:flex;justify-content:space-between;align-items:center;">
+  renderInvoiceSummary(invoices, summary);
+  renderPaymentBox(payment, invoices);
+
+  // À régler : d'abord ce qui est en retard, puis par échéance.
+  const open = invoices.filter(i => !i.legacy && i.balanceCents > 0)
+    .sort((a, b) => (b.overdueDays > 0) - (a.overdueDays > 0) || String(a.dueDate).localeCompare(String(b.dueDate)));
+  const others = invoices.filter(i => i.legacy || i.balanceCents <= 0);
+  const LIMIT = 4;
+  const shown = invoiceShowAll ? others : others.slice(0, LIMIT);
+  const head = (t) => (open.length && others.length ? `<h5 class="inv-group">${t}</h5>` : '');
+  box.innerHTML = `
+    ${open.length ? head('À régler') + open.map(invoiceHtml).join('') : ''}
+    ${others.length ? head('Déjà réglées et anciennes') + shown.map(invoiceHtml).join('') : ''}
+    ${others.length > LIMIT ? `<button type="button" class="link-btn" id="btn-invoices-more">${invoiceShowAll ? 'Réduire la liste' : `Afficher les ${others.length - LIMIT} autres factures`}</button>` : ''}`;
+  const more = document.getElementById('btn-invoices-more');
+  if (more) more.addEventListener('click', () => { invoiceShowAll = !invoiceShowAll; renderOwnInvoices().catch(console.error); });
+}
+
+// ---------- commandes ----------
+function trackHtml(status) {
+  const idx = STATUSES.findIndex(s => s.id === status);
+  return `<ol class="track" aria-label="Avancement : ${statusLabel(status)}">${STATUSES.map((s, i) => `<li class="${i < idx ? 'done' : i === idx ? 'current' : ''}"><span></span>${s.label}</li>`).join('')}</ol>`;
+}
+
+function ownTicketHtml(o, { badge = true } = {}) {
+  const adjusted = o.items.some(i => (i.deliveredQty ?? i.qty) !== i.qty);
+  return `
+    <div class="own-ticket ${o.status}" data-id="${o.id}" tabindex="0" role="button" aria-label="Voir le détail de la commande ${escapeHtml(o.ticket)}">
       <div>
-        <span class="mini-num">${inv.odooNumber || 'Facture #' + inv.id}${inv.kind === 'credit_note' ? ' (avoir)' : ''}</span>
-        <span class="mini-sub">${new Date(inv.periodStart).toLocaleDateString('fr-FR')} au ${new Date(inv.periodEnd).toLocaleDateString('fr-FR')} · ${inv.totalHt?.toFixed(2)} € HT</span>
+        <span class="mini-num">${escapeHtml(o.ticket)}</span>
+        <span class="mini-sub">${o.items.length} réf. · ${new Date(o.createdAt).toLocaleDateString('fr-FR')}</span>
       </div>
-      <a href="${inv.pdfUrl || '/api/clients/invoices/' + inv.id + '/pdf'}" target="_blank" style="color:var(--brand);text-decoration:underline;font-size:12.5px;white-space:nowrap;margin-left:10px;">Télécharger</a>
-    </div>
-  `).join('');
+      <div style="display:flex;align-items:center;gap:8px;">
+        ${adjusted ? '<span class="adjusted-flag" title="Quantités livrées différentes de la commande">Ajustée</span>' : ''}
+        ${badge ? `<span class="own-badge ${o.status}">${statusLabel(o.status)}</span>` : ''}
+      </div>
+    </div>`;
+}
+
+function bindOrderTickets(container) {
+  container.querySelectorAll('.own-ticket').forEach(el => {
+    el.addEventListener('click', () => openOrderModal(el.dataset.id, 'espace'));
+    el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openOrderModal(el.dataset.id, 'espace'); } });
+  });
+}
+
+let orderHistoryShowAll = false;
+async function renderOwnOrders() {
+  const { orders } = await api('GET', '/api/clients/orders');
+  ownOrdersCache = orders;
+  const active = orders.filter(o => o.status !== 'livree');
+  const done = orders.filter(o => o.status === 'livree');
+
+  document.getElementById('home-action-note').textContent = active.length ? `${plural(active.length, 'commande en cours', 'commandes en cours')}` : '';
+
+  // En cours : le suivi d'un coup d'œil.
+  const inprogress = document.getElementById('own-inprogress');
+  document.getElementById('inprogress-section').style.display = active.length ? 'block' : 'none';
+  inprogress.innerHTML = active.map(o => `
+    <div class="live-order">
+      ${ownTicketHtml(o)}
+      ${trackHtml(o.status)}
+      ${o.livraisonPrevue ? `<div class="live-eta">Livraison prévue le ${portalDay(o.livraisonPrevue)}</div>` : ''}
+    </div>`).join('');
+  bindOrderTickets(inprogress);
+
+  // Historique : les commandes livrées, avec « Recommander ».
+  const box = document.getElementById('own-orders');
+  if (done.length === 0) {
+    box.innerHTML = `<p class="empty-note">${orders.length === 0 ? 'Aucune commande pour le moment.' : 'Aucune commande livrée pour le moment.'}</p>`;
+    return;
+  }
+  const LIMIT = 5;
+  const shown = orderHistoryShowAll ? done : done.slice(0, LIMIT);
+  box.innerHTML = shown.map(o => `
+    <div class="own-row">
+      ${ownTicketHtml(o, { badge: false })}
+      <button type="button" class="reorder-btn" data-reorder="${o.id}" aria-label="Recommander la commande ${escapeHtml(o.ticket)}">Recommander</button>
+    </div>`).join('') + (done.length > LIMIT
+      ? `<button type="button" class="link-btn" id="btn-orders-more">${orderHistoryShowAll ? 'Réduire la liste' : `Afficher les ${done.length - LIMIT} commandes précédentes`}</button>` : '');
+  bindOrderTickets(box);
+  box.querySelectorAll('[data-reorder]').forEach(b => b.addEventListener('click', () => reorderFrom(b.dataset.reorder)));
+  const more = document.getElementById('btn-orders-more');
+  if (more) more.addEventListener('click', () => { orderHistoryShowAll = !orderHistoryShowAll; renderOwnOrders().catch(console.error); });
+}
+
+// « Recommander » : reprend les quantités d'une commande passée dans le formulaire, sans rien envoyer.
+async function reorderFrom(orderId) {
+  const order = ownOrdersCache.find(o => String(o.id) === String(orderId));
+  if (!order) return;
+  try { await loadServices(); } catch (e) { /* on garde le catalogue déjà chargé */ }
+  const next = {};
+  const missing = [];
+  order.items.forEach(i => {
+    if (SERVICES.some(s => s.id === i.id)) next[i.id] = i.qty; else missing.push(i.name);
+  });
+  document.getElementById('order-modal').classList.remove('open');
+  cart = next;
+  renderSummary();
+  switchView('commander');
+  const note = document.getElementById('reorder-note');
+  const n = Object.keys(next).length;
+  note.innerHTML = n
+    ? `Quantités reprises de la commande <strong>${escapeHtml(order.ticket)}</strong>. Vérifiez-les avant de valider.${missing.length ? ` Plus disponible${missing.length > 1 ? 's' : ''} : ${escapeHtml(missing.join(', '))}.` : ''}`
+    : `Aucun article de la commande <strong>${escapeHtml(order.ticket)}</strong> n'est disponible actuellement. Composez votre commande ci-dessous.`;
+  note.style.display = 'block';
+}
+
+function fillAccountForms() {
+  document.getElementById('prof-contact').value = currentClient.contact || '';
+  document.getElementById('prof-tel').value = currentClient.tel || '';
+  document.getElementById('prof-adresse').value = currentClient.adresse || '';
+  document.getElementById('prof-email').value = currentClient.email || '';
+  document.getElementById('prof-current-code').value = '';
+  document.getElementById('prof-code-field').style.display = 'none';
+  const links = contactLinks((portalOptions && portalOptions.contact) || {});
+  document.getElementById('prof-name-hint').innerHTML = `Le nom de votre établissement (${escapeHtml(currentClient.societe)}) figure sur vos factures : pour le modifier, contactez-nous${links ? ' : ' + links : ''}.`;
+  document.getElementById('billing-siret').value = currentClient.siret || '';
+  document.getElementById('billing-tva').value = currentClient.tvaNumber || '';
+  document.getElementById('billing-adresse').value = currentClient.adresseFacturation || '';
 }
 
 async function renderEspace() {
@@ -366,42 +650,13 @@ async function renderEspace() {
   dash.style.display = 'block';
   document.getElementById('dash-societe').textContent = currentClient.societe;
   document.getElementById('dash-email').textContent = currentClient.email;
+  fillAccountForms();
 
-  renderNpsCard();
-
-  document.getElementById('billing-siret').value = currentClient.siret || '';
-  document.getElementById('billing-tva').value = currentClient.tvaNumber || '';
-  document.getElementById('billing-adresse').value = currentClient.adresseFacturation || '';
-
-  renderOwnInvoices();
-
-  const { orders } = await api('GET', '/api/clients/orders');
-  ownOrdersCache = orders;
-  const box = document.getElementById('own-orders');
-  if (orders.length === 0) {
-    box.innerHTML = '<p class="empty-note">Aucune commande pour le moment.</p>';
-    return;
-  }
-  box.innerHTML = orders.map(o => {
-    const adjusted = o.items.some(i => (i.deliveredQty ?? i.qty) !== i.qty);
-    return `
-    <div class="own-ticket ${o.status}" data-id="${o.id}" tabindex="0" role="button" aria-label="Voir le détail de la commande ${o.ticket}">
-      <div>
-        <span class="mini-num">${o.ticket}</span>
-        <span class="mini-sub">${o.items.length} réf. · ${new Date(o.createdAt).toLocaleDateString('fr-FR')}</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        ${adjusted ? '<span class="adjusted-flag" title="Quantités livrées différentes de la commande">Ajustée</span>' : ''}
-        <span class="own-badge ${o.status}">${statusLabel(o.status)}</span>
-      </div>
-    </div>
-  `;
-  }).join('');
-  box.querySelectorAll('.own-ticket').forEach(el => {
-    el.addEventListener('click', () => openOrderModal(el.dataset.id, 'espace'));
-    el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openOrderModal(el.dataset.id, 'espace'); } });
-  });
+  renderNpsCard().catch(console.error);
+  renderOwnInvoices().catch(err => { console.error(err); document.getElementById('own-invoices-section').style.display = 'none'; });
+  try { await renderOwnOrders(); } catch (err) { console.error(err); }
 }
+
 document.getElementById('btn-save-billing').addEventListener('click', async () => {
   const note = document.getElementById('billing-note');
   try {
@@ -419,6 +674,57 @@ document.getElementById('btn-save-billing').addEventListener('click', async () =
   } catch (err) {
     note.classList.add('error');
     note.textContent = err.message;
+  }
+});
+
+// Coordonnées : l'adresse e-mail est l'identifiant de connexion, donc le code actuel est demandé pour la changer.
+document.getElementById('prof-email').addEventListener('input', () => {
+  const changed = document.getElementById('prof-email').value.trim().toLowerCase() !== (currentClient?.email || '');
+  document.getElementById('prof-code-field').style.display = changed ? '' : 'none';
+});
+document.getElementById('btn-save-profile').addEventListener('click', async () => {
+  const err = document.getElementById('err-profile');
+  const note = document.getElementById('profile-note');
+  err.classList.remove('show'); note.classList.remove('error'); note.textContent = '';
+  const email = document.getElementById('prof-email').value.trim().toLowerCase();
+  const body = {
+    contact: document.getElementById('prof-contact').value.trim(),
+    tel: document.getElementById('prof-tel').value.trim(),
+    adresse: document.getElementById('prof-adresse').value.trim(),
+  };
+  if (email !== currentClient.email) {
+    body.email = email;
+    body.currentCode = document.getElementById('prof-current-code').value.trim();
+    if (!body.currentCode) { err.textContent = 'Saisissez votre code d\'accès actuel pour changer d\'adresse e-mail.'; err.classList.add('show'); return; }
+  }
+  try {
+    const { client } = await api('PUT', '/api/clients/me/profile', body);
+    currentClient = client;
+    document.getElementById('dash-email').textContent = client.email;
+    fillAccountForms();
+    note.style.color = 'var(--teal)';
+    note.textContent = 'Enregistré ✓';
+    setTimeout(() => { note.textContent = ''; }, 2500);
+  } catch (e) {
+    err.textContent = e.message; err.classList.add('show');
+  }
+});
+
+document.getElementById('btn-save-code').addEventListener('click', async () => {
+  const err = document.getElementById('err-code');
+  const note = document.getElementById('code-note');
+  err.classList.remove('show'); note.textContent = '';
+  const currentCode = document.getElementById('code-current').value.trim();
+  const newCode = document.getElementById('code-new').value.trim();
+  if (newCode !== document.getElementById('code-new2').value.trim()) { err.textContent = 'Les deux nouveaux codes ne correspondent pas.'; err.classList.add('show'); return; }
+  try {
+    await api('PUT', '/api/clients/me/code', { currentCode, newCode });
+    ['code-current', 'code-new', 'code-new2'].forEach(id => { document.getElementById(id).value = ''; });
+    note.style.color = 'var(--teal)';
+    note.textContent = 'Code modifié ✓';
+    setTimeout(() => { note.textContent = ''; }, 3000);
+  } catch (e) {
+    err.textContent = e.message; err.classList.add('show');
   }
 });
 
@@ -527,6 +833,13 @@ async function openOrderModal(orderId, context) {
       <div class="modal-actions-note" id="delivery-status-note"></div>
     `;
     document.getElementById('btn-send-delivery').addEventListener('click', () => sendDeliveryNote(order.id));
+  } else if (context === 'espace') {
+    noteBox.style.display = 'block';
+    noteBox.innerHTML = `
+      <p style="font-size:12.5px;color:var(--steel);margin:0 0 12px;">Besoin du même linge ? Les quantités sont reprises dans une nouvelle commande, que vous pouvez ajuster avant de la valider.</p>
+      <button class="btn-mail" id="btn-reorder">Recommander cette commande</button>
+    `;
+    document.getElementById('btn-reorder').addEventListener('click', () => reorderFrom(order.id));
   } else {
     noteBox.style.display = 'none';
     noteBox.innerHTML = '';
@@ -2612,6 +2925,21 @@ document.getElementById('footer-admin-link').addEventListener('click', () => swi
 document.getElementById('brand-home-link').addEventListener('click', () => switchView('espace'));
 document.getElementById('brand-home-link').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchView('espace'); } });
 
+// Lien « code oublié » reçu par e-mail (#reset=…) : on retire le jeton de la barre d'adresse, on se déconnecte
+// si besoin et on affiche directement le choix du nouveau code. Fonctionne aussi dans un onglet déjà ouvert.
+async function consumeResetLink() {
+  const m = /^#reset=([A-Za-z0-9_-]{20,})$/.exec(location.hash);
+  if (!m) return false;
+  resetToken = m[1];
+  history.replaceState(null, '', location.pathname + location.search);
+  if (currentClient) { try { await api('POST', '/api/clients/logout'); } catch (e) { /* ignoré */ } currentClient = null; }
+  setAuthMode('reset');
+  return true;
+}
+window.addEventListener('hashchange', async () => {
+  if (await consumeResetLink()) { switchView('espace'); }
+});
+
 // ---------- init ----------
 (async function init() {
   try {
@@ -2623,9 +2951,13 @@ document.getElementById('brand-home-link').addEventListener('keydown', e => { if
   renderServiceList();
   renderSummary();
 
+  loadPortalOptions();
+
   try {
     const { client } = await api('GET', '/api/clients/me');
     currentClient = client;
   } catch (err) { /* pas connecté, on continue normalement */ }
+
+  await consumeResetLink();
   renderEspace(); // la page s'ouvre désormais sur "Mon espace" par défaut
 })();

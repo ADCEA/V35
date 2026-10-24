@@ -238,6 +238,32 @@ En production, quel que soit l'hébergeur, pensez à :
   ainsi que `cookie: { secure: true }` dans `src/server.js` pour que les
   cookies de session fonctionnent correctement en HTTPS.
 
+## Espace client
+
+Ce que voit un hôtel quand il se connecte (page d'accueil du site) :
+
+- **Accueil** : bouton « Nouvelle commande » en tête, puis les commandes en cours avec leur avancement (reçue → en traitement →
+  prête → livrée) et la date de livraison prévue, les factures, l'historique des commandes livrées et, tout en bas, le compte.
+- **Factures** : pour chaque facture de la facturation intégrée, le statut (à régler, réglée en partie, en retard, réglée, avoir),
+  l'échéance, le montant TTC, le reste dû et le PDF. Un résumé « Reste à régler » (dont le retard) surmonte la liste, avec les
+  coordonnées bancaires et un bouton « Copier ». Tant que l'offre d'**escompte** est ouverte, un encadré indique le montant à payer
+  et la date limite ; une fois la facture réglée avec escompte, l'escompte accordé est rappelé. Les anciennes factures du circuit
+  Odoo restent listées (sans statut).
+- **Recommander** : sur une commande livrée, reprend ses quantités dans le formulaire de commande (rien n'est envoyé : l'hôtel vérifie
+  puis valide). Les articles qui ne sont plus au catalogue de l'hôtel sont signalés et ignorés.
+- **Mon compte** : coordonnées (contact, téléphone, adresse), informations de facturation (SIRET, TVA, adresse de facturation) et
+  changement du code d'accès. Le nom de l'établissement reste géré par Blanchisserie Cézanne (il figure sur les factures) ; changer
+  l'adresse e-mail (l'identifiant) exige le code actuel. Chaque modification de coordonnées ou de code est tracée au journal de la
+  facturation (`client_self_updated`, `client_code_changed`).
+- **Code oublié** : l'hôtel saisit son adresse e-mail et reçoit un lien valable 1 heure, utilisable une seule fois. La réponse est la même
+  que le compte existe ou non. Le jeton (256 bits) n'est stocké qu'empreinté (SHA-256) et le lien est toujours construit à partir de
+  `PUBLIC_URL` (sinon `RENDER_EXTERNAL_URL`, que Render fournit), jamais de l'en-tête `Host`. Sans envoi d'e-mails configuré
+  (`SMTP_*`) ou sans adresse publique, la fonction est indisponible : l'écran affiche alors le téléphone et l'e-mail de la blanchisserie
+  (réglages de la facturation).
+- **Essais limités** : 5 mauvais codes pour une même adresse e-mail bloquent la connexion 15 minutes (même avec le bon code), de même
+  pour les changements de code et les demandes de lien. Ces compteurs sont en mémoire : un redémarrage du serveur les remet à zéro.
+  Ils sont suivis par adresse et non par IP, car le serveur n'est pas configuré derrière un proxy de confiance.
+
 ## Facturation intégrée
 
 Moteur de facturation natif (onglet **Administration → Plus → Facturation**).
@@ -577,7 +603,7 @@ relances. Sans SMTP, l'envoi répond « non configuré » (503) ; une relance fa
 
 ### Tests
 
-`npm test` (172 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
+`npm test` (180 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 
