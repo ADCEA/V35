@@ -101,11 +101,19 @@ function listArticles() {
     FROM order_items oi JOIN orders o ON o.id = oi.order_id
     WHERE substr(o.created_at, 1, 10) >= ? GROUP BY oi.service_id
   `).all(since).map(r => [r.id, r]));
+  // Hôtels à catalogue sélectionné qui n'ont pas cet article : il leur est masqué.
+  const hidden = new Map(db.prepare(`
+    SELECT a.id AS id, COUNT(*) AS n FROM articles a
+    CROSS JOIN (SELECT DISTINCT client_id FROM client_articles) r
+    WHERE NOT EXISTS (SELECT 1 FROM client_articles ca WHERE ca.client_id = r.client_id AND ca.article_id = a.id)
+    GROUP BY a.id
+  `).all().map(r => [r.id, r.n]));
   return {
     categories: CATEGORIES,
     clientCount: db.prepare('SELECT COUNT(*) c FROM clients').get().c,
     articles: articles.map(a => ({
       ...a,
+      hiddenFor: hidden.get(a.id) || 0,
       negotiatedCount: negotiated.get(a.id) || 0,
       qty90: usage.get(a.id)?.qty || 0,
       orders90: usage.get(a.id)?.orders || 0,
@@ -547,6 +555,82 @@ function setAssignment(clientId, articleIds) {
   return { ok: true, hasRestriction: ids.length > 0 };
 }
 
+// ---- accès des hôtels à un article ----
+// Un hôtel sans aucune ligne dans client_articles voit tout le catalogue ; dès qu'il en a, il ne voit que ces articles.
+// Retirer un article à un hôtel « catalogue complet » le fait donc passer en catalogue sélectionné (tous les autres
+// articles actuels lui sont attribués) ; en rajouter jusqu'à retrouver tout le catalogue le ramène en « catalogue complet ».
+
+const USAGE_DAYS = 365;
+
+/** Pour un article : chaque hôtel y a-t-il accès, et l'a-t-il commandé ces 12 derniers mois ? */
+function articleAccess(articleId) {
+  const a = db.prepare('SELECT id, name, sage_code AS sageCode FROM articles WHERE id = ?').get(articleId);
+  if (!a) throw new BillingError('Article introuvable.', 404);
+  const since = engine.addDays(todayParis(), -USAGE_DAYS);
+  const clients = db.prepare('SELECT id, societe FROM clients ORDER BY societe COLLATE NOCASE').all();
+  const restricted = new Set(db.prepare('SELECT DISTINCT client_id FROM client_articles').all().map(r => r.client_id));
+  const granted = new Set(db.prepare('SELECT client_id FROM client_articles WHERE article_id = ?').all(articleId).map(r => r.client_id));
+  const usage = new Map(db.prepare(`
+    SELECT o.client_id AS clientId,
+           SUM(CASE WHEN substr(o.created_at, 1, 10) >= @since THEN COALESCE(oi.delivered_qty, oi.qty) ELSE 0 END) AS pieces,
+           MAX(substr(o.created_at, 1, 10)) AS lastOrderAt
+    FROM order_items oi JOIN orders o ON o.id = oi.order_id
+    WHERE oi.service_id = @id AND o.client_id IS NOT NULL GROUP BY o.client_id
+  `).all({ since, id: articleId }).map(r => [r.clientId, r]));
+  return {
+    article: a, since, totalArticles: db.prepare('SELECT COUNT(*) c FROM articles').get().c,
+    clients: clients.map(c => ({
+      id: c.id, societe: c.societe,
+      restricted: restricted.has(c.id), hasAccess: !restricted.has(c.id) || granted.has(c.id),
+      pieces12m: usage.get(c.id)?.pieces || 0, lastOrderAt: usage.get(c.id)?.lastOrderAt || null,
+    })),
+  };
+}
+
+/**
+ * Fixe la liste des hôtels qui ont accès à l'article. Seuls les hôtels dont l'état change sont touchés.
+ * Aperçu (apply = false) ou application ; un hôtel ne peut pas se retrouver sans aucun article.
+ */
+function setArticleAccess(articleId, clientIds, { apply = false } = {}) {
+  const art = db.prepare('SELECT id, name, sage_code FROM articles WHERE id = ?').get(articleId);
+  if (!art) throw new BillingError('Article introuvable.', 404);
+  if (!Array.isArray(clientIds)) throw new BillingError('Indiquez la liste des hôtels qui ont accès à cet article.');
+  const clients = db.prepare('SELECT id, societe FROM clients ORDER BY societe COLLATE NOCASE').all();
+  const known = new Set(clients.map(c => c.id));
+  const want = new Set(clientIds.map(Number));
+  for (const id of want) if (!known.has(id)) throw new BillingError(`Hôtel inconnu (${id}).`);
+  const allIds = db.prepare('SELECT id FROM articles').all().map(r => r.id);
+
+  return transact(apply, () => {
+    const changes = [];
+    const rowsOf = db.prepare('SELECT article_id FROM client_articles WHERE client_id = ?');
+    const ins = db.prepare('INSERT INTO client_articles (client_id, article_id) VALUES (?, ?)');
+    for (const c of clients) {
+      const rows = rowsOf.all(c.id).map(r => r.article_id);
+      const restricted = rows.length > 0;
+      const has = !restricted || rows.includes(articleId);
+      const wants = want.has(c.id);
+      if (wants === has) continue;
+      let after;     // nombre d'articles de l'hôtel après le changement, null = catalogue complet
+      if (wants) {
+        ins.run(c.id, articleId); rows.push(articleId);
+        if (allIds.every(i => rows.includes(i))) { db.prepare('DELETE FROM client_articles WHERE client_id = ?').run(c.id); after = null; }
+        else after = rows.length;
+      } else if (!restricted) {
+        const others = allIds.filter(i => i !== articleId);
+        if (!others.length) throw new BillingError(`« ${c.societe} » n'aurait plus aucun article : c'est le seul du catalogue.`);
+        others.forEach(i => ins.run(c.id, i)); after = others.length;
+      } else {
+        if (rows.length === 1) throw new BillingError(`« ${c.societe} » n'aurait plus aucun article. Un hôtel doit pouvoir commander au moins un article.`);
+        db.prepare('DELETE FROM client_articles WHERE client_id = ? AND article_id = ?').run(c.id, articleId); after = rows.length - 1;
+      }
+      changes.push({ clientId: c.id, client: c.societe, access: wants, becameRestricted: !wants && !restricted, backToFull: wants && after === null, articleCount: after });
+      if (apply) log('client_article_access', { clientId: c.id, client: c.societe, articleId, article: art.name, sageCode: art.sage_code, access: wants, restricted: after !== null, count: after });
+    }
+    return { applied: !!apply, changes };
+  });
+}
+
 // ======================================================================
 //  TARIFS PAR CLIENT
 // ======================================================================
@@ -576,6 +660,13 @@ function priceGrid(clientId) {
   for (const r of rows) { if (!by.has(r.article_id)) by.set(r.article_id, []); by.get(r.article_id).push(r); }
   const assigned = new Set(db.prepare('SELECT article_id FROM client_articles WHERE client_id = ?').all(clientId).map(r => r.article_id));
   const hasRestriction = assigned.size > 0;
+  const since = engine.addDays(today, -USAGE_DAYS);
+  const used = new Map(db.prepare(`
+    SELECT oi.service_id AS id,
+           SUM(CASE WHEN substr(o.created_at, 1, 10) >= @since THEN COALESCE(oi.delivered_qty, oi.qty) ELSE 0 END) AS pieces,
+           MAX(substr(o.created_at, 1, 10)) AS lastOrderAt
+    FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE o.client_id = @c GROUP BY oi.service_id
+  `).all({ since, c: clientId }).map(r => [r.id, r]));
   return {
     client, hasRestriction, today,
     articles: articles.map(a => {
@@ -590,6 +681,7 @@ function priceGrid(clientId) {
         upcoming: next ? { price: next.price, from: next.date_debut } : null,
         history: list.filter(r => r !== cur && r !== next && r.date_debut <= today).reverse().map(r => ({ price: r.price, from: r.date_debut, to: r.date_fin })),
         attributed: hasRestriction ? assigned.has(a.id) : true,
+        pieces12m: used.get(a.id)?.pieces || 0, lastOrderAt: used.get(a.id)?.lastOrderAt || null,
       };
     }),
   };
@@ -906,7 +998,7 @@ function repriceUnbilled(clientId, { from, articleIds } = {}, { apply = false } 
 
 // ---- journal des prix ----
 
-const PRICE_ACTIONS = ['article_price_changed', 'article_created', 'article_deleted', 'client_price_set', 'client_price_removed', 'client_prices_bulk', 'orders_repriced', 'client_catalog_set'];
+const PRICE_ACTIONS = ['article_price_changed', 'article_created', 'article_deleted', 'client_price_set', 'client_price_removed', 'client_prices_bulk', 'orders_repriced', 'client_catalog_set', 'client_article_access'];
 
 function priceLog({ clientId, articleId, limit = 100 } = {}) {
   const sage = articleId ? db.prepare('SELECT sage_code FROM articles WHERE id = ?').get(articleId)?.sage_code : null;
@@ -926,7 +1018,7 @@ module.exports = {
   billingIssues, round3,
   listArticles, getArticle, createArticle, updateArticle, deleteArticle, importArticles,
   listClients, getClient, createClient, updateClient, setAccessCode, deleteClient,
-  createToken, revokeToken, setWebhook, importClients, setAssignment,
+  createToken, revokeToken, setWebhook, importClients, setAssignment, articleAccess, setArticleAccess,
   priceGrid, setClientPrice, removeClientPrice, bulkPrices, importPrices, priceMatrix, matrixCsv,
   repriceUnbilled, priceLog,
 };

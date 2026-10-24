@@ -203,6 +203,11 @@
     });
   };
 
+  // Usage d'un article par un hôtel sur 12 mois, en une phrase courte.
+  Bill.usageText = (pieces, lastOrderAt) => (pieces > 0
+    ? `${Bill.plural(Math.round(pieces), 'pièce', 'pièces')} sur 12 mois · dernière commande le ${Bill.dFr(lastOrderAt)}`
+    : lastOrderAt ? `Rien commandé depuis 12 mois (dernière commande le ${Bill.dFr(lastOrderAt)})` : 'Jamais commandé');
+
   // Phrase décrivant une ligne du journal des prix.
   Bill.describePriceEvent = (ev) => {
     const d = ev.detail || {}; const who = d.client ? `${d.client} — ` : '';
@@ -219,6 +224,7 @@
       }
       case 'orders_repriced': return `${who}${Bill.plural(d.orders, 'BL recalculé', 'BL recalculés')} depuis le ${Bill.dFr(d.from)} (écart ${Bill.eur(d.deltaCents)})`;
       case 'client_catalog_set': return `${who}${d.restricted ? `catalogue limité à ${Bill.plural(d.count, 'article', 'articles')}` : 'catalogue complet'}`;
+      case 'client_article_access': return `${who}${d.article} : ${d.access ? 'de nouveau proposé' : 'retiré du catalogue'}${d.restricted ? ` (catalogue limité à ${Bill.plural(d.count, 'article', 'articles')})` : ' (catalogue complet)'}`;
       default: return ev.action;
     }
   };

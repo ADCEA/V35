@@ -144,6 +144,46 @@ test('suppression, import et code d’accès : ressaisie exigée, aucun secret d
   assert.equal((await sensitive(`client-delete:${hotel}`, 'DELETE', `${B}/catalog/clients/${hotel}`)).status, 200, 'sans document : supprimable');
 });
 
+test('accès par article : verrouillé, aperçu puis application, article retiré refusé à la commande', async () => {
+  const URL_ = `${B}/catalog/articles/${serviette}/access`;
+  await call('POST', `${B}/lock/lock`);
+  assert.equal((await call('GET', URL_)).status, 423);
+  assert.equal((await call('POST', URL_, { clientIds: [] })).status, 423);
+  assert.equal((await call('POST', `${B}/lock/unlock`, { code: CODE })).status, 200);
+
+  const sel = (await call('POST', `${B}/catalog/clients`, { societe: 'Hôtel Sélection', email: 'selection@exemple.fr' })).data.client.id;
+  let r = await call('GET', URL_);
+  assert.equal(r.status, 200);
+  assert.equal(r.data.article.sageCode, 'T-ST');
+  assert.ok(r.data.clients.length >= 2 && r.data.clients.every(c => c.hasAccess));
+  assert.equal((await call('GET', `${B}/catalog/articles/inconnu/access`)).status, 404);
+  assert.equal((await call('POST', URL_, { clientIds: 'x' })).status, 400);
+  assert.equal((await call('POST', URL_, { clientIds: [999999] })).status, 400);
+
+  // seul « Hôtel Sélection » perd la serviette ; l'aperçu n'écrit rien
+  const everyone = r.data.clients.map(c => c.id).filter(id => id !== sel);
+  r = await call('POST', URL_, { clientIds: everyone });
+  assert.equal(r.status, 200); assert.equal(r.data.applied, false);
+  assert.deepEqual(r.data.changes.map(c => [c.clientId, c.access, c.becameRestricted]), [[sel, false, true]]);
+  assert.equal((await call('GET', URL_)).data.clients.find(c => c.id === sel).hasAccess, true, 'aperçu : rien n’est écrit');
+
+  r = await call('POST', URL_, { clientIds: everyone, apply: true });
+  assert.equal(r.status, 200); assert.equal(r.data.applied, true);
+  assert.equal((await call('GET', URL_)).data.clients.find(c => c.id === sel).hasAccess, false);
+  const arts = (await call('GET', `${B}/catalog/articles`)).data.articles;
+  assert.equal(arts.find(a => a.id === serviette).hiddenFor, 1);
+  assert.equal((await call('GET', `${B}/catalog/prices/log?articleId=${serviette}`)).data.events.filter(e => e.action === 'client_article_access').length, 1);
+
+  // l'hôtel ne peut plus commander l'article retiré, mais le reste passe
+  const refused = await call('POST', '/api/admin/orders/manual', { clientId: sel, items: [{ serviceId: serviette, qty: 1 }] });
+  assert.ok(refused.status >= 400 && refused.status < 500, `commande refusée (reçu ${refused.status})`);
+  const ok = await call('POST', '/api/admin/orders/manual', { clientId: sel, items: [{ serviceId: drap, qty: 1 }] });
+  assert.equal(ok.status, 201, JSON.stringify(ok.data));
+  // le recto de la médaille : on lui redonne l'article
+  assert.equal((await call('POST', URL_, { clientIds: [...everyone, sel], apply: true })).status, 200);
+  assert.equal((await call('GET', `${B}/catalog/articles`)).data.articles.find(a => a.id === serviette).hiddenFor, 0);
+});
+
 test('export de la grille tarifaire et intégrité du journal', async () => {
   const res = await call('GET', `${B}/catalog/prices/export.csv`, undefined, true);
   assert.equal(res.status, 200);

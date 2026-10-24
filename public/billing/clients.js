@@ -165,7 +165,8 @@
           <div class="bl-field"><label for="i-lv">Détail des lignes sur la facture</label><select id="i-lv">${LEVELS.map(([k, l]) => `<option value="${k}" ${C.invoiceDetailLevel === k ? 'selected' : ''}>${e(l)}</option>`).join('')}</select></div>
         </div></div>
         <div class="bl-actions" style="margin:16px 0 6px"><button class="bl-btn primary" id="i-save">Enregistrer les informations</button></div><div class="bl-err" id="i-err" role="alert"></div>
-        <div class="bl-panel"><div class="bl-panel-h"><h3>Activité</h3></div><div class="bl-panel-b"><p class="bl-note">${plural(stats.orders, 'commande', 'commandes')}${stats.lastOrderAt ? `, la dernière le ${dFr(stats.lastOrderAt)}` : ''} · ${plural(stats.invoices, 'facture émise', 'factures émises')}.</p></div></div>
+        <div class="bl-panel"><div class="bl-panel-h"><h3>Activité</h3></div><div class="bl-panel-b"><p class="bl-note">${plural(stats.orders, 'commande', 'commandes')}${stats.lastOrderAt ? `, la dernière le ${dFr(stats.lastOrderAt)}` : ''} · ${plural(stats.invoices, 'facture émise', 'factures émises')}.</p>
+          <div class="bl-actions"><button class="bl-btn" id="i-bls">Voir ses bons de livraison</button><button class="bl-btn" id="i-invs">Voir ses factures</button></div></div></div>
         <div class="bl-panel"><div class="bl-panel-h"><h3>Accès et suppression</h3></div><div class="bl-panel-b">
           <p class="bl-note">Le code d'accès actuel n'est jamais visible (il est chiffré). Définissez-en un nouveau si l'hôtel l'a oublié.</p>
           <div class="bl-actions"><button class="bl-btn" id="i-code">Définir un nouveau code d'accès…</button><button class="bl-btn danger" id="i-del">Supprimer cet hôtel…</button></div></div></div>`;
@@ -179,6 +180,8 @@
           changed = true; Bill.toast('Informations enregistrées'); await refresh();
         } catch (err) { btn.disabled = false; Bill.fail(err, errEl); }
       };
+      box.querySelector('#i-bls').onclick = () => { Bill.closeDrawer(); Bill.go('deliveries', { clientId: id }); };
+      box.querySelector('#i-invs').onclick = () => { Bill.closeDrawer(); Bill.go('invoices', { clientId: id }); };
       box.querySelector('#i-code').onclick = () => Bill.sensitive({
         title: 'Nouveau code d\'accès de l\'hôtel', scope: `client-code:${id}`, okLabel: 'Enregistrer le code',
         text: `Ce code ouvre l'espace client de « ${C.societe} » (suivi de commandes). L'ancien code cesse de fonctionner immédiatement.`,
@@ -293,20 +296,48 @@
     function paintCatalog(box) {
       const groups = {};
       for (const a of G.articles) (groups[a.category] ||= []).push(a);
+      // Sans sélection existante, passer en « sélection » part de tout le catalogue coché : on décoche ce qui ne sert pas.
+      const checked = (a) => (G.hasRestriction ? a.attributed : true);
       box.innerHTML = `<div class="bl-panel"><div class="bl-panel-b">
         <p class="bl-note">Détermine les articles que l'hôtel peut commander (espace client, commandes saisies, import par API).</p>
         <label class="bl-check"><input type="radio" name="cm" value="all" ${G.hasRestriction ? '' : 'checked'}><span><b>Tout le catalogue</b><br><span class="bl-muted">Y compris les articles que vous ajouterez plus tard.</span></span></label>
         <label class="bl-check" style="margin-top:12px"><input type="radio" name="cm" value="some" ${G.hasRestriction ? 'checked' : ''}><span><b>Seulement une sélection</b><br><span class="bl-muted">Les nouveaux articles ne lui sont pas proposés tant que vous ne les cochez pas.</span></span></label>
+        <div id="cm-tools" ${G.hasRestriction ? '' : 'hidden'}>
+          <div class="bl-actions" style="justify-content:flex-start;margin-top:12px">
+            <button class="bl-btn small" type="button" id="cm-all">Tout cocher</button>
+            <button class="bl-btn small" type="button" id="cm-none">Tout décocher</button>
+            <button class="bl-btn small" type="button" id="cm-unused">Décocher les articles jamais commandés (12 mois)</button>
+            <span class="bl-muted" id="cm-count"></span></div>
+          <div class="bl-field" style="margin-top:8px"><label for="cm-q">Chercher un article</label><input id="cm-q" type="search" placeholder="Nom ou code Sage"></div></div>
         <div id="cm-list" class="bl-checklist" ${G.hasRestriction ? '' : 'hidden'}>
-          ${Object.entries(groups).map(([k, list]) => `<div class="bl-checkgroup">${e(CAT_LABELS[k] || k)}</div>${list.map(a => `<label class="bl-check"><input type="checkbox" value="${e(a.id)}" ${a.attributed && G.hasRestriction ? 'checked' : ''}><span>${e(a.name)} <span class="bl-muted">${e(a.sageCode)}</span></span></label>`).join('')}`).join('')}</div>
+          ${Object.entries(groups).map(([k, list]) => `<div class="bl-checkgroup" data-group="${e(k)}">${e(CAT_LABELS[k] || k)}</div>${list.map(a => `<label class="bl-check" data-cat="${e(k)}" data-name="${e((a.name + ' ' + a.sageCode).toLowerCase())}"><input type="checkbox" value="${e(a.id)}" ${checked(a) ? 'checked' : ''}><span>${e(a.name)} <span class="bl-muted">${e(a.sageCode)}</span><br><span class="bl-muted">${e(Bill.usageText(a.pieces12m, a.lastOrderAt))}</span></span></label>`).join('')}`).join('')}</div>
       </div></div><div class="bl-actions"><button class="bl-btn primary" id="cm-save">Enregistrer</button></div><div class="bl-err" id="cm-err" role="alert"></div>`;
-      const list = box.querySelector('#cm-list');
-      box.querySelectorAll('[name=cm]').forEach(r => r.onchange = () => { list.hidden = box.querySelector('[name=cm]:checked').value === 'all'; });
+      const list = box.querySelector('#cm-list'); const tools = box.querySelector('#cm-tools');
+      const boxes = () => [...list.querySelectorAll('input[type=checkbox]')];
+      const sync = () => { box.querySelector('#cm-count').textContent = `${boxes().filter(i => i.checked).length} / ${G.articles.length} articles`; };
+      list.addEventListener('change', sync); sync();
+      box.querySelectorAll('[name=cm]').forEach(r => r.onchange = () => { const all = box.querySelector('[name=cm]:checked').value === 'all'; list.hidden = all; tools.hidden = all; });
+      const visibleBoxes = () => boxes().filter(i => !i.closest('.bl-check').hidden);
+      box.querySelector('#cm-all').onclick = () => { visibleBoxes().forEach(i => { i.checked = true; }); sync(); };
+      box.querySelector('#cm-none').onclick = () => { visibleBoxes().forEach(i => { i.checked = false; }); sync(); };
+      box.querySelector('#cm-unused').onclick = () => {
+        const idle = new Set(G.articles.filter(a => !a.pieces12m && !a.lastOrderAt).map(a => a.id));
+        boxes().forEach(i => { if (idle.has(i.value)) i.checked = false; }); sync();
+      };
+      box.querySelector('#cm-q').oninput = (ev) => {
+        const q = ev.target.value.trim().toLowerCase();
+        list.querySelectorAll('.bl-check').forEach(l => { l.hidden = !!q && !l.dataset.name.includes(q); });
+        list.querySelectorAll('.bl-checkgroup').forEach(g => { g.hidden = !!q && ![...list.querySelectorAll('.bl-check')].some(l => l.dataset.cat === g.dataset.group && !l.hidden); });
+      };
       box.querySelector('#cm-save').onclick = async (ev) => {
         const btn = ev.currentTarget; const errEl = box.querySelector('#cm-err'); errEl.textContent = '';
         const some = box.querySelector('[name=cm]:checked').value === 'some';
-        const ids = some ? [...list.querySelectorAll('input:checked')].map(i => i.value) : [];
+        const ids = some ? boxes().filter(i => i.checked).map(i => i.value) : [];
         if (some && !ids.length) { errEl.textContent = 'Cochez au moins un article, ou choisissez « Tout le catalogue ».'; return; }
+        if (some) {
+          const dropped = G.articles.filter(x => checked(x) && !ids.includes(x.id) && x.pieces12m > 0);
+          if (dropped.length && !await Bill.confirm('Retirer des articles récemment commandés ?', `${plural(dropped.length, 'article retiré a', 'articles retirés ont')} été commandé(s) ces 12 derniers mois par cet hôtel :\n${dropped.slice(0, 8).map(x => '• ' + x.name).join('\n')}${dropped.length > 8 ? '\n…' : ''}`, 'Enregistrer quand même')) return;
+        }
         btn.disabled = true;
         try { await Bill.put(`/catalog/clients/${id}/assignment`, { articleIds: ids }); changed = true; Bill.toast('Catalogue enregistré'); await loadClient(); await loadGrid(); paint(); }
         catch (err) { btn.disabled = false; Bill.fail(err, errEl); }

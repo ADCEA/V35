@@ -23,12 +23,13 @@
     }
     if (!list.length) { box.innerHTML = '<div class="bl-empty"><b>Aucun résultat</b>Essayez un autre mot, ou retirez le filtre de catégorie.</div>'; return; }
     box.innerHTML = `<div class="bl-tablewrap"><table class="bl-table"><thead><tr>
-      <th>Article</th><th>Catégorie</th><th class="r">Prix catalogue HT</th><th>Tarifs négociés</th><th class="r">Pièces sur 90 jours</th></tr></thead><tbody>
+      <th>Article</th><th>Catégorie</th><th class="r">Prix catalogue HT</th><th>Tarifs négociés</th><th>Proposé à</th><th class="r">Pièces sur 90 jours</th></tr></thead><tbody>
       ${list.map(a => `<tr class="bl-row" tabindex="0" data-id="${e(a.id)}">
         <td class="client">${e(a.name)}<span class="sub">${e(a.sageCode)} · badge ${e(a.code)}</span></td>
         <td>${e(catLabel(a.category))}</td>
         <td class="r bl-num"><b style="font-weight:600">${Bill.price(a.price)}</b></td>
         <td>${a.negotiatedCount ? `<span class="bl-tag info">${a.negotiatedCount} / ${DATA.clientCount} hôtels</span>` : '<span class="bl-faint">Aucun</span>'}</td>
+        <td>${a.hiddenFor ? `<span class="bl-tag wait">Retiré à ${plural(a.hiddenFor, 'hôtel', 'hôtels')}</span>` : '<span class="bl-faint">Tous</span>'}</td>
         <td class="r bl-num">${a.qty90 ? Bill.num3(a.qty90).replace(/,00$/, '') : '<span class="bl-faint">0</span>'}</td></tr>`).join('')}
       </tbody></table></div>`;
     box.querySelectorAll('tr.bl-row').forEach(tr => {
@@ -69,7 +70,7 @@
   // ---------- fiche article ----------
 
   async function openArticle(id, onChange) {
-    let changed = false; let art = null; let log = [];
+    let changed = false; let art = null; let log = []; let access = null;
     const d = Bill.drawer({ onClose: () => { if (changed && onChange) onChange(); } });
     d.body.innerHTML = '<div class="bl-spin">Chargement…</div>';
 
@@ -78,9 +79,69 @@
         if (id) {
           art = (await Bill.get('/catalog/articles/' + encodeURIComponent(id))).article;
           log = (await Bill.get('/catalog/prices/log?articleId=' + encodeURIComponent(id))).events;
+          access = await Bill.get('/catalog/articles/' + encodeURIComponent(id) + '/access');
         } else art = { name: '', code: '', sageCode: '', category: DATA.categories[0].id, price: '', gsm: '', widthCm: '', lengthCm: '', foldedWidthCm: '', foldedLengthCm: '', foldedHeightCm: '' };
       } catch (err) { Bill.closeDrawer(); return Bill.fail(err); }
       paint();
+    }
+
+    // Hôtels qui peuvent commander l'article. Les cases cochées = hôtels qui l'ont ; tout se règle ici en une fois.
+    function paintAccess(box) {
+      const cl = access.clients;
+      const withAccess = cl.filter(c => c.hasAccess).length;
+      box.innerHTML = `<div class="bl-panel-h"><h3>Hôtels qui peuvent le commander</h3><span class="bl-muted" id="ac-count"></span></div><div class="bl-panel-b">
+        <p class="bl-note">Décochez les hôtels qui n'utilisent pas cet article : il ne leur sera plus proposé (espace client, commandes saisies, import par API). Les commandes déjà passées ne changent pas.</p>
+        ${cl.length ? `<div class="bl-filters" style="margin-bottom:8px"><div class="bl-field grow"><label for="ac-q">Chercher un hôtel</label><input id="ac-q" type="search" placeholder="Nom de l'hôtel"></div></div>
+        <div class="bl-actions" style="justify-content:flex-start;margin-bottom:8px">
+          <button class="bl-btn small" type="button" id="ac-all">Tout cocher</button>
+          <button class="bl-btn small" type="button" id="ac-none">Tout décocher</button>
+          <button class="bl-btn small" type="button" id="ac-unused">Décocher ceux qui ne l'ont pas commandé depuis 12 mois</button></div>
+        <div class="bl-checklist" id="ac-list">${cl.map(c => `<label class="bl-check" data-name="${e(c.societe.toLowerCase())}"><input type="checkbox" value="${c.id}" ${c.hasAccess ? 'checked' : ''}>
+          <span>${e(c.societe)}${c.restricted ? ' <span class="bl-tag info" title="Cet hôtel ne voit qu\'une sélection d\'articles">catalogue sélectionné</span>' : ''}<br><span class="bl-muted">${e(Bill.usageText(c.pieces12m, c.lastOrderAt))}</span></span></label>`).join('')}</div>
+        <div class="bl-actions" style="margin-top:12px"><button class="bl-btn primary" type="button" id="ac-save">Enregistrer les hôtels…</button></div>`
+        : '<p class="bl-muted">Aucun hôtel pour le moment.</p>'}
+        <div class="bl-err" id="ac-err" role="alert"></div></div>`;
+      if (!cl.length) return;
+      const boxes = () => [...box.querySelectorAll('#ac-list input')];
+      const sync = () => { box.querySelector('#ac-count').textContent = `${boxes().filter(i => i.checked).length} / ${cl.length}`; };
+      box.addEventListener('change', sync); sync();
+      box.querySelector('#ac-q').oninput = (ev) => {
+        const q = ev.target.value.trim().toLowerCase();
+        box.querySelectorAll('#ac-list .bl-check').forEach(l => { l.hidden = !!q && !l.dataset.name.includes(q); });
+      };
+      const visibleBoxes = () => boxes().filter(i => !i.closest('.bl-check').hidden);
+      box.querySelector('#ac-all').onclick = () => { visibleBoxes().forEach(i => { i.checked = true; }); sync(); };
+      box.querySelector('#ac-none').onclick = () => { visibleBoxes().forEach(i => { i.checked = false; }); sync(); };
+      box.querySelector('#ac-unused').onclick = () => {
+        const idle = new Set(cl.filter(c => !c.pieces12m).map(c => String(c.id)));
+        boxes().forEach(i => { if (idle.has(i.value)) i.checked = false; }); sync();
+      };
+      const errEl = box.querySelector('#ac-err');
+      box.querySelector('#ac-save').onclick = async (ev) => {
+        const btn = ev.currentTarget; errEl.textContent = '';
+        const clientIds = boxes().filter(i => i.checked).map(i => Number(i.value));
+        btn.disabled = true;
+        try {
+          const r = await Bill.post(`/catalog/articles/${encodeURIComponent(id)}/access`, { clientIds, apply: false });
+          if (!r.changes.length) { Bill.toast('Aucun changement'); return; }
+          const byId = new Map(cl.map(c => [c.id, c]));
+          const lost = r.changes.filter(c => !c.access); const gained = r.changes.filter(c => c.access);
+          const busy = lost.filter(c => byId.get(c.clientId).pieces12m > 0);
+          const narrowed = lost.filter(c => c.becameRestricted);
+          const li = (c) => `<li>${e(c.client)}${byId.get(c.clientId).pieces12m ? ` <span class="bl-muted">— ${e(Bill.usageText(byId.get(c.clientId).pieces12m, byId.get(c.clientId).lastOrderAt))}</span>` : ''}</li>`;
+          Bill.modal({
+            title: `Modifier les hôtels de « ${art.name} »`, wide: true,
+            body: `${lost.length ? `<div class="bl-alert warn"><b>Retiré à ${plural(lost.length, 'hôtel', 'hôtels')}</b> : ils ne pourront plus le commander.<ul>${lost.map(li).join('')}</ul></div>` : ''}
+              ${busy.length ? `<div class="bl-alert warn"><b>Attention :</b> ${plural(busy.length, 'de ces hôtels a', 'de ces hôtels ont')} commandé cet article ces 12 derniers mois.</div>` : ''}
+              ${narrowed.length ? `<div class="bl-alert info"><b>${plural(narrowed.length, 'hôtel passe', 'hôtels passent')} en « catalogue sélectionné »</b> : ils gardent tous leurs autres articles actuels, mais les futurs articles ne leur seront pas proposés tant que vous ne les cochez pas.</div>` : ''}
+              ${gained.length ? `<div class="bl-alert ok"><b>Proposé à ${plural(gained.length, 'hôtel de plus', 'hôtels de plus')}</b><ul>${gained.map(li).join('')}</ul></div>` : ''}`,
+            buttons: [{ label: 'Annuler' }, { label: 'Appliquer', primary: true, onClick: async () => {
+              await Bill.post(`/catalog/articles/${encodeURIComponent(id)}/access`, { clientIds, apply: true });
+              changed = true; Bill.toast('Hôtels enregistrés'); await load();
+            } }],
+          });
+        } catch (err) { Bill.fail(err, errEl); } finally { btn.disabled = false; }
+      };
     }
 
     function impactHtml() {
@@ -119,6 +180,7 @@
             <div class="bl-field"><label for="a-fl">Longueur pliée (cm)</label><input id="a-fl" inputmode="decimal" value="${f('foldedLengthCm')}"></div>
             <div class="bl-field"><label for="a-fh">Épaisseur pliée (cm)</label><input id="a-fh" inputmode="decimal" value="${f('foldedHeightCm')}"></div></div>
           <p class="bl-hint" id="a-calc"></p></div></details>
+        ${id ? '<div class="bl-panel" id="ar-access"></div>' : ''}
         ${id ? `<div class="bl-panel"><div class="bl-panel-h"><h3>Historique des prix</h3></div><div class="bl-panel-b">${Bill.priceLogHtml(log, 'Aucun changement de prix enregistré pour cet article.')}</div></div>` : ''}
         <div class="bl-err" id="a-err" role="alert"></div>`;
 
@@ -135,6 +197,8 @@
         if (!el) return;
         el.textContent = Number.isFinite(n) && n !== art.price ? `Prix catalogue : ${Bill.price(art.price)} → ${Bill.price(n)} (${Bill.pct(art.price, n)})` : `Prix catalogue actuel : ${Bill.price(art.price)}`;
       });
+
+      if (id) paintAccess(d.body.querySelector('#ar-access'));
 
       d.head.querySelector('[data-a="save"]').onclick = async (ev) => {
         const btn = ev.currentTarget; const errEl = d.body.querySelector('#a-err'); errEl.textContent = '';

@@ -9,7 +9,7 @@ const html = fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8');
 
 test('index.html charge les fichiers de la Facturation, et eux seuls', () => {
   const scripts = [...html.matchAll(/<script src="(\/billing[^"]*)"/g)].map(m => m[1]);
-  assert.deepEqual(scripts, ['/billing/core.js', '/billing/shared.js', '/billing/dashboard.js', '/billing/invoices.js', '/billing/quotes.js', '/billing/month.js', '/billing/cash.js', '/billing/config.js', '/billing/articles.js', '/billing/prices.js', '/billing/clients.js']);
+  assert.deepEqual(scripts, ['/billing/core.js', '/billing/shared.js', '/billing/dashboard.js', '/billing/invoices.js', '/billing/deliveries.js', '/billing/quotes.js', '/billing/month.js', '/billing/cash.js', '/billing/config.js', '/billing/articles.js', '/billing/prices.js', '/billing/clients.js']);
   assert.ok(html.includes('<link rel="stylesheet" href="/billing/billing.css">'));
   assert.ok(!html.includes('/billing.js'), "l'ancien écran /billing.js ne doit plus être chargé");
   for (const f of [...scripts, '/billing/billing.css']) assert.ok(fs.existsSync(path.join(PUBLIC, f)), `${f} manquant`);

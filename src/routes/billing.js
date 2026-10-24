@@ -285,5 +285,6 @@ router.post('/pennylane/auto', lock.requireStepUp('pennylane-auto'), wrap((req, 
 // Ventes : encaissements, rapprochement, facturation en lot, devis.
 router.use(require('./billingSales'));
 router.use(require('./billingCatalog'));
+router.use(require('./billingDeliveries'));
 
 module.exports = router;

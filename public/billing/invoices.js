@@ -83,6 +83,7 @@
   Bill.register('invoices', {
     async render(main, params = {}) {
       if (params.tab) { S.tab = params.tab; S.limit = 100; }
+      if (params.clientId !== undefined) { S.clientId = String(params.clientId || ''); S.tab = params.tab || 'all'; S.q = ''; S.limit = 100; }
       S.bucket = params.bucket || null;
       const clients = await Bill.clients();
       main.innerHTML = `<div class="bl-head"><div><h2>Factures</h2><p>Toutes vos factures et avoirs. Cliquez sur une ligne pour l'ouvrir, l'envoyer ou enregistrer un règlement.</p></div>

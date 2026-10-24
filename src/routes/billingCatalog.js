@@ -29,6 +29,11 @@ router.post('/catalog/articles', wrap((req, res) => res.status(201).json({ artic
 router.put('/catalog/articles/:id', wrap((req, res) => res.json({ article: catalog.updateArticle(req.params.id, req.body) })));
 router.delete('/catalog/articles/:id', lock.requireStepUp(req => `article-delete:${req.params.id}`),
   wrap((req, res) => res.json(catalog.deleteArticle(req.params.id))));
+router.get('/catalog/articles/:id/access', wrap((req, res) => res.json(catalog.articleAccess(req.params.id))));
+router.post('/catalog/articles/:id/access', wrap((req, res) => {
+  const b = req.body || {};
+  res.json(catalog.setArticleAccess(req.params.id, b.clientIds, { apply: !!b.apply }));
+}));
 router.post('/catalog/articles/import', stepUpWhen(applying, 'articles-import'),
   wrap((req, res) => res.json(catalog.importArticles(csvOf(req.body), { apply: applying(req) }))));
 

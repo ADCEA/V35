@@ -252,6 +252,7 @@ Odoo reste en base et téléchargeable par les hôtels dans leur espace.
 |---|---|
 | Tableau de bord | encours avec ruban d'ancienneté, facturé/encaissé du mois, délai moyen de paiement, « à faire », 12 mois |
 | Factures | liste à onglets (brouillons, à encaisser, en retard, payées, avoirs), recherche, tri ; tiroir de détail (aperçu PDF, détail, historique) |
+| Bons de livraison | les commandes livrées, filtrées par **période** et par **hôtel** (plus recherche et état de facturation) ; détail d'un bon, PDF d'un bon ou de tous les bons filtrés (un seul fichier), export Excel (CSV) |
 | Devis | brouillon → finalisé (`DE-AAAA-NNNN`, valable 30 j) → accepté / refusé → converti en brouillon de facture |
 | Facturer le mois | un brouillon par hôtel pour tous les bons livrés non facturés, vérification, émission groupée |
 | Hôtels | fiche de chaque hôtel : coordonnées, SIRET/TVA, tarifs négociés, catalogue accessible, jetons d'API et webhook |
@@ -307,6 +308,42 @@ l'administration ; la création rapide d'un hôtel depuis « Nouvelle commande �
 copie des tarifs d'un autre hôtel, retour au catalogue, import CSV (articles, hôtels, tarifs). Chacune affiche d'abord un
 **aperçu exact** (le même calcul que l'application, simplement annulé) puis demande le code pour appliquer.
 Les CSV acceptent `;` ou `,`, la virgule décimale, l'UTF-8 (avec ou sans BOM) et le format Excel Windows.
+
+### Bons de livraison
+
+Page **Facturation → Bons de livraison** (juste sous « Factures »). Un bon de livraison (BL) est une commande au
+statut « Livrée » ; sa date est la date de livraison prévue, à défaut la date de création (la même qui sert à facturer
+et à choisir le tarif en vigueur).
+
+- **Filtres** : période (du / au, bornes incluses, avec « Ce mois-ci », « Mois dernier », « 30 derniers jours »),
+  hôtel, recherche (numéro de bon, nom d'hôtel) et état de facturation. Les onglets *À facturer / Dans un brouillon /
+  Facturés* affichent leur nombre ; le total HT de la sélection s'affiche au-dessus du tableau ;
+- **État de facturation**, calculé comme « Facturer le mois » : *à facturer*, *dans un brouillon*, *facturé* (avec le numéro
+  de facture), *facturé (ancien circuit)* pour l'historique Odoo. Une facture annulée par un avoir total remet le BL à facturer ;
+- **Montants** : quantité livrée × prix figé sur la commande. Un bon dont la quantité livrée diffère de la commande est signalé ;
+- **Exports** : PDF d'un bon, **PDF groupé** de tous les bons filtrés (un bon par page, du plus ancien au plus récent,
+  500 bons au plus) et CSV Excel (`;`, virgule décimale, BOM) ;
+- depuis la fiche d'un hôtel, « Voir ses bons de livraison » ouvre la page déjà filtrée.
+
+La page ne fait que lire : elle ne modifie ni commande ni facture. Elle est derrière le code de la Facturation.
+
+### Restreindre des articles aux hôtels qui les utilisent
+
+Deux façons de régler la même chose (un hôtel voit tout le catalogue ou seulement une sélection) :
+
+- **depuis l'article** (Facturation → Articles → fiche de l'article → « Hôtels qui peuvent le commander ») : la liste de
+  tous les hôtels, chacun avec son usage sur 12 mois (pièces, dernière commande). Cocher / décocher, chercher un hôtel,
+  « Décocher ceux qui ne l'ont pas commandé depuis 12 mois ». L'enregistrement affiche d'abord un **aperçu** : hôtels qui perdent
+  l'article (avec un avertissement s'ils l'ont commandé récemment), hôtels qui passent en « catalogue sélectionné », hôtels
+  qui le retrouvent. La colonne « Proposé à » du tableau des articles indique à combien d'hôtels il est retiré ;
+- **depuis l'hôtel** (fiche de l'hôtel → Catalogue accessible) : en passant à « Seulement une sélection », tous les articles sont
+  cochés au départ ; l'usage sur 12 mois est affiché à côté de chaque article, avec « Décocher les articles jamais commandés ».
+
+Règles : retirer un article à un hôtel qui voyait tout le catalogue le passe en *sélection* (il garde tous les autres articles actuels,
+mais pas les futurs) ; lui redonner tous les articles le ramène à *catalogue complet*. **Un hôtel ne peut jamais se retrouver sans
+aucun article** (la demande est refusée en entier). Les commandes déjà passées, les BL et les factures ne changent pas ; la génération
+de commandes depuis le planning des chambres continue d'utiliser le catalogue complet. Chaque changement est écrit dans le journal chaîné
+(`client_article_access`) et visible dans l'historique de l'article comme dans celui de l'hôtel.
 
 ### Verrou de la Facturation
 

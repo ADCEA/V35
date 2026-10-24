@@ -130,6 +130,7 @@
     { key: 'dashboard', label: 'Tableau de bord' },
     { group: 'Ventes' },
     { key: 'invoices', label: 'Factures', badge: 'overdue', hot: true },
+    { key: 'deliveries', label: 'Bons de livraison' },
     { key: 'quotes', label: 'Devis' },
     { key: 'month', label: 'Facturer le mois', badge: 'toInvoiceClients' },
     { group: 'Encaissements' },
