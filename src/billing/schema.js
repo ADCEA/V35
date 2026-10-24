@@ -226,15 +226,15 @@ module.exports = function applyBillingSchema(db) {
   `);
 
   // ---------- réglages par défaut ----------
-  // Ligne unique, créée au premier démarrage. Moteur : on garde Odoo tant
-  // qu'il est configuré sur le serveur (aucun changement de comportement
-  // pour l'existant), sinon la facturation intégrée prend le relais.
+  // Ligne unique, créée au premier démarrage. Toute la facturation passe par
+  // la facturation intégrée : le circuit Odoo est retiré (l'historique des
+  // factures Odoo reste en base et consultable par les hôtels).
   const existing = db.prepare('SELECT id FROM billing_settings WHERE id = 1').get();
   if (!existing) {
-    const odooConfigured = Boolean(process.env.ODOO_URL && process.env.ODOO_API_KEY);
     db.prepare(`
       INSERT INTO billing_settings (id, engine, legal_name, legal_form, address_line, postal_code, city, country)
-      VALUES (1, ?, 'BLANCHISSERIE CEZANNE & CO', 'SAS', '153 boulevard Jean-Louis Passet', '84200', 'Carpentras', 'FR')
-    `).run(odooConfigured ? 'odoo' : 'native');
+      VALUES (1, 'native', 'BLANCHISSERIE CEZANNE & CO', 'SAS', '153 boulevard Jean-Louis Passet', '84200', 'Carpentras', 'FR')
+    `).run();
   }
+  db.prepare("UPDATE billing_settings SET engine = 'native' WHERE engine <> 'native'").run();
 };

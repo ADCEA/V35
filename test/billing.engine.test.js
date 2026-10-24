@@ -119,3 +119,9 @@ test('mentions obligatoires manquantes : émission refusée, aucun numéro conso
   assert.equal(B.issueInvoice(d.id, { issueDate: '2026-11-06' }).number, 'FA-2026-000003');
   assert.deepEqual(B.verifyIntegrity().problems, []);
 });
+
+test('moteur : toujours « native », même si une ancienne base est restée sur « odoo »', () => {
+  db.prepare("UPDATE billing_settings SET engine='odoo' WHERE id=1").run();
+  require('../src/billing/schema')(db); // rejoué à chaque démarrage
+  assert.equal(B.getSettings().engine, 'native');
+});

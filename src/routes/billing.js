@@ -31,12 +31,6 @@ function fail(res, e) {
   return res.status(500).json({ error: 'Erreur serveur.' });
 }
 
-function requireNativeEngine() {
-  if (engine.getSettings().engine !== 'native') {
-    throw new engine.BillingError("La facturation intégrée est désactivée (moteur : Odoo). Changez de moteur dans les réglages de facturation.", 409);
-  }
-}
-
 // Représentation JSON d'une facture pour l'écran.
 function present(inv) {
   const issued = inv.status === 'issued';
@@ -66,13 +60,13 @@ const SETTINGS_FIELDS = {
   legal_name: 'text', legal_form: 'text', share_capital: 'text', siren: 'siren', siret: 'siret', vat_number: 'text', rcs: 'text',
   address_line: 'text', postal_code: 'text', city: 'text', email: 'text', phone: 'text', iban: 'text', bic: 'text',
   late_penalty_text: 'text', footer_note: 'text', invoice_prefix: 'prefix', credit_prefix: 'prefix',
-  default_vat_rate: 'vat', payment_terms_days: 'days', vat_on_debits: 'bool', engine: 'engine',
+  default_vat_rate: 'vat', payment_terms_days: 'days', vat_on_debits: 'bool',
 };
 
 router.get('/settings', wrap((req, res) => {
   const s = engine.getSettings();
   const issuedCount = db.prepare("SELECT COUNT(*) c FROM native_invoices WHERE status='issued'").get().c;
-  res.json({ settings: s, hasIssuedDocuments: issuedCount > 0, odooConfigured: Boolean(process.env.ODOO_URL && process.env.ODOO_API_KEY) });
+  res.json({ settings: s, hasIssuedDocuments: issuedCount > 0 });
 }));
 
 router.put('/settings', wrap((req, res) => {
@@ -111,9 +105,6 @@ router.put('/settings', wrap((req, res) => {
       if (!Number.isInteger(v) || v < 0 || v > 60) throw new engine.BillingError('Délai de paiement : 0 à 60 jours (plafond légal, art. L441-10 du Code de commerce).');
     }
     if (type === 'bool') v = v ? 1 : 0;
-    if (type === 'engine') {
-      if (!['native', 'odoo'].includes(v)) throw new engine.BillingError('Moteur invalide.');
-    }
     sets.push(`${field} = ?`); vals.push(v);
   }
   if (sets.length) db.prepare(`UPDATE billing_settings SET ${sets.join(', ')} WHERE id = 1`).run(...vals);
@@ -165,7 +156,6 @@ router.get('/invoices/:id', wrap((req, res) => {
 // ---------- brouillons ----------
 
 router.post('/invoices', wrap((req, res) => {
-  requireNativeEngine();
   const { clientId, orderIds, detailLevel, operationCategory, notes } = req.body || {};
   if (detailLevel && !['detail', 'per_bl', 'aggregated'].includes(detailLevel)) throw new engine.BillingError('Niveau de détail invalide.');
   const inv = engine.createDraftFromOrders(Number(clientId), (orderIds || []).map(Number), { detailLevel, operationCategory, notes });
@@ -185,7 +175,6 @@ router.delete('/invoices/:id', wrap((req, res) => {
 // ---------- émission ----------
 
 router.post('/invoices/:id/issue', wrap((req, res) => {
-  requireNativeEngine();
   const issueDate = req.body?.issueDate || undefined;
   const inv = engine.issueInvoice(Number(req.params.id), { issueDate });
   res.json({ invoice: present(inv) });
@@ -194,7 +183,6 @@ router.post('/invoices/:id/issue', wrap((req, res) => {
 // ---------- avoirs ----------
 
 router.post('/invoices/:id/credit-note', wrap((req, res) => {
-  requireNativeEngine();
   const { reason, full, lines } = req.body || {};
   const cn = engine.createCreditNoteDraft(Number(req.params.id), { reason, full: !!full, lines });
   res.status(201).json({ invoice: present(cn) });

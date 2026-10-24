@@ -602,6 +602,10 @@ router.post('/invoices/:id/sync-status', async (req, res) => {
 // Ne valide/ne poste JAMAIS automatiquement — la facture reste modifiable
 // et supprimable dans Odoo tant qu'elle n'y est pas confirmée à la main.
 router.post('/clients/:id/invoices', async (req, res) => {
+  // Le circuit Odoo est retiré : toute la facturation passe par la facturation intégrée
+  // (Administration → Plus → Facturation). Le code ci-dessous est conservé, inactif,
+  // pour pouvoir le réactiver si besoin.
+  return res.status(410).json({ error: "La génération de factures via Odoo est désactivée. Utilisez Administration → Plus → Facturation." });
   const clientId = Number(req.params.id);
   const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(clientId);
   if (!client) return res.status(404).json({ error: 'Hôtel introuvable.' });
@@ -622,10 +626,6 @@ router.post('/clients/:id/invoices', async (req, res) => {
   for (const o of orders) {
     if (o.client_id !== clientId) return res.status(400).json({ error: `La commande ${o.ticket} n'appartient pas à cet hôtel.` });
     if (o.status !== 'livree') return res.status(400).json({ error: `La commande ${o.ticket} n'est pas encore livrée.` });
-  }
-  const engineRow = db.prepare('SELECT engine FROM billing_settings WHERE id = 1').get();
-  if (engineRow && engineRow.engine === 'native') {
-    return res.status(409).json({ error: "La facturation intégrée est active : le circuit Odoo est désactivé pour éviter une double facturation. Changez de moteur dans l'onglet Facturation → Réglages." });
   }
   const alreadyNative = db.prepare(`
     SELECT DISTINCT no.order_id FROM native_invoice_orders no

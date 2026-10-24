@@ -239,12 +239,11 @@ En production, quel que soit l'hébergeur, pensez à :
 
 ## Facturation intégrée
 
-Moteur de facturation natif (onglet **Administration → Plus → Facturation**),
-qui remplace à terme le circuit Odoo. Les deux coexistent : un réglage
-(**Facturation → Réglages → Moteur actif**) choisit lequel est actif, pour
-qu'un BL ne soit jamais facturé deux fois. À la première installation, le
-moteur reste **Odoo** si `ODOO_URL` / `ODOO_API_KEY` sont définis (aucun
-changement de comportement), sinon c'est le moteur intégré.
+Moteur de facturation natif (onglet **Administration → Plus → Facturation**).
+Il remplace entièrement le circuit Odoo : toute la facturation passe par lui.
+La génération de factures via Odoo est désactivée (l'ancienne route répond 410) ;
+le code Odoo est conservé, inactif, et l'historique des factures déjà créées via
+Odoo reste en base et téléchargeable par les hôtels dans leur espace.
 
 **Avant la première facture** : renseigner Facturation → Réglages (raison
 sociale, forme, capital, SIREN, RCS, n° de TVA, IBAN). L'émission est refusée

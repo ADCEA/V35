@@ -89,6 +89,8 @@ test('scénario complet via HTTP', async () => {
   assert.equal((await call('PUT', `/api/admin/billing/invoices/${invId}`, { notes: 'x' })).status, 409);
   assert.equal((await call('DELETE', `/api/admin/billing/invoices/${invId}`)).status, 409);
 
+  // Le circuit Odoo est retiré : la génération Odoo est refusée (410)
+  assert.equal((await call('POST', `/api/admin/clients/${clientId}/invoices`, { orderIds: ids })).status, 410);
   // Le circuit Odoo ne voit plus ces BL
   r = await call('GET', `/api/admin/clients/${clientId}/invoiceable-orders`);
   assert.equal(r.data.orders.length, 0);

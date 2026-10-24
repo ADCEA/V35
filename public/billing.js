@@ -28,8 +28,8 @@
   }
 
   window.renderBillingTab = async function () {
-    const [{ settings, odooConfigured, hasIssuedDocuments }] = await Promise.all([api('GET', '/api/admin/billing/settings'), ensureClients()]);
-    state.settings = settings; state.odooConfigured = odooConfigured; state.hasIssuedDocuments = hasIssuedDocuments;
+    const [{ settings, hasIssuedDocuments }] = await Promise.all([api('GET', '/api/admin/billing/settings'), ensureClients()]);
+    state.settings = settings; state.hasIssuedDocuments = hasIssuedDocuments;
     draw();
   };
 
@@ -39,11 +39,8 @@
       <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap;">
         ${nav.map(([k, l]) => `<button class="btn-secondary" data-bt="${k}" style="width:auto;padding:7px 14px;${state.tab === k ? 'background:var(--ink);color:#fff;' : ''}">${l}</button>`).join('')}
       </div>
-      ${state.settings.engine !== 'native' ? `<div class="card" style="border-color:var(--amber);margin-bottom:16px;"><p style="margin:0;font-size:12.5px;">Moteur actif : <b>Odoo</b>. La facturation intégrée est en lecture seule (aucune création ni émission). Pour l'utiliser : <a href="#" id="bt-goto-settings">Réglages → moteur de facturation</a>.</p></div>` : ''}
       <div id="bt-body"></div>`;
     root().querySelectorAll('[data-bt]').forEach(b => b.addEventListener('click', () => { state.tab = b.dataset.bt; draw(); }));
-    const g = document.getElementById('bt-goto-settings');
-    if (g) g.addEventListener('click', (ev) => { ev.preventDefault(); state.tab = 'settings'; draw(); });
     if (state.tab === 'invoices') drawList();
     if (state.tab === 'settings') drawSettings();
     if (state.tab === 'controls') drawControls();
@@ -57,7 +54,7 @@
     if (state.filterClient) q.set('clientId', state.filterClient);
     if (state.filterStatus) q.set('status', state.filterStatus);
     const { invoices } = await api('GET', '/api/admin/billing/invoices?' + q);
-    const native = state.settings.engine === 'native';
+    const native = true;
     body().innerHTML = `
       <div class="card">
         <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:14px;">
@@ -141,7 +138,7 @@
     const isDraft = inv.status === 'draft';
     const isCredit = inv.kind === 'credit_note';
     const sg = isCredit ? -1 : 1;
-    const native = state.settings.engine === 'native';
+    const native = true;
     const problems = isDraft && inv.preview ? inv.preview.problems : [];
 
     const linesHtml = inv.lines.map((l, idx) => {
@@ -301,12 +298,6 @@
     const f = (id, label, val, extra = '') => `<div class="field"><label>${label}</label><input id="bs-${id}" value="${e(val || '')}" ${extra}></div>`;
     body().innerHTML = `
       <div class="card">
-        <h4 class="card-subhead">Moteur de facturation</h4>
-        <div class="field" style="max-width:420px;"><label>Moteur actif</label>
-          <select id="bs-engine"><option value="native" ${s.engine === 'native' ? 'selected' : ''}>Facturation intégrée</option><option value="odoo" ${s.engine === 'odoo' ? 'selected' : ''}>Odoo (circuit existant)</option></select></div>
-        <p style="font-size:12px;color:var(--steel);">Un seul moteur est actif à la fois, pour qu'un BL ne soit jamais facturé deux fois. Les BL déjà passés par Odoo ne sont jamais re-proposés ici. ${state.hasIssuedDocuments ? '<b>Des documents ont déjà été émis par la facturation intégrée : leur numérotation et leurs préfixes ne peuvent plus changer.</b>' : ''}</p>
-      </div>
-      <div class="card" style="margin-top:16px;">
         <h4 class="card-subhead">Identité de l'émetteur (mentions légales)</h4>
         <div class="field-row">${f('legal_name', 'Raison sociale', s.legal_name)}${f('legal_form', 'Forme juridique', s.legal_form)}</div>
         <div class="field-row">${f('share_capital', 'Capital social (ex. 10 000 €)', s.share_capital)}${f('rcs', 'Immatriculation (ex. RCS Avignon)', s.rcs)}</div>
@@ -336,7 +327,7 @@
     document.getElementById('bs-save').onclick = async () => {
       const g = (id) => document.getElementById('bs-' + id);
       const payload = {};
-      ['legal_name', 'legal_form', 'share_capital', 'rcs', 'siren', 'siret', 'vat_number', 'address_line', 'postal_code', 'city', 'email', 'phone', 'iban', 'bic', 'late_penalty_text', 'footer_note', 'payment_terms_days', 'default_vat_rate', 'engine'].forEach(k => payload[k] = g(k).value);
+      ['legal_name', 'legal_form', 'share_capital', 'rcs', 'siren', 'siret', 'vat_number', 'address_line', 'postal_code', 'city', 'email', 'phone', 'iban', 'bic', 'late_penalty_text', 'footer_note', 'payment_terms_days', 'default_vat_rate'].forEach(k => payload[k] = g(k).value);
       if (!state.hasIssuedDocuments) { payload.invoice_prefix = g('invoice_prefix').value; payload.credit_prefix = g('credit_prefix').value; }
       payload.vat_on_debits = g('vat_on_debits').checked;
       try {
