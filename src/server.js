@@ -103,4 +103,5 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`Blanchisserie Cézanne — serveur lancé sur http://localhost:${PORT}`);
   startInvoiceStatusScheduler();
+  require('./backup').startScheduler();
 });

@@ -18,8 +18,16 @@ async function call(method, url, body, raw = false) {
   return { status: res.status, data };
 }
 
+const CODE = 'code-facturation-1';
+// Ressaisie du code pour un acte sensible, puis l'acte lui-même.
+async function sensitive(scope, method, url, body, raw = false) {
+  const c = await call('POST', '/api/admin/billing/lock/confirm', { code: CODE, scope });
+  assert.equal(c.status, 200, `confirmation ${scope} : ${JSON.stringify(c.data)}`);
+  return call(method, url, body, raw);
+}
+
 test.before(async () => {
-  const env = { ...process.env, DATA_DIR, PORT: String(PORT), SESSION_SECRET: 'test-secret' };
+  const env = { ...process.env, DATA_DIR, PORT: String(PORT), SESSION_SECRET: 'test-secret', BACKUP_SCHEDULER: 'off' };
   delete env.ODOO_URL; delete env.ODOO_API_KEY;
   server = spawn('node', [path.join(__dirname, '..', 'src', 'server.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   await new Promise((resolve, reject) => {
@@ -33,10 +41,12 @@ test.after(() => server && server.kill());
 test('accès refusé sans session admin', async () => {
   assert.equal((await call('GET', '/api/admin/billing/settings')).status, 401);
   assert.equal((await call('GET', '/api/admin/billing/integrity')).status, 401);
+  assert.equal((await call('GET', '/api/admin/billing/lock/status')).status, 401);
 });
 
 test('scénario complet via HTTP', async () => {
   assert.equal((await call('POST', '/api/admin/setup', { password: 'secret123' })).status, 201);
+  assert.equal((await call('POST', '/api/admin/billing/lock/setup', { code: CODE, confirm: CODE })).status, 201);
 
   // Seed
   const db = new Database(path.join(DATA_DIR, 'database.sqlite'));
@@ -59,16 +69,16 @@ test('scénario complet via HTTP', async () => {
   assert.equal(r.status, 201);
   const invId = r.data.invoice.id;
   assert.equal(r.data.invoice.totalHtCents, 24680);
-  r = await call('POST', `/api/admin/billing/invoices/${invId}/issue`, { issueDate: '2026-10-31' });
+  r = await sensitive(`issue:${invId}`, 'POST', `/api/admin/billing/invoices/${invId}/issue`, { issueDate: '2026-10-31' });
   assert.equal(r.status, 422);
   assert.match(r.data.error, /capital social/);
   assert.match(r.data.error, /RCS/);
 
   // Réglages invalides refusés
-  assert.equal((await call('PUT', '/api/admin/billing/settings', { siren: '123456789' })).status, 400);
-  assert.equal((await call('PUT', '/api/admin/billing/settings', { payment_terms_days: 90 })).status, 400);
+  assert.equal((await sensitive('settings', 'PUT', '/api/admin/billing/settings', { siren: '123456789' })).status, 400);
+  assert.equal((await sensitive('settings', 'PUT', '/api/admin/billing/settings', { payment_terms_days: 90 })).status, 400);
 
-  r = await call('PUT', '/api/admin/billing/settings', { share_capital: '10 000 €', siren: '552 100 554', siret: '55210055400013', vat_number: 'FR40552100554', rcs: 'RCS Avignon', iban: 'FR76 3000 1007 9412 3456 7890 185', bic: 'BDFEFRPP' });
+  r = await sensitive('settings', 'PUT', '/api/admin/billing/settings', { share_capital: '10 000 €', siren: '552 100 554', siret: '55210055400013', vat_number: 'FR40552100554', rcs: 'RCS Avignon', iban: 'FR76 3000 1007 9412 3456 7890 185', bic: 'BDFEFRPP' });
   assert.equal(r.status, 200);
 
   // Le détail du brouillon liste les manques (aucun maintenant) et le PDF brouillon se génère
@@ -82,7 +92,7 @@ test('scénario complet via HTTP', async () => {
   // Édition du brouillon puis émission
   r = await call('PUT', `/api/admin/billing/invoices/${invId}`, { notes: 'Merci' });
   assert.equal(r.status, 200);
-  r = await call('POST', `/api/admin/billing/invoices/${invId}/issue`, { issueDate: '2026-10-31' });
+  r = await sensitive(`issue:${invId}`, 'POST', `/api/admin/billing/invoices/${invId}/issue`, { issueDate: '2026-10-31' });
   assert.equal(r.status, 200);
   assert.equal(r.data.invoice.number, 'FA-2026-000001');
   // Émise : modification et suppression refusées (409)
@@ -96,10 +106,10 @@ test('scénario complet via HTTP', async () => {
   assert.equal(r.data.orders.length, 0);
 
   // Avoir total puis BL de nouveau facturables
-  r = await call('POST', `/api/admin/billing/invoices/${invId}/credit-note`, { reason: 'Annulation', full: true });
+  r = await sensitive(`credit:${invId}`, 'POST', `/api/admin/billing/invoices/${invId}/credit-note`, { reason: 'Annulation', full: true });
   assert.equal(r.status, 201);
   const cnId = r.data.invoice.id;
-  r = await call('POST', `/api/admin/billing/invoices/${cnId}/issue`, { issueDate: '2026-11-02' });
+  r = await sensitive(`issue:${cnId}`, 'POST', `/api/admin/billing/invoices/${cnId}/issue`, { issueDate: '2026-11-02' });
   assert.equal(r.data.invoice.number, 'AV-2026-000001');
   r = await call('GET', `/api/admin/billing/clients/${clientId}/invoiceable-orders`);
   assert.equal(r.data.orders.length, 2, 'BL libérés par l\'avoir total');
@@ -112,7 +122,7 @@ test('scénario complet via HTTP', async () => {
   // Nouvelle facture + règlement partiel + solde
   r = await call('POST', '/api/admin/billing/invoices', { clientId, orderIds: ids });
   const inv2 = r.data.invoice.id;
-  r = await call('POST', `/api/admin/billing/invoices/${inv2}/issue`, { issueDate: '2026-11-05' });
+  r = await sensitive(`issue:${inv2}`, 'POST', `/api/admin/billing/invoices/${inv2}/issue`, { issueDate: '2026-11-05' });
   assert.equal(r.data.invoice.number, 'FA-2026-000002');
   r = await call('POST', `/api/admin/billing/invoices/${inv2}/payments`, { paidOn: '2026-11-20', amount: 100, method: 'virement', reference: 'VIR 123' });
   assert.equal(r.data.invoice.paymentStatus, 'partial');
@@ -130,7 +140,7 @@ test('scénario complet via HTTP', async () => {
   r = await call('GET', '/api/admin/billing/integrity');
   assert.deepEqual(r.data.problems, []);
   assert.equal(r.data.checked, 3);
-  const fec = await call('GET', '/api/admin/billing/export/fec?year=2026', null, true);
+  const fec = await sensitive('fec:2026', 'GET', '/api/admin/billing/export/fec?year=2026', null, true);
   assert.equal(fec.status, 200);
   assert.match(fec.headers.get('content-disposition'), /552100554FEC20261231\.txt/);
   const txt = await fec.text();

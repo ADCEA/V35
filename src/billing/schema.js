@@ -128,6 +128,19 @@ module.exports = function applyBillingSchema(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_native_payments_invoice ON native_payments(invoice_id);
 
+    -- Verrou propre à l'espace Facturation : un code distinct du mot de passe
+    -- administrateur (stocké haché), avec compteur d'échecs persistant pour
+    -- résister à la force brute même après un redémarrage du serveur.
+    CREATE TABLE IF NOT EXISTS billing_lock (
+      id               INTEGER PRIMARY KEY CHECK (id = 1),
+      code_hash        TEXT,
+      failed_attempts  INTEGER NOT NULL DEFAULT 0,
+      locked_until     INTEGER NOT NULL DEFAULT 0,   -- ms epoch : refus de tout essai avant cette date
+      reset_marker     TEXT,                         -- dernière valeur de BILLING_LOCK_RESET appliquée
+      updated_at       TEXT
+    );
+    INSERT OR IGNORE INTO billing_lock (id) VALUES (1);
+
     -- Journal d'événements : append-only et chaîné par hash.
     CREATE TABLE IF NOT EXISTS billing_events (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,

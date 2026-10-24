@@ -9,9 +9,16 @@ const { requireAdmin } = require('../middleware/auth');
 const engine = require('../billing/engine');
 const { buildInvoicePdf } = require('../billing/pdf');
 const { buildFec } = require('../billing/fec');
+const lock = require('../billing/lock');
+const backup = require('../backup');
 
 const router = express.Router();
 router.use(requireAdmin);
+// Verrou propre à la Facturation (code distinct du mot de passe admin) : les
+// routes /lock/* restent accessibles verrouillées, tout le reste exige un
+// déverrouillage récent. Les actes sensibles exigent en plus une ressaisie.
+router.use('/lock', lock.router);
+router.use(lock.requireUnlocked);
 
 const wrap = (fn) => (req, res) => {
   try {
@@ -69,7 +76,7 @@ router.get('/settings', wrap((req, res) => {
   res.json({ settings: s, hasIssuedDocuments: issuedCount > 0 });
 }));
 
-router.put('/settings', wrap((req, res) => {
+router.put('/settings', lock.requireStepUp('settings'), wrap((req, res) => {
   const body = req.body || {};
   const current = engine.getSettings();
   const issuedCount = db.prepare("SELECT COUNT(*) c FROM native_invoices WHERE status='issued'").get().c;
@@ -174,7 +181,7 @@ router.delete('/invoices/:id', wrap((req, res) => {
 
 // ---------- émission ----------
 
-router.post('/invoices/:id/issue', wrap((req, res) => {
+router.post('/invoices/:id/issue', lock.requireStepUp(req => `issue:${req.params.id}`), wrap((req, res) => {
   const issueDate = req.body?.issueDate || undefined;
   const inv = engine.issueInvoice(Number(req.params.id), { issueDate });
   res.json({ invoice: present(inv) });
@@ -182,7 +189,7 @@ router.post('/invoices/:id/issue', wrap((req, res) => {
 
 // ---------- avoirs ----------
 
-router.post('/invoices/:id/credit-note', wrap((req, res) => {
+router.post('/invoices/:id/credit-note', lock.requireStepUp(req => `credit:${req.params.id}`), wrap((req, res) => {
   const { reason, full, lines } = req.body || {};
   const cn = engine.createCreditNoteDraft(Number(req.params.id), { reason, full: !!full, lines });
   res.status(201).json({ invoice: present(cn) });
@@ -217,7 +224,7 @@ router.get('/integrity', wrap((req, res) => {
   res.json(engine.verifyIntegrity());
 }));
 
-router.get('/export/fec', wrap((req, res) => {
+router.get('/export/fec', lock.requireStepUp(req => `fec:${parseInt(req.query.year, 10) || new Date().getFullYear()}`), wrap((req, res) => {
   const year = parseInt(req.query.year, 10) || new Date().getFullYear();
   if (year < 2000 || year > 2100) throw new engine.BillingError('Année invalide.');
   const { content, rowCount, balanced } = buildFec(year);
@@ -227,6 +234,26 @@ router.get('/export/fec', wrap((req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${siren}FEC${year}1231.txt"`);
   res.setHeader('X-Fec-Rows', String(rowCount));
   res.send(content);
+}));
+
+// ---------- sauvegardes ----------
+
+router.get('/backup/status', wrap((req, res) => { res.json(backup.getStatus()); }));
+
+router.post('/backup/run', wrap(async (req, res) => {
+  try {
+    const run = await backup.runBackup({ trigger: 'manual' });
+    res.json({ ok: true, status: run.status, status_detail: backup.getStatus() });
+  } catch (e) {
+    res.status(500).json({ error: `Sauvegarde impossible : ${e.message}` });
+  }
+}));
+
+// Téléchargement d'une copie (chiffrée si BACKUP_PASSPHRASE est définie) : ressaisie du code exigée.
+router.get('/backup/:id/download', lock.requireStepUp(req => `backup:${req.params.id}`), wrap((req, res) => {
+  const f = backup.localFilePath(Number(req.params.id));
+  if (!f) throw new engine.BillingError('Fichier de sauvegarde introuvable (purgé ?).', 404);
+  res.download(f.path, f.name);
 }));
 
 module.exports = router;

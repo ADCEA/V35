@@ -669,7 +669,7 @@ function previewDraft(invoiceId, issueDateOverride) {
 }
 
 module.exports = {
-  previewDraft,
+  previewDraft, logEvent,
   BillingError, todayParis, addDays, lineCents, computeTotals, sirenFrom, luhnOk,
   getSettings, loadInvoice, listInvoiceableOrders,
   createDraftFromOrders, updateDraft, deleteDraft, createCreditNoteDraft, issueInvoice,

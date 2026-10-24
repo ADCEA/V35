@@ -66,6 +66,7 @@ router.post('/login', (req, res) => {
 // POST /api/admin/logout
 router.post('/logout', (req, res) => {
   delete req.session.isAdmin;
+  delete req.session.billing; // le déverrouillage de la Facturation ne survit pas à la déconnexion
   res.json({ ok: true });
 });
 
