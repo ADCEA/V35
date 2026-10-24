@@ -152,7 +152,12 @@ router.get('/native-invoices/:id/pdf', requireClient, async (req, res) => {
   }
   const extra = {};
   if (inv.credits_invoice_id) extra.creditedInvoiceNumber = db.prepare('SELECT number FROM native_invoices WHERE id = ?').get(inv.credits_invoice_id)?.number;
-  if (inv.kind === 'invoice') { extra.paidCents = engine.paidCents(inv.id); extra.balanceCents = engine.balanceCents(inv); }
+  if (inv.kind === 'invoice') {
+    // Même présentation que dans l'espace de facturation : argent reçu et escompte accordé séparés.
+    extra.paidCents = engine.cashCents(inv.id);
+    extra.discountCents = engine.discountSums(inv.id).ttcCents;
+    extra.balanceCents = engine.balanceCents(inv);
+  }
   try {
     const pdf = await buildInvoicePdf(inv, null, extra);
     res.setHeader('Content-Type', 'application/pdf');
