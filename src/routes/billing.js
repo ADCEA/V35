@@ -93,6 +93,7 @@ router.get('/clients/:id/invoiceable-orders', wrap((req, res) => {
 router.get('/dashboard', wrap((req, res) => {
   const d = queries.dashboard();
   d.backup = (() => { const b = backup.getStatus(); return { health: b.health, message: b.message }; })();
+  d.reminders = { due: mail.remindersOverview().filter(x => x.suggestedLevel).length };
   res.json(d);
 }));
 

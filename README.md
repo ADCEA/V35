@@ -245,29 +245,115 @@ La génération de factures via Odoo est désactivée (l'ancienne route répond 
 le code Odoo est conservé, inactif, et l'historique des factures déjà créées via
 Odoo reste en base et téléchargeable par les hôtels dans leur espace.
 
-**Avant la première facture** : renseigner Facturation → Réglages (raison
+### Ce que couvre l'espace Facturation
+
+| Page | Rôle |
+|---|---|
+| Tableau de bord | encours avec ruban d'ancienneté, facturé/encaissé du mois, délai moyen de paiement, « à faire », 12 mois |
+| Factures | liste à onglets (brouillons, à encaisser, en retard, payées, avoirs), recherche, tri ; tiroir de détail (aperçu PDF, détail, historique) |
+| Devis | brouillon → finalisé (`DE-AAAA-NNNN`, valable 30 j) → accepté / refusé → converti en brouillon de facture |
+| Facturer le mois | un brouillon par hôtel pour tous les bons livrés non facturés, vérification, émission groupée |
+| Règlements | tous les encaissements |
+| Rapprochement bancaire | import d'un relevé CSV, propositions de factures, validation ligne par ligne ; une empreinte par ligne empêche tout double enregistrement |
+| Relances | factures échues, niveau conseillé (rappel / relance / dernier rappel), texte prêt ; **toujours déclenchées par une personne** |
+| Émetteur, Sécurité et sauvegardes, Pennylane, Contrôle et FEC | configuration |
+
+**Avant la première facture** : renseigner Facturation → Émetteur (raison
 sociale, forme, capital, SIREN, RCS, n° de TVA, IBAN). L'émission est refusée
 tant qu'une mention obligatoire manque, et la fiche de chaque hôtel doit avoir
 un SIREN/SIRET valide (obligatoire sur les factures B2B depuis le 1er sept. 2026).
 
-Principes :
+### Principes du moteur
+
 - montants calculés en **centimes entiers** ; TVA calculée par taux sur la base HT ;
 - brouillon librement modifiable → **émission** = numéro continu (`FA-AAAA-000001`),
   empreinte SHA-256 chaînée, identités vendeur/acheteur figées ;
 - une facture émise **ne peut plus être modifiée ni supprimée** (triggers SQL,
   y compris depuis la console SQLite) : correction par **avoir**, partiel ou total ;
-- règlements et journal d'événements en **ajout seul** (annulation = écriture inverse) ;
+- règlements, journal d'événements et historique d'e-mails en **ajout seul**
+  (annulation d'un règlement = écriture inverse) ;
 - PDF régénéré à l'identique depuis les données figées ; visible dans l'espace client ;
-- Facturation → Contrôle et exports : vérification d'intégrité + export **FEC**.
+- Contrôle et FEC : vérification d'intégrité (empreintes, chaînage, totaux, numérotation,
+  journal) + export **FEC**.
 
-Tests : `npm test` (base SQLite jetable, aucun effet sur vos données).
+### Verrou de la Facturation
 
-Limites connues — à traiter avant d'utiliser en production :
+La session administrateur ouvre tout le logiciel et dure des jours ; la facturation
+émet des documents légaux irréversibles et affiche l'IBAN. Elle est donc protégée par
+un **second code, distinct du mot de passe administrateur**, défini à la première ouverture.
+
+- redemandé après **10 minutes d'inactivité** (`BILLING_IDLE_MINUTES`, minimum 1) ;
+- **ressaisie du code** avant chaque acte sensible : émission d'une facture ou d'un avoir,
+  création d'un avoir, émission groupée du mois, export FEC, modification des coordonnées de
+  l'émetteur (dont l'IBAN), téléchargement d'une sauvegarde, activation de l'envoi automatique
+  Pennylane. L'autorisation est à usage unique, liée à l'acte précis (ex. `issue:42`) et valable 90 s ;
+- 5 erreurs de code → blocage 15 minutes, conservé en base (survit à un redémarrage) ;
+- **code oublié** : sur l'hébergeur, définir `BILLING_LOCK_RESET=<valeur quelconque>` puis
+  redémarrer ; le code est effacé (une seule fois par valeur distincte) et un nouveau est demandé.
+  Les données ne sont pas touchées. Changer la valeur à chaque nouvelle réinitialisation.
+
+### Sauvegardes automatiques
+
+Chaque nuit (après 3 h, heure de Paris ; rattrapage au démarrage si la dernière a plus de 26 h) :
+instantané cohérent de la base → contrôle d'intégrité SQLite → purge des sessions →
+compression → **chiffrement AES-256-GCM** → copie locale (30 conservées, `BACKUP_KEEP_LOCAL`)
+puis copies **hors serveur**. Une copie sur le disque du serveur ne protège pas de la perte du
+serveur : configurez au moins une destination hors serveur.
+
+| Variable | Rôle |
+|---|---|
+| `BACKUP_PASSPHRASE` | phrase secrète de chiffrement. **Sans elle, rien ne part hors serveur.** À conserver ailleurs : sans elle une sauvegarde est illisible |
+| `BACKUP_S3_ENDPOINT`, `BACKUP_S3_BUCKET`, `BACKUP_S3_REGION`, `BACKUP_S3_ACCESS_KEY`, `BACKUP_S3_SECRET_KEY`, `BACKUP_S3_PREFIX` | stockage compatible S3 (Backblaze B2, Cloudflare R2, Scaleway…) |
+| `BACKUP_EMAIL_TO`, `BACKUP_EMAIL_MAX_MB` | copie par e-mail (nécessite SMTP) |
+| `BACKUP_ALERT_TO` | alerte e-mail si une sauvegarde échoue (une par jour au plus) |
+| `BACKUP_SCHEDULER=off` | désactive la planification (tests) |
+
+La page Sécurité et sauvegardes affiche l'état (ok / à vérifier / critique au-delà de 48 h sans copie
+hors serveur), l'historique, et permet de sauvegarder immédiatement ou de télécharger une copie.
+La rétention côté S3 n'est pas purgée par l'application : utilisez une règle de cycle de vie du bucket.
+
+**Restauration** (arrêter le serveur d'abord) :
+
+```bash
+BACKUP_PASSPHRASE='votre phrase secrète' node scripts/restore-backup.js \
+  cezanne-AAAAMMJJTHHMMSSZ.sqlite.gz.enc restauree.sqlite
+# garder une copie de DATA_DIR/database.sqlite, la remplacer par restauree.sqlite, redémarrer,
+# puis lancer Facturation → Contrôle et FEC → Lancer le contrôle.
+```
+
+### Envoi à Pennylane (optionnel)
+
+Le logiciel reste la source de vérité pour **émettre** ; Pennylane reçoit une copie pour la
+comptabilité et le rapprochement bancaire.
+
+- `PENNYLANE_API_TOKEN` : jeton d'API, **uniquement en variable d'environnement** (jamais dans le code) ;
+  `PENNYLANE_BASE_URL` pour changer d'URL ; `PENNYLANE_SCHEDULER=off` pour désactiver la file.
+- Page Pennylane : tester la connexion, envoi manuel d'un document ou de tous les non transmis,
+  réessai des échecs, **envoi automatique** (seuls les documents émis après l'activation).
+- Factures et avoirs sont transmis avec leur PDF, les lignes regroupées par taux de TVA ; les avoirs
+  en montants négatifs ; nouvel essai automatique (5 au plus) en cas d'échec.
+- **Les champs exacts de l'API Pennylane n'ont pas pu être vérifiés sur un compte réel** : testez d'abord
+  sur un compte d'essai avant d'activer l'envoi automatique.
+
+### E-mails
+
+`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` (voir plus haut) servent aussi à l'envoi des factures, devis et
+relances. Sans SMTP, l'envoi répond « non configuré » (503) ; une relance faite par téléphone peut quand même être notée.
+
+### Tests
+
+`npm test` (bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
+
+### Limites connues — à traiter avant d'utiliser en production
+
 - **Pas de transmission à une plateforme agréée (PA)** : l'obligation d'émission
   électronique pour les PME démarre au 1er septembre 2027 (à vérifier, le calendrier
   a déjà bougé). Il faudra choisir une PA et brancher son API ; le champ
   `pa_status` est déjà prévu sur chaque facture. Pas de Factur-X/UBL non plus.
+  L'envoi à Pennylane n'est **pas** une transmission via plateforme agréée.
 - **Certification NF525 / attestation éditeur** : non fournie. Le moteur applique
   les principes (inaltérabilité, chaînage, traçabilité) mais n'est pas certifié.
 - **Numéros de comptes du FEC** (411, 706000, 445710, 512000) : usuels, à valider
   avec votre expert-comptable (constantes dans `src/billing/fec.js`).
+- Les PDF des factures créées à l'époque d'Odoo (`DATA_DIR/invoices`) ne sont **pas** incluses
+  dans les sauvegardes (la base, elle, l'est entièrement).
