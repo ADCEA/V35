@@ -241,3 +241,61 @@ table.bl-table{width:100%; border-collapse:collapse; font-size:14px;}
   .bl-row2,.bl-row3{grid-template-columns:1fr;}
   .bl-kv{grid-template-columns:1fr; gap:0;} .bl-kv dt{margin-top:8px; font-size:12.5px;}
 }
+
+/* ---------- Hôtels, articles et tarifs ---------- */
+.bl-tag{display:inline-flex; align-items:center; padding:2px 8px; border-radius:11px; font-size:12.5px; font-weight:500; white-space:nowrap; background:var(--bl-draft-bg); color:var(--bl-draft);}
+.bl-tag.ok{background:var(--bl-ok-bg); color:var(--bl-ok);}
+.bl-tag.bad{background:var(--bl-late-bg); color:var(--bl-late);}
+.bl-tag.info{background:var(--bl-info-bg); color:var(--bl-info);}
+.bl-tag.draft{background:var(--bl-draft-bg); color:var(--bl-draft);}
+.bl-details{padding:0;}
+.bl-details > summary{cursor:pointer; padding:13px 18px; font-weight:500; list-style:revert;}
+.bl-details > summary:focus-visible{outline:2px solid var(--brand); outline-offset:-2px; border-radius:6px;}
+.bl-details[open] > summary{border-bottom:1px solid var(--line);}
+.bl-linkbtn{background:none; border:none; padding:0; font:inherit; font-weight:500; color:var(--ink); cursor:pointer; text-align:left; text-decoration:underline; text-decoration-color:#C5D3E0; text-underline-offset:3px;}
+.bl-linkbtn:hover{color:var(--brand-deep); text-decoration-color:currentColor;}
+.bl-linkbtn:focus-visible{outline:2px solid var(--brand); outline-offset:2px; border-radius:3px;}
+.bl-checklist{display:grid; gap:7px; padding:12px 14px; margin-top:10px; border:1px solid var(--line); border-radius:6px; background:var(--bl-row); max-height:320px; overflow-y:auto;}
+.bl-checklist[hidden]{display:none;}
+.bl-checkgroup{font-size:12.5px; font-weight:600; color:var(--steel); margin-top:6px;}
+.bl-checkgroup:first-child{margin-top:0;}
+.bl-token{display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:10px 0; border-bottom:1px solid #EAF0F6;}
+.bl-token:last-of-type{border-bottom:none;}
+.bl-tokenval{display:block; margin-top:4px; padding:5px 8px; background:#EEF3F8; border-radius:4px; word-break:break-all;}
+.bl-prices tr.neg td{background:var(--bl-info-bg);}
+.bl-prices tr.off td{color:#8C9DAE;}
+.bl-prices td .sub{font-size:12px;}
+
+/* grille des tarifs : articles en lignes, hôtels en colonnes, deux premières colonnes figées */
+.bl-matrixwrap{overflow:auto; max-height:68vh; border-top:1px solid var(--line);}
+.bl-matrix{border-collapse:separate; border-spacing:0; font-size:13.5px; min-width:100%;}
+.bl-matrix th,.bl-matrix td{border-bottom:1px solid #EAF0F6; border-right:1px solid #EAF0F6; padding:0; background:var(--paper); text-align:right;}
+.bl-matrix thead th{position:sticky; top:0; z-index:3; font-size:12.5px; font-weight:500; color:var(--steel); padding:8px 10px; vertical-align:bottom; text-align:right; min-width:104px; max-width:150px;}
+.bl-matrix thead th.art,.bl-matrix thead th.cat{z-index:5;}
+.bl-matrix th.art,.bl-matrix td.cat{position:sticky; z-index:2;}
+.bl-matrix th.art{left:0; width:220px; min-width:220px; max-width:220px; text-align:left; padding:7px 10px;}
+.bl-matrix td.cat,.bl-matrix thead th.cat{left:220px; width:92px; min-width:92px; padding:7px 10px; background:var(--bl-row); box-shadow:2px 0 0 var(--line);}
+.bl-matrix th.art small{display:block; font-size:11.5px; font-weight:400; color:#8C9DAE;}
+.bl-matrix th.cl button{background:none; border:none; padding:0; font:inherit; font-size:12.5px; color:var(--ink); font-weight:600; cursor:pointer; text-align:right; white-space:normal; line-height:1.25;}
+.bl-matrix th.cl button:hover{text-decoration:underline;}
+.bl-matrix th.cl button:focus-visible{outline:2px solid var(--brand); outline-offset:2px;}
+.bl-matrix tr.grp th{position:sticky; left:0; text-align:left; font-size:12.5px; font-weight:600; color:var(--steel); background:var(--bl-row); padding:6px 10px;}
+.bl-matrix td.neg{background:var(--bl-info-bg);}
+.bl-matrix td.neg .bl-cell{font-weight:700; color:var(--bl-info);}
+.bl-matrix td.neg .bl-cell small{display:block; font-size:11px; font-weight:500;}
+.bl-matrix td.x{background:repeating-linear-gradient(135deg,#F3F6FA 0 5px,#E9EFF5 5px 6px);}
+.bl-cell{position:relative; display:block; width:100%; height:100%; min-height:38px; padding:7px 10px; background:none; border:none; font:inherit; font-variant-numeric:tabular-nums; color:var(--ink); text-align:right; cursor:pointer;}
+.bl-cell:hover{background:rgba(15,111,203,.09);}
+.bl-cell:focus-visible{outline:2px solid var(--brand); outline-offset:-2px;}
+.bl-cell i.up{position:absolute; top:5px; left:6px; width:7px; height:7px; border-radius:50%; background:var(--bl-wait);}
+.bl-legend-line{display:flex; flex-wrap:wrap; gap:6px 20px; padding:10px 14px; border-top:1px solid var(--line); font-size:12.5px; color:var(--steel);}
+.bl-legend-line i.k{display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:6px; vertical-align:-2px; border:1px solid #D5E0EB;}
+.bl-legend-line i.k.neg{background:var(--bl-info-bg); border-color:#B8D6F5;}
+.bl-legend-line i.k.up{background:var(--bl-wait); border-radius:50%; width:9px; height:9px; margin:0 8px 0 1px; border:none; vertical-align:0;}
+.bl-legend-line i.k.x{background:repeating-linear-gradient(135deg,#F3F6FA 0 3px,#DCE5EE 3px 4px);}
+@media (max-width:760px){
+  .bl-matrix th.art{width:150px; min-width:150px; max-width:150px;}
+  .bl-matrix td.cat,.bl-matrix thead th.cat{left:150px; width:72px; min-width:72px; padding:7px 6px;}
+  .bl-matrixwrap{max-height:62vh;}
+}
+@media (prefers-reduced-motion: reduce){.bl-cell{transition:none;}}

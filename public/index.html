@@ -220,9 +220,8 @@
               <button data-admin-view="stats">Statistiques</button>
               <button data-admin-view="billing">Facturation</button>
               <button data-admin-view="historique">Historique des livraisons</button>
-              <button data-admin-view="articles">Gestion des articles</button>
+              <button data-admin-view="equipment">Chariots et camions</button>
               <button data-admin-view="garage">Garage</button>
-              <button data-admin-view="clients">Gestion des clients</button>
               <button data-admin-view="settings">Réglages</button>
             </div>
           </div>
@@ -298,28 +297,7 @@
           <div id="stats-content"></div>
         </div>
 
-        <div id="admin-view-articles" class="admin-subview" style="display:none;">
-          <div class="card" style="margin-bottom:20px;">
-            <div class="collapsible-head"><h4 class="card-subhead">Catalogue</h4><button class="collapse-toggle" data-collapse-target="section-catalogue">▾</button></div>
-            <div id="section-catalogue">
-              <button class="btn-secondary" id="btn-add-article" style="margin-bottom:14px;">+ Ajouter un article</button>
-              <div id="article-form-zone"></div>
-
-              <div style="background:var(--bg);border-radius:6px;padding:12px 14px;margin-bottom:14px;">
-                <h5 style="font-size:12.5px;font-weight:600;color:var(--ink);margin:0 0 6px;">Import en masse (CSV)</h5>
-                <p style="font-size:11px;color:var(--steel-light);margin:0 0 8px;">Colonnes attendues : <span class="mono">nom, code, code_sage</span> (obligatoires), <span class="mono">prix, categorie, poids_g, volume_l, largeur_cm, longueur_cm, largeur_pliee_cm, longueur_pliee_cm, epaisseur_pliee_cm</span> (optionnelles). Un code_sage déjà existant met à jour l'article plutôt que d'en créer un double.</p>
-                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                  <input type="file" id="articles-import-file" accept=".csv" style="font-size:12px;">
-                  <button class="btn-secondary" id="btn-import-articles" style="width:auto;">Importer</button>
-                  <a href="#" id="link-articles-template" style="font-size:11.5px;color:var(--brand);text-decoration:underline;">Télécharger un modèle</a>
-                </div>
-                <div id="articles-import-result" style="margin-top:10px;"></div>
-              </div>
-
-              <div id="articles-list"></div>
-            </div>
-          </div>
-
+        <div id="admin-view-equipment" class="admin-subview" style="display:none;">
           <div class="card" style="margin-bottom:20px;">
             <div class="collapsible-head"><h4 class="card-subhead">Types de chariots</h4><button class="collapse-toggle" data-collapse-target="section-cart-types">▾</button></div>
             <div id="section-cart-types">
@@ -349,45 +327,11 @@
               </div>
             </div>
           </div>
-
-          <div class="card" style="margin-bottom:20px;">
-            <div class="collapsible-head"><h4 class="card-subhead">Attribution par hôtel</h4><button class="collapse-toggle" data-collapse-target="section-attribution">▾</button></div>
-            <div id="section-attribution">
-            <p style="font-size:12.5px;color:var(--steel);margin:0 0 14px;">Par défaut, un hôtel voit tout le catalogue. Cochez des articles précis pour un hôtel afin de limiter ce qu'il peut commander — utile si certains articles (une couleur, une variante) ne concernent qu'un établissement en particulier.</p>
-            <div class="field" style="max-width:360px;margin-bottom:14px;">
-              <label>Hôtel</label>
-              <select id="articles-client-select"><option value="">— Choisir un hôtel —</option></select>
-            </div>
-            <div id="articles-client-assignment"></div>
-            </div>
-          </div>
         </div>
 
         <div id="admin-view-garage" class="admin-subview" style="display:none;">
-          <p style="font-size:12.5px;color:var(--steel);margin:0 0 16px;">Suivi du kilométrage et de l'entretien de vos véhicules. Les types de camions eux-mêmes se gèrent dans « Gestion des articles ».</p>
+          <p style="font-size:12.5px;color:var(--steel);margin:0 0 16px;">Suivi du kilométrage et de l'entretien de vos véhicules. Les types de camions eux-mêmes se gèrent dans « Chariots et camions ».</p>
           <div id="garage-trucks-list"></div>
-        </div>
-
-        <div id="admin-view-clients" class="admin-subview" style="display:none;">
-          <div class="card" style="margin-bottom:20px;">
-            <h4 class="card-subhead">Hôtels clients</h4>
-            <p style="font-size:12.5px;color:var(--steel);margin:0 0 14px;">Modifier les coordonnées d'un hôtel, réinitialiser son code d'accès s'il l'a oublié, ou en créer un manuellement.</p>
-            <button class="btn-secondary" id="btn-add-client" style="margin-bottom:14px;">+ Ajouter un hôtel</button>
-            <div id="client-form-zone"></div>
-
-            <div style="background:var(--bg);border-radius:6px;padding:12px 14px;margin-bottom:14px;">
-              <h5 style="font-size:12.5px;font-weight:600;color:var(--ink);margin:0 0 6px;">Import en masse (CSV)</h5>
-              <p style="font-size:11px;color:var(--steel-light);margin:0 0 8px;">Colonnes attendues : <span class="mono">societe, contact, tel, adresse, email</span> (obligatoires), <span class="mono">code_postal, ville, code</span> (optionnelles). Sans colonne "code", un code d'accès à 6 chiffres est généré automatiquement pour chaque nouvel hôtel — à transmettre ensuite vous-même. Un email déjà existant met à jour l'hôtel plutôt que d'en créer un double, sans jamais changer son code d'accès sauf si la colonne "code" est explicitement remplie pour cette ligne.</p>
-              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                <input type="file" id="clients-import-file" accept=".csv" style="font-size:12px;">
-                <button class="btn-secondary" id="btn-import-clients" style="width:auto;">Importer</button>
-                <a href="#" id="link-clients-template" style="font-size:11.5px;color:var(--brand);text-decoration:underline;">Télécharger un modèle</a>
-              </div>
-              <div id="clients-import-result" style="margin-top:10px;"></div>
-            </div>
-
-            <div id="clients-list"></div>
-          </div>
         </div>
 
         <div id="admin-view-billing" class="admin-subview" style="display:none;">
@@ -459,7 +403,7 @@
 
           <div class="card settings-card">
             <h4>Réglages — Logistique</h4>
-            <p>Capacité utilisée pour le calcul de charge des camions, et adresse de départ pour l'optimisation des tournées. Les types de chariots se gèrent dans l'onglet « Gestion des articles ».</p>
+            <p>Capacité utilisée pour le calcul de charge des camions, et adresse de départ pour l'optimisation des tournées. Les types de chariots se gèrent dans l'onglet « Chariots et camions ».</p>
             <div class="settings-row">
               <div class="field"><label>Charge max. d'un camion (kg)</label><input type="number" min="1" id="settings-truck-capacity" placeholder="1200"></div>
               <div class="field"><label>Poids d'un chariot vide (kg)</label><input type="number" min="0" id="settings-cart-weight" placeholder="20"></div>
@@ -482,7 +426,7 @@
             <h4>Règles de conditionnement</h4>
             <p>Logique appliquée par « Organiser le conditionnement » (détail d'une commande) pour répartir les articles dans les chariots choisis. Les deux premières règles ne se désactivent pas — ce sont des limites physiques réelles.</p>
             <ul class="rules-list">
-              <li><b>Limite de volume par chariot</b> — dépend des dimensions du chariot choisi (Gestion des articles → Types de chariots). Jamais dépassée.</li>
+              <li><b>Limite de volume par chariot</b> — dépend des dimensions du chariot choisi (Chariots et camions → Types de chariots). Jamais dépassée.</li>
               <li><b>Limite de poids par chariot</b> — <span id="rules-max-weight-echo">120</span> kg maximum, réglable ci-dessus (« Poids max. de linge par chariot »). Jamais dépassée.</li>
               <li><b>Chargement du plus lourd au plus léger</b> — dans chaque chariot, les articles les plus lourds sont placés en premier (donc au fond), pour la stabilité du chargement.</li>
               <li><b>Regroupement des références</b> — réglable ci-dessous : évite de disperser une même référence entre plusieurs chariots quand c'est possible, quitte à moins bien équilibrer le poids entre chariots.</li>
@@ -560,5 +504,8 @@
 <script src="/billing/month.js"></script>
 <script src="/billing/cash.js"></script>
 <script src="/billing/config.js"></script>
+<script src="/billing/articles.js"></script>
+<script src="/billing/prices.js"></script>
+<script src="/billing/clients.js"></script>
 </body>
 </html>

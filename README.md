@@ -113,7 +113,8 @@ frontend).
 
 ## Organisation de l'espace admin
 
-L'administration est organisée en six sous-onglets :
+L'administration est organisée en sous-onglets (les articles, tarifs et fiches hôtels sont dans **Plus → Facturation**, derrière son code ; 
+« Plus → Chariots et camions » regroupe les équipements de logistique) :
 
 - **Production** — kanban à 5 étapes (Tri → Lavage → Séchage → Repassage →
   Pliage/emballage) pour les commandes actuellement "en traitement".
@@ -253,6 +254,9 @@ Odoo reste en base et téléchargeable par les hôtels dans leur espace.
 | Factures | liste à onglets (brouillons, à encaisser, en retard, payées, avoirs), recherche, tri ; tiroir de détail (aperçu PDF, détail, historique) |
 | Devis | brouillon → finalisé (`DE-AAAA-NNNN`, valable 30 j) → accepté / refusé → converti en brouillon de facture |
 | Facturer le mois | un brouillon par hôtel pour tous les bons livrés non facturés, vérification, émission groupée |
+| Hôtels | fiche de chaque hôtel : coordonnées, SIRET/TVA, tarifs négociés, catalogue accessible, jetons d'API et webhook |
+| Articles | catalogue (prix, codes Sage, dimensions pour la logistique), impact d'un changement de prix, import CSV |
+| Tarifs par hôtel | grille articles × hôtels, modification d'un tarif en un clic, import/export CSV, journal des changements |
 | Règlements | tous les encaissements |
 | Rapprochement bancaire | import d'un relevé CSV, propositions de factures, validation ligne par ligne ; une empreinte par ligne empêche tout double enregistrement |
 | Relances | factures échues, niveau conseillé (rappel / relance / dernier rappel), texte prêt ; **toujours déclenchées par une personne** |
@@ -276,6 +280,34 @@ un SIREN/SIRET valide (obligatoire sur les factures B2B depuis le 1er sept. 2026
 - Contrôle et FEC : vérification d'intégrité (empreintes, chaînage, totaux, numérotation,
   journal) + export **FEC**.
 
+### Articles, hôtels et tarifs
+
+Le catalogue d'articles, les fiches hôtels et les tarifs négociés se gèrent **dans la
+Facturation**, donc derrière son code : ce sont les données qui déterminent ce qui est facturé.
+Les anciens écrans « Gestion des articles » et « Gestion des clients » de l'administration et leurs
+routes (`/api/admin/articles` hors logistique, `/api/admin/clients/:id/...`) ont été supprimés ; ils
+répondent 404. L'onglet **Chariots et camions** (types de chariots, de camions) reste dans
+l'administration ; la création rapide d'un hôtel depuis « Nouvelle commande » aussi.
+
+**Règles de prix**
+
+- chaque article a un **prix catalogue** (HT, 3 décimales) ; un hôtel paie ce prix, sauf là où il a un **tarif négocié** ;
+- un tarif négocié a une **date d'effet** (aujourd'hui, le 1er du mois, ou toute date) ; il ne s'applique
+  jamais avant. Un nouveau tarif clôt le précédent la veille de sa date ; les périodes ne se chevauchent jamais ;
+- le prix est **figé sur la commande à sa création**. Modifier un prix ne change jamais les commandes passées ;
+  pour corriger celles qui ne sont ni facturées ni dans un brouillon, l'action explicite
+  « Réappliquer aux BL non facturés » (fiche de l'hôtel) les recalcule au tarif en vigueur à leur date ;
+- le **catalogue accessible** d'un hôtel est soit complet (y compris les futurs articles), soit une sélection d'articles ;
+- le tarif négocié s'applique partout où une commande se crée : espace client, commande saisie, import par API
+  **et génération depuis le planning des chambres** (qui utilisait jusqu'ici le prix catalogue : corrigé) ;
+- toute modification de prix, de catalogue accessible ou de recalcul est écrite dans le **journal chaîné** de la
+  Facturation (contrôlé par « Contrôle et FEC ») et consultable par article ou par hôtel.
+
+**Opérations en masse** — pourcentage (sur le prix actuel ou le prix catalogue, sur tout ou une sélection d'articles),
+copie des tarifs d'un autre hôtel, retour au catalogue, import CSV (articles, hôtels, tarifs). Chacune affiche d'abord un
+**aperçu exact** (le même calcul que l'application, simplement annulé) puis demande le code pour appliquer.
+Les CSV acceptent `;` ou `,`, la virgule décimale, l'UTF-8 (avec ou sans BOM) et le format Excel Windows.
+
 ### Verrou de la Facturation
 
 La session administrateur ouvre tout le logiciel et dure des jours ; la facturation
@@ -286,7 +318,9 @@ un **second code, distinct du mot de passe administrateur**, défini à la premi
 - **ressaisie du code** avant chaque acte sensible : émission d'une facture ou d'un avoir,
   création d'un avoir, émission groupée du mois, export FEC, modification des coordonnées de
   l'émetteur (dont l'IBAN), téléchargement d'une sauvegarde, activation de l'envoi automatique
-  Pennylane. L'autorisation est à usage unique, liée à l'acte précis (ex. `issue:42`) et valable 90 s ;
+  Pennylane, **suppression d'un article ou d'un hôtel**, **nouveau code d'accès d'un hôtel**, **régénération d'un secret de webhook**,
+  **application d'une opération en masse sur les tarifs**, **recalcul des BL non facturés** et **tout import CSV** (articles, hôtels, tarifs).
+  L'autorisation est à usage unique, liée à l'acte précis (ex. `issue:42`, `prices-bulk:7`) et valable 90 s ;
 - 5 erreurs de code → blocage 15 minutes, conservé en base (survit à un redémarrage) ;
 - **code oublié** : sur l'hébergeur, définir `BILLING_LOCK_RESET=<valeur quelconque>` puis
   redémarrer ; le code est effacé (une seule fois par valeur distincte) et un nouveau est demandé.
@@ -345,6 +379,12 @@ relances. Sans SMTP, l'envoi répond « non configuré » (503) ; une relance fa
 `npm test` (bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
+
+- **Articles, tarifs et fiches hôtels exigent désormais le code de la Facturation** : un opérateur qui n'a que le mot de passe
+  administrateur ne peut plus les modifier (il saisit toujours les commandes, voit la liste des hôtels et peut en créer un en
+  « Nouvelle commande »). C'est voulu, à connaître avant de former l'équipe.
+- Un hôtel qui a des factures, avoirs ou devis ne peut pas être supprimé, un article utilisé par une règle de linge non plus.
+- L'ancien écran d'administration « Facture » (circuit Odoo) n'est plus relié à aucun bouton ; son code est conservé, inactif.
 
 - **Pas de transmission à une plateforme agréée (PA)** : l'obligation d'émission
   électronique pour les PME démarre au 1er septembre 2027 (à vérifier, le calendrier

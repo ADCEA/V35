@@ -736,7 +736,10 @@ function mapHeaders(headers) {
 }
 
 /**
- * Colonnes : [client], code_sage (ou code), prix, [date_debut]. Sans colonne client, `clientId` est requis.
+ * Deux présentations de fichier :
+ *  - en liste : [client], code_sage (ou code), prix, [date_debut] ; sans colonne client, `clientId` est requis ;
+ *  - en grille (celle de l'export) : code_sage puis une colonne par hôtel. Une case vide est ignorée, une case égale
+ *    au prix déjà applicable ne change rien, une case égale au prix catalogue retire le tarif négocié.
  * Les lignes sont rapprochées par nom d'hôtel / code Sage sans tenir compte des accents ni de la casse.
  */
 function importPrices(csvText, { apply = false, clientId = null, defaultDate = null } = {}) {
@@ -744,47 +747,63 @@ function importPrices(csvText, { apply = false, clientId = null, defaultDate = n
   try { parsed = parseCsv(String(csvText || '')); } catch (e) { throw new BillingError(`Fichier CSV illisible : ${e.message}`); }
   if (!parsed.rows.length) throw new BillingError('Le fichier ne contient aucune ligne de données.');
   const map = mapHeaders(parsed.headers);
-  if (!map.article || !map.prix) throw new BillingError(`Colonnes « code_sage » et « prix » requises. Colonnes trouvées : ${parsed.headers.join(', ')}.`);
-  const fixedClient = clientId ? clientRow(Number(clientId)) : null;
-  if (!map.client && !fixedClient) throw new BillingError('Ajoutez une colonne « client » ou choisissez l\'hôtel concerné avant l\'import.');
-  const fallbackDate = parseDate(defaultDate, todayParis(), "Date d'effet");
-
   const clients = db.prepare('SELECT id, societe FROM clients').all();
   const clientByName = new Map(clients.map(c => [norm(c.societe), c]));
+  const wideCols = !map.prix && map.article ? parsed.headers.filter(h => h !== map.article && clientByName.has(norm(h))) : [];
+  const wide = wideCols.length > 0;
+  if (!map.article || (!map.prix && !wide)) {
+    throw new BillingError(`Colonnes « code_sage » et « prix » requises (ou une colonne par hôtel, comme dans l'export de la grille). Colonnes trouvées : ${parsed.headers.join(', ')}.`);
+  }
+  const fixedClient = !wide && clientId ? clientRow(Number(clientId)) : null;
+  if (!wide && !map.client && !fixedClient) throw new BillingError('Ajoutez une colonne « client » ou choisissez l\'hôtel concerné avant l\'import.');
+  const fallbackDate = parseDate(defaultDate, todayParis(), "Date d'effet");
+
   const articles = db.prepare('SELECT id, name, code, sage_code, price FROM articles').all();
   const bySage = new Map(articles.map(a => [norm(a.sage_code), a]));
   const byCode = new Map(articles.map(a => [norm(a.code), a]));
 
   const lines = [];
+  const handle = (line, c, row, priceRaw) => {
+    const rec = { line, client: c ? c.societe : '', article: '', from: null, to: null, effective: null, status: 'error', error: null };
+    lines.push(rec);
+    try {
+      if (!c) throw new BillingError(`Hôtel inconnu : « ${row[map.client] || ''} ».`);
+      const ref = norm(row[map.article]);
+      const a = bySage.get(ref) || byCode.get(ref);
+      if (!a) throw new BillingError(`Article inconnu : « ${row[map.article] || ''} ».`);
+      rec.article = a.name;
+      const to = parsePrice(priceRaw, 'Prix');
+      const date = parseDate(map.date ? String(row[map.date] || '').trim() : '', fallbackDate, "Date d'effet");
+      rec.to = to; rec.effective = date;
+      rec.from = resolveClientPrice(c.id, a.id, date);
+      if (wide && to === rec.from) { rec.status = 'same'; return; }
+      if (wide && to === round3(a.price)) {                       // retour au catalogue
+        const d = dropPrice(c.id, a, date);
+        rec.status = d.changed ? 'ok' : 'same';
+        if (d.changed) log('client_price_removed', { clientId: c.id, client: c.societe, articleId: a.id, article: a.name, sageCode: a.sage_code, from: d.from, to: d.to, effective: date, via: 'import' });
+        return;
+      }
+      const w = writePrice(c.id, a, to, date);
+      rec.status = w.changed ? 'ok' : 'same';
+      if (w.changed) log('client_price_set', { clientId: c.id, client: c.societe, articleId: a.id, article: a.name, sageCode: a.sage_code, from: w.from, to, effective: date, via: 'import' });
+    } catch (e) {
+      if (!(e instanceof BillingError)) throw e;
+      rec.error = e.message;
+    }
+  };
   transact(apply, () => {
     parsed.rows.forEach((row, idx) => {
       const line = idx + 2;
-      const rec = { line, client: '', article: '', from: null, to: null, effective: null, status: 'error', error: null };
-      lines.push(rec);
-      try {
-        const c = fixedClient || clientByName.get(norm(row[map.client]));
-        if (!c) throw new BillingError(`Hôtel inconnu : « ${row[map.client] || ''} ».`);
-        rec.client = c.societe;
-        const ref = norm(row[map.article]);
-        const a = bySage.get(ref) || byCode.get(ref);
-        if (!a) throw new BillingError(`Article inconnu : « ${row[map.article] || ''} ».`);
-        rec.article = a.name;
-        const to = parsePrice(row[map.prix], 'Prix');
-        const date = parseDate(map.date ? String(row[map.date] || '').trim() : '', fallbackDate, "Date d'effet");
-        rec.to = to; rec.effective = date;
-        rec.from = resolveClientPrice(c.id, a.id, date);
-        const w = writePrice(c.id, a, to, date);
-        rec.status = w.changed ? 'ok' : 'same';
-        if (w.changed) log('client_price_set', { clientId: c.id, client: c.societe, articleId: a.id, article: a.name, sageCode: a.sage_code, from: w.from, to, effective: date, via: 'import' });
-      } catch (e) {
-        if (!(e instanceof BillingError)) throw e;
-        rec.error = e.message;
+      if (wide) {
+        for (const col of wideCols) if (String(row[col] ?? '').trim() !== '') handle(line, clientByName.get(norm(col)), row, row[col]);
+      } else {
+        handle(line, fixedClient || clientByName.get(norm(row[map.client])), row, row[map.prix]);
       }
     });
     return lines;
   });
   const n = (s) => lines.filter(l => l.status === s).length;
-  return { applied: !!apply, summary: { total: lines.length, changed: n('ok'), same: n('same'), errors: n('error') }, lines };
+  return { applied: !!apply, format: wide ? 'grille' : 'liste', summary: { total: lines.length, changed: n('ok'), same: n('same'), errors: n('error') }, lines };
 }
 
 // ---- grille articles × hôtels ----

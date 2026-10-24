@@ -117,4 +117,112 @@
 
   // Ouvre un PDF/fichier protégé par la session (nouvel onglet).
   Bill.openPdf = (path) => window.open(Bill.base + path, '_blank', 'noopener');
+
+  // ---------- catalogue et tarifs : aides communes ----------
+
+  const NF3 = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+  Bill.num3 = (n) => (n == null ? '—' : NF3.format(n));
+  Bill.price = (n) => (n == null ? '—' : NF3.format(n) + ' €');
+  // Écart en % de `to` par rapport à `from` (« −10 % », « +4,5 % »).
+  Bill.pct = (from, to) => {
+    if (!from || to == null) return '';
+    const p = ((to - from) / from) * 100;
+    if (Math.abs(p) < 0.05) return '0 %';
+    return (p > 0 ? '+' : '−') + Math.abs(p).toFixed(Math.abs(p) < 10 ? 1 : 0).replace('.', ',') + ' %';
+  };
+  // Saisie décimale française tolérante (« 1,35 » ou « 1.35 »). NaN si illisible.
+  Bill.parsePrice = (s) => { const t = String(s ?? '').replace(/\s/g, '').replace(',', '.'); return t === '' ? NaN : Number(t); };
+
+  // Lit un fichier CSV choisi par l'utilisateur. Excel en français enregistre souvent en Windows-1252 :
+  // on essaie l'UTF-8 strict, puis ce codage, pour que les accents ne se transforment pas en « � ».
+  Bill.readText = async (file) => {
+    if (!file) throw new Error('Choisissez d\'abord un fichier.');
+    if (file.size > 2.5 * 1024 * 1024) throw new Error('Fichier trop volumineux (2,5 Mo maximum).');
+    const buf = await file.arrayBuffer();
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch (_) { return new TextDecoder('windows-1252').decode(buf); }
+  };
+  // Enregistre un texte CSV (avec BOM pour qu'Excel reconnaisse l'UTF-8).
+  Bill.saveText = (filename, text) => {
+    const url = URL.createObjectURL(new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
+
+  // Petit encadré de liste (erreurs, doublons…) pour les comptes rendus d'import.
+  Bill.noticeList = (title, items, cls = 'warn') => (items && items.length
+    ? `<div class="bl-alert ${cls}"><b>${e(title)}</b><ul>${items.slice(0, 40).map(i => `<li>${e(i)}</li>`).join('')}${items.length > 40 ? `<li>… et ${items.length - 40} autres</li>` : ''}</ul></div>` : '');
+
+  // Opération en deux temps : on remplit le formulaire, on VOIT d'abord le résultat (aperçu exact, rien n'est écrit),
+  // puis on applique après ressaisie du code de la Facturation.
+  //   preview(m) → { html, canApply, confirm }     apply() → effectue l'opération
+  Bill.previewThenConfirm = function ({ title, body, previewLabel = 'Voir l\'aperçu', applyLabel = 'Appliquer', scope, preview, apply, onOpen, wide = true }) {
+    let stage = 'check'; let confirmText = '';
+    const setLabel = (m, t) => { m.el.querySelector('.bl-foot .primary').textContent = t; };
+    return Bill.modal({
+      title, wide,
+      body: `${body}<div id="pv-out" style="margin-top:14px"></div>`,
+      buttons: [
+        { label: 'Annuler', onClick: async () => {} },
+        { label: previewLabel, primary: true, onClick: async (m) => {
+          if (stage === 'check') {
+            const r = await preview(m);
+            m.$('#pv-out').innerHTML = r.html;
+            if (r.canApply) { stage = 'apply'; confirmText = r.confirm || ''; setLabel(m, applyLabel); }
+            return true;
+          }
+          m.close();
+          Bill.sensitive({ title, scope: typeof scope === 'function' ? scope() : scope, text: confirmText, okLabel: applyLabel, onSubmit: apply });
+          return true;
+        } },
+      ],
+      onOpen: (m) => {
+        // Toute modification du formulaire rend l'aperçu caduc : on repart de la vérification.
+        const reset = (ev) => { if (ev.target.closest('#pv-out') || stage === 'check') return; stage = 'check'; setLabel(m, previewLabel); m.$('#pv-out').innerHTML = ''; };
+        m.el.addEventListener('input', reset); m.el.addEventListener('change', reset);
+        if (onOpen) onOpen(m);
+      },
+    });
+  };
+
+  // Import d'un fichier CSV avec aperçu, puis application après ressaisie du code.
+  Bill.csvImport = function ({ title, intro, template, path, scope, extraFields = '', extraBody = () => ({}), renderPreview, onDone }) {
+    let csv = ''; let extra = {};
+    return Bill.previewThenConfirm({
+      title, applyLabel: 'Importer', previewLabel: 'Vérifier le fichier', scope,
+      body: `<p class="bl-note">${intro}</p>${extraFields}
+        <div class="bl-field"><label for="ci-f">Fichier CSV</label><input id="ci-f" type="file" accept=".csv,text/csv,text/plain">
+        ${template ? `<div class="bl-hint"><button type="button" class="bl-btn link small" id="ci-tpl">Télécharger un modèle de fichier</button> — s'ouvre dans Excel ; séparateur « , » ou « ; » accepté.</div>` : ''}</div>`,
+      onOpen: (m) => { if (template) m.$('#ci-tpl').onclick = () => Bill.saveText(template.name, template.text); },
+      preview: async (m) => {
+        csv = await Bill.readText(m.$('#ci-f').files[0]);
+        extra = extraBody(m);   // relevé à ce moment : la fenêtre est refermée au moment d'appliquer
+        const r = await Bill.post(path, { csv, ...extra });
+        return renderPreview(r);
+      },
+      apply: async () => { const r = await Bill.post(path, { csv, ...extra, apply: true }); if (onDone) onDone(r); },
+    });
+  };
+
+  // Phrase décrivant une ligne du journal des prix.
+  Bill.describePriceEvent = (ev) => {
+    const d = ev.detail || {}; const who = d.client ? `${d.client} — ` : '';
+    const via = d.via === 'import' ? ' (import)' : '';
+    switch (ev.action) {
+      case 'article_price_changed': return `Prix catalogue de « ${d.name} » : ${Bill.price(d.from)} → ${Bill.price(d.to)}${via}`;
+      case 'article_created': return `Article créé : ${d.name} à ${Bill.price(d.price)}${via}`;
+      case 'article_deleted': return `Article supprimé : ${d.name}${d.clientPricesRemoved ? ` (${d.clientPricesRemoved} tarif(s) négocié(s) retiré(s))` : ''}`;
+      case 'client_price_set': return `${who}${d.article} : ${Bill.price(d.from)} → ${Bill.price(d.to)} à partir du ${Bill.dFr(d.effective)}${via}`;
+      case 'client_price_removed': return `${who}${d.article} : retour au prix catalogue (${Bill.price(d.to)}) à partir du ${Bill.dFr(d.effective)}`;
+      case 'client_prices_bulk': {
+        const how = d.mode === 'percent' ? `${d.percent > 0 ? '+' : '−'}${Math.abs(d.percent)} %` : d.mode === 'copy' ? 'copie des tarifs d\'un autre hôtel' : 'retour au prix catalogue';
+        return `${who}${Bill.plural(d.count, 'tarif modifié', 'tarifs modifiés')} (${how}) à partir du ${Bill.dFr(d.effective)}`;
+      }
+      case 'orders_repriced': return `${who}${Bill.plural(d.orders, 'BL recalculé', 'BL recalculés')} depuis le ${Bill.dFr(d.from)} (écart ${Bill.eur(d.deltaCents)})`;
+      case 'client_catalog_set': return `${who}${d.restricted ? `catalogue limité à ${Bill.plural(d.count, 'article', 'articles')}` : 'catalogue complet'}`;
+      default: return ev.action;
+    }
+  };
+  Bill.priceLogHtml = (events, empty = 'Aucun changement enregistré pour le moment.') => (events.length
+    ? `<ul class="bl-timeline">${events.map(ev => `<li><b>${e(Bill.describePriceEvent(ev))}</b><small>${Bill.dtFr(ev.at)}</small></li>`).join('')}</ul>`
+    : `<p class="bl-muted">${e(empty)}</p>`);
 })();

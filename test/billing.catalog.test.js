@@ -327,3 +327,38 @@ test('import des hôtels : simulation sans codes, application avec codes', () =>
   assert.match(done.created[0].code, /^\d{6}$/);
   assert.equal(db.prepare("SELECT COUNT(*) c FROM clients WHERE email='neuf@exemple.fr'").get().c, 1);
 });
+
+test('import des tarifs en grille : l’export revient tel quel, seules les cases modifiées comptent', () => {
+  const today = '2026-10-24';
+  const csv = catalog.matrixCsv();
+  const same = catalog.importPrices(csv, { apply: false });
+  assert.equal(same.format, 'grille');
+  assert.equal(same.summary.changed, 0, 'un export réimporté tel quel ne change rien');
+  assert.equal(same.summary.errors, 0);
+  assert.ok(same.summary.same > 0);
+
+  // on modifie deux cases dans le tableur : un nouveau tarif négocié, et un retour au catalogue
+  const catalogue = catalog.getArticle(drap).price;
+  assert.notEqual(price(alpha, drap, today), catalogue, 'préalable : Alpha a un tarif négocié sur cet article');
+  assert.equal(price(beta, drap, today), catalogue, 'préalable : Beta paie le catalogue');
+  const rows = csv.replace(/^\uFEFF/, '').trim().split('\r\n').map(l => l.split(';'));
+  const col = (name) => rows[0].indexOf(name);
+  const drapRow = rows.find(r => r[0] === 'B-DP2');
+  const before = db.prepare('SELECT COUNT(*) c FROM client_prices').get().c;
+  drapRow[col('Beta Resort')] = '1,11';                           // nouveau tarif négocié
+  drapRow[col('Hôtel Alpha')] = String(catalogue).replace('.', ',');   // = catalogue : retire le tarif négocié
+  const edited = '\uFEFF' + rows.map(r => r.join(';')).join('\r\n') + '\r\n';
+  const preview = catalog.importPrices(edited, { apply: false, defaultDate: today });
+  assert.deepEqual([preview.summary.changed, preview.summary.errors], [2, 0]);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM client_prices').get().c, before, "l'aperçu n'écrit rien");
+  catalog.importPrices(edited, { apply: true, defaultDate: today });
+  assert.equal(price(beta, drap, today), 1.11);
+  assert.equal(price(alpha, drap, today), catalogue, 'retour au prix catalogue');
+  assert.equal(events('client_price_removed').filter(e => e.d.via === 'import').length, 1);
+  assert.equal(catalog.importPrices(edited, { apply: true, defaultDate: today }).summary.changed, 0, 'idempotent');
+
+  // les cases vides (article non proposé à l'hôtel) sont ignorées
+  assert.equal(catalog.importPrices('code_sage;Hôtel Alpha;Beta Resort\nB-DP2;;', { apply: false }).summary.total, 0);
+  // un nom de colonne inconnu n'est pas un hôtel : message d'aide
+  rejects(() => catalog.importPrices('code_sage;Inconnu SARL\nB-DP2;1', {}), /une colonne par hôtel/);
+});
