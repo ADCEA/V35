@@ -18,7 +18,7 @@ const emptyDay = (date) => ({
   date, deliveredCount: 0, deliveredHtCents: 0,
   invoiceCount: 0, invoicedHtCents: 0, invoicedVatCents: 0, invoicedTtcCents: 0,
   creditCount: 0, creditedTtcCents: 0,
-  paymentCount: 0, paidCents: 0, reversedCents: 0, paidByMethod: {},
+  paymentCount: 0, paidCents: 0, reversedCents: 0, discountCents: 0, paidByMethod: {},
 });
 
 function daily(from, to) {
@@ -54,11 +54,18 @@ function daily(from, to) {
   // Encaissements
   for (const r of db.prepare(`
     SELECT paid_on AS date, method, SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END) AS received, SUM(CASE WHEN amount_cents < 0 THEN -amount_cents ELSE 0 END) AS reversed, COUNT(*) AS n
-    FROM native_payments WHERE paid_on BETWEEN ? AND ? GROUP BY paid_on, method
+    FROM native_payments WHERE paid_on BETWEEN ? AND ? AND method <> 'escompte' GROUP BY paid_on, method
   `).all(p.from, p.to)) {
     const d = days.get(r.date); if (!d) continue;
     d.paymentCount += r.n; d.paidCents += r.received - r.reversed; d.reversedCents += r.reversed;
     d.paidByMethod[r.method] = (d.paidByMethod[r.method] || 0) + (r.received - r.reversed);
+  }
+
+  // Escomptes accordés : ce n'est pas de l'argent reçu, mais ils soldent des factures.
+  for (const r of db.prepare(`
+    SELECT paid_on AS date, SUM(amount_cents) AS cents FROM native_payments WHERE method = 'escompte' AND paid_on BETWEEN ? AND ? GROUP BY paid_on
+  `).all(p.from, p.to)) {
+    const d = days.get(r.date); if (d) d.discountCents = r.cents;
   }
 
   const list = [...days.values()];
@@ -75,7 +82,7 @@ function daily(from, to) {
     deliveredCount: sum('deliveredCount'), deliveredHtCents: sum('deliveredHtCents'),
     invoiceCount: sum('invoiceCount'), invoicedHtCents: sum('invoicedHtCents'), invoicedVatCents: sum('invoicedVatCents'), invoicedTtcCents: sum('invoicedTtcCents'),
     creditCount: sum('creditCount'), creditedTtcCents: sum('creditedTtcCents'),
-    paymentCount: sum('paymentCount'), paidCents: sum('paidCents'), paidByMethod: byMethod,
+    paymentCount: sum('paymentCount'), paidCents: sum('paidCents'), discountCents: sum('discountCents'), paidByMethod: byMethod,
   };
   return { from: p.from, to: p.to, days: list, totals, outstandingCents: Math.max(0, open) };
 }
@@ -95,9 +102,13 @@ function dayDetail(date) {
   `).all(date);
   const payments = db.prepare(`
     SELECT p.id, p.amount_cents AS amountCents, p.method, p.reference, i.id AS invoiceId, i.number, c.societe AS clientName
-    FROM native_payments p JOIN native_invoices i ON i.id = p.invoice_id JOIN clients c ON c.id = i.client_id WHERE p.paid_on = ? ORDER BY p.id
+    FROM native_payments p JOIN native_invoices i ON i.id = p.invoice_id JOIN clients c ON c.id = i.client_id WHERE p.paid_on = ? AND p.method <> 'escompte' ORDER BY p.id
   `).all(date);
-  return { date, deliveries, invoices, payments };
+  const discounts = db.prepare(`
+    SELECT p.id, p.amount_cents AS amountCents, i.id AS invoiceId, i.number, c.societe AS clientName
+    FROM native_payments p JOIN native_invoices i ON i.id = p.invoice_id JOIN clients c ON c.id = i.client_id WHERE p.paid_on = ? AND p.method = 'escompte' ORDER BY p.id
+  `).all(date);
+  return { date, deliveries, invoices, payments, discounts };
 }
 
 module.exports = { daily, dayDetail };

@@ -140,7 +140,7 @@ function dashboard(today = engine.todayParis()) {
   const months = lastMonths(today, 12);
   const invoicedBy = new Map(months.map(m => [m, 0])); const collectedBy = new Map(months.map(m => [m, 0]));
   for (const d of issued) { const m = monthOf(d.issueDate); if (invoicedBy.has(m)) invoicedBy.set(m, invoicedBy.get(m) + sign(d) * d.totalHtCents); }
-  for (const p of db.prepare('SELECT paid_on, amount_cents FROM native_payments').all()) {
+  for (const p of db.prepare("SELECT paid_on, amount_cents FROM native_payments WHERE method <> 'escompte'").all()) {
     const m = monthOf(p.paid_on); if (collectedBy.has(m)) collectedBy.set(m, collectedBy.get(m) + p.amount_cents);
   }
   const series = months.map(m => ({ month: m, invoicedHtCents: invoicedBy.get(m), collectedCents: collectedBy.get(m) }));
@@ -221,6 +221,8 @@ const EVENT_LABEL = {
   issued: 'Émis',
   payment_recorded: 'Règlement enregistré',
   payment_reversed: 'Règlement annulé (écriture inverse)',
+  discount_granted: 'Escompte accordé (règlement anticipé)',
+  discount_reversed: 'Escompte annulé',
   pennylane_sent: 'Envoyé à Pennylane',
   pennylane_error: "Échec d'envoi à Pennylane",
 };
@@ -234,6 +236,7 @@ function timeline(invoiceId) {
     let detail = '';
     if (e.action === 'issued') detail = `${d.number} · empreinte ${String(d.hash || '').slice(0, 10)}…`;
     if (e.action.startsWith('payment_')) detail = `${fmtEur(Math.abs(d.amountCents || 0))} (${d.method || ''}) le ${d.paidOn || ''}`;
+    if (e.action.startsWith('discount_')) detail = `${fmtEur(Math.abs(d.amountCents || 0))} TTC${d.ratePct ? ` (${String(d.ratePct).replace('.', ',')} %)` : ''} le ${d.paidOn || ''}`;
     if (e.action === 'pennylane_sent') detail = d.pennylaneId ? `Réf. Pennylane ${d.pennylaneId}` : '';
     if (e.action === 'pennylane_error') detail = d.error || '';
     if (e.action === 'credit_note_draft_created') detail = d.reason ? `Motif : ${d.reason}` : '';
@@ -259,7 +262,10 @@ function listPayments({ from, to, q, limit = 300 } = {}) {
     && (!q || norm(`${r.number} ${r.client_name} ${r.reference || ''}`).includes(norm(q))));
   return {
     payments: rows.slice(0, limit).map(r => ({ id: r.id, paidOn: r.paid_on, amountCents: r.amount_cents, method: r.method, reference: r.reference, fromBank: !!r.from_bank, invoiceId: r.invoice_id, number: r.number, clientName: r.client_name })),
-    totalCents: rows.reduce((s, r) => s + r.amount_cents, 0), count: rows.length,
+    // Les escomptes figurent dans la liste (ils expliquent l'écart avec la facture) mais ne sont pas de l'argent encaissé.
+    totalCents: rows.reduce((s, r) => s + (r.method === 'escompte' ? 0 : r.amount_cents), 0),
+    discountCents: rows.reduce((s, r) => s + (r.method === 'escompte' ? r.amount_cents : 0), 0),
+    count: rows.filter(r => r.method !== 'escompte').length,
   };
 }
 

@@ -30,7 +30,10 @@ function present(inv) {
     totalHtCents: inv.total_ht_cents, totalVatCents: inv.total_vat_cents, totalTtcCents: inv.total_ttc_cents,
     vatBreakdown: inv.vatBreakdown, orderIds: inv.orderIds,
     buyerName: inv.buyer?.name || null,
+    // paidCents = tout ce qui solde la facture (argent reçu + escompte accordé) ; cashCents = argent reçu seul.
     paidCents: issued && inv.kind === 'invoice' ? engine.paidCents(inv.id) : 0,
+    cashCents: issued && inv.kind === 'invoice' ? engine.cashCents(inv.id) : 0,
+    discountCents: issued && inv.kind === 'invoice' ? engine.discountSums(inv.id).ttcCents : 0,
     creditedCents: issued && inv.kind === 'invoice' ? engine.creditedCents(inv.id) : 0,
     balanceCents: issued ? engine.balanceCents(inv) : null,
     paymentStatus: engine.paymentStatus(inv),

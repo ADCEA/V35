@@ -15,6 +15,7 @@
 const crypto = require('crypto');
 const db = require('../db');
 const { aggregateByArticle } = require('../utils/invoiceBuilder');
+const escompte = require('./escompte');
 
 class BillingError extends Error {
   constructor(message, status = 400) {
@@ -470,16 +471,22 @@ function snapshotBuyer(client) {
   };
 }
 
-function snapshotTerms(settings, issueDate, kind) {
-  return {
+function snapshotTerms(settings, issueDate, kind, { client, inv } = {}) {
+  const dueDate = kind === 'invoice' ? addDays(issueDate, settings.payment_terms_days) : null;
+  const terms = {
     paymentTermsDays: settings.payment_terms_days,
-    dueDate: kind === 'invoice' ? addDays(issueDate, settings.payment_terms_days) : null,
+    dueDate,
     latePenaltyText: settings.late_penalty_text,
     recoveryIndemnityCents: 4000, // indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.)
-    earlyPaymentDiscount: 'Pas d\'escompte pour paiement anticipé.',
+    earlyPaymentDiscount: escompte.NO_DISCOUNT_TEXT,
     vatOnDebits: Boolean(settings.vat_on_debits),
     footerNote: settings.footer_note || null,
   };
+  // Escompte pour règlement anticipé : l'offre est figée avec la facture (taux, date limite, montants).
+  // La clé n'existe que si une offre est faite : les documents émis avant n'en portent aucune trace.
+  const offer = inv ? escompte.buildOffer({ settings, client, inv, issueDate, dueDate }) : null;
+  if (offer) { terms.earlyPaymentDiscount = offer.text; terms.earlyDiscount = offer.offer; }
+  return terms;
 }
 
 function missingMentions(seller, buyer, inv, issueDate) {
@@ -583,7 +590,7 @@ function issueInvoice(invoiceId, opts = {}) {
     const chainNo = last ? last.chain_no + 1 : 1;
     const prevHash = last ? last.hash : null;
 
-    const terms = snapshotTerms(settings, issueDate, inv.kind);
+    const terms = snapshotTerms(settings, issueDate, inv.kind, { client, inv });
     const frozen = { ...inv, seller, buyer, terms };
     const hash = sha256(canonicalDocument(frozen, number, issueDate, prevHash));
     const issuedAt = new Date().toISOString();
@@ -605,8 +612,21 @@ function issueInvoice(invoiceId, opts = {}) {
 
 // ---------- règlements ----------
 
+// Total réglé : encaissements ET escomptes accordés (c'est ce qui solde la facture).
 function paidCents(invoiceId) {
   return db.prepare('SELECT COALESCE(SUM(amount_cents),0) AS s FROM native_payments WHERE invoice_id = ?').get(invoiceId).s;
+}
+
+// Argent réellement reçu (hors escompte).
+function cashCents(invoiceId) {
+  return db.prepare("SELECT COALESCE(SUM(amount_cents),0) AS s FROM native_payments WHERE invoice_id = ? AND method <> 'escompte'").get(invoiceId).s;
+}
+
+// Escomptes accordés (net des annulations) : TTC, HT et TVA.
+function discountSums(invoiceId) {
+  const r = db.prepare(`SELECT COALESCE(SUM(amount_cents),0) AS ttc, COALESCE(SUM(discount_ht_cents),0) AS ht, COALESCE(SUM(discount_vat_cents),0) AS vat
+    FROM native_payments WHERE invoice_id = ? AND method = 'escompte'`).get(invoiceId);
+  return { ttcCents: r.ttc, htCents: r.ht, vatCents: r.vat };
 }
 
 function creditedCents(invoiceId) {
@@ -628,20 +648,67 @@ function paymentStatus(inv) {
   return inv.due_date && inv.due_date < todayParis() ? 'overdue' : 'unpaid';
 }
 
-function recordPayment(invoiceId, { paidOn, amount, method, reference, bankFingerprint }) {
+/**
+ * Situation de l'escompte d'une facture émise : offre figée à l'émission, ce qui reste
+ * possible aujourd'hui (selon la date de règlement visée) et ce qui a déjà été accordé.
+ * null si la facture ne prévoyait aucun escompte.
+ */
+function escompteStatus(inv, onDate = todayParis()) {
+  const offer = inv.terms && inv.terms.earlyDiscount;
+  if (!offer || inv.status !== 'issued' || inv.kind !== 'invoice') return null;
+  const granted = discountSums(inv.id);
+  const balance = balanceCents(inv);
+  const open = balance > 0 && onDate <= offer.deadline;
+  // Montants sur le reste dû actuel, que le délai soit passé ou non (l'écran les affiche selon la date saisie).
+  const now = balance > 0 ? escompte.amounts({ vatBreakdown: inv.vatBreakdown, total_ttc_cents: inv.total_ttc_cents }, balance, offer.ratePct) : null;
+  return {
+    ratePct: offer.ratePct, hours: offer.hours, deadline: offer.deadline,
+    open, expired: balance > 0 && onDate > offer.deadline,
+    discountCents: now ? now.ttcCents : 0, netCents: now ? balance - now.ttcCents : null,
+    grantedCents: granted.ttcCents,
+  };
+}
+
+function recordPayment(invoiceId, { paidOn, amount, method, reference, bankFingerprint, withDiscount, reverseDiscount }) {
   const inv = loadInvoice(invoiceId);
   if (!inv) throw new BillingError('Facture introuvable.', 404);
   if (inv.status !== 'issued' || inv.kind !== 'invoice') throw new BillingError("Un règlement ne s'enregistre que sur une facture émise.");
-  const amountCents = Math.round(Number(amount) * 100);
-  if (!Number.isFinite(amountCents) || amountCents === 0) throw new BillingError('Montant invalide.');
+  const given = amount !== undefined && amount !== null && amount !== '';
+  let amountCents = given ? Math.round(Number(amount) * 100) : null;
+  // Avec escompte, le montant se déduit de la facture ; s'il est donné, il doit y correspondre.
+  if (given || !withDiscount) {
+    if (!Number.isFinite(amountCents) || amountCents === 0) throw new BillingError('Montant invalide.');
+  }
+  if (withDiscount && reverseDiscount) throw new BillingError("Un escompte s'accorde ou s'annule, pas les deux à la fois.");
+  if (reverseDiscount && !(amountCents < 0)) throw new BillingError("L'annulation d'un escompte accompagne l'annulation d'un règlement.");
   const date = paidOn || todayParis();
   if (!isIsoDate(date)) throw new BillingError('Date de règlement invalide.');
   const methods = ['virement', 'cheque', 'prelevement', 'carte', 'especes', 'autre'];
   const m = methods.includes(method) ? method : 'virement';
   const run = db.transaction(() => {
     const bal = balanceCents(inv);
+    let disc = null;
+    if (withDiscount) {
+      const offer = inv.terms && inv.terms.earlyDiscount;
+      if (!offer) throw new BillingError("Cette facture ne propose pas d'escompte.");
+      if (bal <= 0) throw new BillingError('Cette facture est déjà soldée.');
+      if (date > offer.deadline) {
+        throw new BillingError(`Le délai de l'escompte est dépassé (règlement attendu au plus tard le ${escompte.dateFr(offer.deadline)}). Pour une remise exceptionnelle, émettez un avoir.`);
+      }
+      disc = escompte.amounts({ vatBreakdown: inv.vatBreakdown, total_ttc_cents: inv.total_ttc_cents }, bal, offer.ratePct);
+      if (disc.ttcCents <= 0) throw new BillingError("Escompte nul sur ce reste dû.");
+      const net = bal - disc.ttcCents;
+      if (amountCents === null) amountCents = net;
+      if (amountCents !== net) throw new BillingError(`Avec l'escompte de ${escompte.pct(offer.ratePct)}, le règlement attendu est de ${escompte.eur(net)} (au lieu de ${escompte.eur(bal)}).`);
+      disc.ratePct = offer.ratePct;
+    }
     if (amountCents > 0 && amountCents > bal) throw new BillingError(`Le règlement dépasse le reste à payer (${(bal / 100).toFixed(2)} €).`);
-    if (amountCents < 0 && -amountCents > paidCents(invoiceId)) throw new BillingError("L'écriture inverse dépasse le total déjà réglé.");
+    if (amountCents < 0 && -amountCents > cashCents(invoiceId)) throw new BillingError("L'écriture inverse dépasse le total déjà réglé.");
+    let undone = null;
+    if (reverseDiscount) {
+      undone = discountSums(invoiceId);
+      if (undone.ttcCents <= 0) throw new BillingError('Aucun escompte à annuler sur cette facture.');
+    }
     try {
       db.prepare('INSERT INTO native_payments (invoice_id, paid_on, amount_cents, method, reference, bank_fingerprint) VALUES (?,?,?,?,?,?)')
         .run(invoiceId, date, amountCents, m, reference ? String(reference).slice(0, 120) : null, bankFingerprint || null);
@@ -650,6 +717,15 @@ function recordPayment(invoiceId, { paidOn, amount, method, reference, bankFinge
       throw e;
     }
     logEvent(amountCents > 0 ? 'payment_recorded' : 'payment_reversed', invoiceId, { amountCents, method: m, paidOn: date, ...(bankFingerprint ? { bank: true } : {}) });
+    const insertDiscount = db.prepare("INSERT INTO native_payments (invoice_id, paid_on, amount_cents, method, reference, discount_ht_cents, discount_vat_cents) VALUES (?,?,?,'escompte',?,?,?)");
+    if (disc) {
+      insertDiscount.run(invoiceId, date, disc.ttcCents, `Escompte ${escompte.pct(disc.ratePct)} pour règlement anticipé`, disc.htCents, disc.vatCents);
+      logEvent('discount_granted', invoiceId, { amountCents: disc.ttcCents, htCents: disc.htCents, vatCents: disc.vatCents, ratePct: disc.ratePct, paidOn: date });
+    }
+    if (undone) {
+      insertDiscount.run(invoiceId, date, -undone.ttcCents, "Annulation de l'escompte accordé", -undone.htCents, -undone.vatCents);
+      logEvent('discount_reversed', invoiceId, { amountCents: undone.ttcCents, htCents: undone.htCents, vatCents: undone.vatCents, paidOn: date });
+    }
   });
   run.immediate();
   return loadInvoice(invoiceId);
@@ -702,7 +778,7 @@ function previewDraft(invoiceId, issueDateOverride) {
   const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(inv.client_id);
   const seller = snapshotSeller(settings);
   const buyer = snapshotBuyer(client);
-  const terms = snapshotTerms(settings, issueDate, inv.kind);
+  const terms = snapshotTerms(settings, issueDate, inv.kind, { client, inv });
   const problems = inv.status === 'draft' ? missingMentions(seller, buyer, inv, issueDate) : [];
   return { seller, buyer, terms, issueDate, problems };
 }
@@ -713,5 +789,5 @@ module.exports = {
   BillingError, todayParis, addDays, lineCents, computeTotals, sirenFrom, luhnOk,
   getSettings, loadInvoice, listInvoiceableOrders,
   createDraftFromOrders, updateDraft, deleteDraft, createCreditNoteDraft, issueInvoice,
-  recordPayment, paidCents, creditedCents, balanceCents, paymentStatus, verifyIntegrity,
+  recordPayment, paidCents, cashCents, discountSums, escompteStatus, creditedCents, balanceCents, paymentStatus, verifyIntegrity,
 };

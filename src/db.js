@@ -226,6 +226,11 @@ if (clientsColumns.length > 0 && !clientsColumns.includes('code_postal')) {
   db.exec(`ALTER TABLE clients ADD COLUMN code_postal TEXT;`);
   db.exec(`ALTER TABLE clients ADD COLUMN ville TEXT;`);
 }
+// Escompte pour règlement anticipé : NULL = suit le réglage général de la Facturation,
+// 'on' = toujours proposé à cet hôtel, 'off' = jamais.
+if (clientsColumns.length > 0 && !clientsColumns.includes('escompte')) {
+  db.exec(`ALTER TABLE clients ADD COLUMN escompte TEXT CHECK (escompte IS NULL OR escompte IN ('on','off'));`);
+}
 
 // L'email client devient facultatif (fiche créée avec le seul nom). SQLite
 // ne sait pas retirer un NOT NULL : on recrée la table à l'identique, sans

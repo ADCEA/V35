@@ -7,12 +7,12 @@
   async function loadPayments(main) {
     const box = main.querySelector('#pa-table');
     let r; try { r = await Bill.get(`/payments?q=${encodeURIComponent(P.q)}&from=${P.from}&to=${P.to}`); } catch (err) { return Bill.fail(err, box); }
-    main.querySelector('#pa-sum').textContent = r.count ? `${plural(r.count, 'règlement', 'règlements')} · ${eur(r.totalCents)}` : '';
+    main.querySelector('#pa-sum').textContent = r.count ? `${plural(r.count, 'règlement', 'règlements')} · ${eur(r.totalCents)}${r.discountCents ? ` · escomptes accordés ${eur(r.discountCents)}` : ''}` : '';
     if (!r.payments.length) { box.innerHTML = `<div class="bl-empty"><b>${P.q || P.from || P.to ? 'Aucun résultat' : 'Aucun règlement enregistré'}</b>Les règlements apparaissent ici dès que vous les saisissez sur une facture ou par le rapprochement bancaire.</div>`; return; }
     box.innerHTML = `<div class="bl-tablewrap"><table class="bl-table"><thead><tr><th>Date</th><th>Hôtel</th><th>Facture</th><th>Mode</th><th>Référence</th><th class="r">Montant</th></tr></thead><tbody>
       ${r.payments.map(p => `<tr class="bl-row" tabindex="0" data-inv="${p.invoiceId}"><td class="bl-num">${dFr(p.paidOn)}</td><td class="client">${e(p.clientName)}</td><td class="bl-num">${e(p.number)}</td>
-        <td>${e(Bill.METHODS[p.method] || p.method)}${p.fromBank ? ' <span class="bl-ind">relevé</span>' : ''}</td><td class="bl-muted">${e(p.reference || '')}</td>
-        <td class="r bl-num" style="${p.amountCents < 0 ? 'color:var(--bl-late)' : ''}">${eur(p.amountCents)}</td></tr>`).join('')}</tbody></table></div>`;
+        <td>${p.method === 'escompte' ? '<i>Escompte accordé</i>' : e(Bill.METHODS[p.method] || p.method)}${p.fromBank ? ' <span class="bl-ind">relevé</span>' : ''}</td><td class="bl-muted">${e(p.reference || '')}</td>
+        <td class="r bl-num" style="${p.amountCents < 0 ? 'color:var(--bl-late)' : p.method === 'escompte' ? 'color:var(--bl-faint,#888)' : ''}">${p.method === 'escompte' ? '<span title="Remise pour règlement anticipé : ce n\'est pas de l\'argent reçu">(' + eur(p.amountCents) + ')</span>' : eur(p.amountCents)}</td></tr>`).join('')}</tbody></table></div>`;
     box.querySelectorAll('tr.bl-row').forEach(tr => { const open = () => Bill.openInvoice(Number(tr.dataset.inv), () => loadPayments(main)); tr.onclick = open; tr.onkeydown = (ev) => { if (ev.key === 'Enter') open(); }; });
   }
   Bill.register('payments', {
