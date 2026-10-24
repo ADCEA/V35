@@ -211,15 +211,31 @@
     ? `${Bill.plural(Math.round(pieces), 'pièce', 'pièces')} sur 12 mois · dernière commande le ${Bill.dFr(lastOrderAt)}`
     : lastOrderAt ? `Rien commandé depuis 12 mois (dernière commande le ${Bill.dFr(lastOrderAt)})` : 'Jamais commandé');
 
-  // Encadré « BL non facturés recalculés » d'un aperçu (changement de tarif) : { orders, lines, deltaCents, skippedInDraft }.
-  Bill.repricedAlert = (rp) => {
-    if (!rp || (!rp.orders && !rp.skippedInDraft)) return '<div class="bl-alert ok">Aucun BL non facturé à recalculer : ils sont déjà à ce tarif.</div>';
+  // Encadré « BL non facturés recalculés » d'un aperçu (changement de tarif) :
+  // { orders, lines, deltaCents, skippedInDraft, from, older: { orders, oldest } | null }.
+  // `older` : BL non facturés datés avant la date d'effet — non touchés ; le bouton propose de reprendre leur date
+  // (les fenêtres qui gèrent `data-older` relancent alors l'aperçu avec cette date).
+  Bill.repricedAlert = (rp, { canPick = true } = {}) => {
+    const older = rp && rp.older && rp.older.orders ? rp.older : null;
+    const olderHtml = older
+      ? `<div class="bl-alert">${Bill.plural(older.orders, 'BL non facturé daté d\'avant le ' + Bill.dFr(rp.from) + ' garde son prix actuel', 'BL non facturés datés d\'avant le ' + Bill.dFr(rp.from) + ' gardent leur prix actuel')} (le plus ancien : ${Bill.dFr(older.oldest)}), car ce tarif ne commence que le ${Bill.dFr(rp.from)}.
+          ${canPick ? `<br>Pour les recalculer aussi, prenez comme date d'effet le ${Bill.dFr(older.oldest)} : <button type="button" class="bl-btn link small" data-older="${Bill.e(older.oldest)}">Utiliser le ${Bill.dFr(older.oldest)}</button><br><span class="bl-muted">Un BL déjà facturé hors de ce logiciel (Sage, par exemple) apparaît ici comme non facturé : vérifiez la date avant de l'utiliser.</span>` : ''}</div>`
+      : '';
+    if (!rp || (!rp.orders && !rp.skippedInDraft)) {
+      const since = rp && rp.from ? ` daté du ${Bill.dFr(rp.from)} ou après` : '';
+      return `<div class="bl-alert ${older ? 'warn' : 'ok'}">Aucun BL non facturé${since} à recalculer.</div>${olderHtml}`;
+    }
     const draft = rp.skippedInDraft ? ` ${Bill.plural(rp.skippedInDraft, 'BL est déjà dans un brouillon de facture', 'BL sont déjà dans un brouillon de facture')} : laissé tel quel — supprimez le brouillon puis refaites-le pour qu'il prenne le nouveau tarif.` : '';
     return `<div class="bl-alert ${rp.orders ? 'ok' : 'warn'}">${rp.orders
       ? `<b>${Bill.plural(rp.orders, 'BL non facturé sera recalculé', 'BL non facturés seront recalculés')}</b> au nouveau tarif (${Bill.plural(rp.lines, 'ligne', 'lignes')}) — écart total ${Bill.eur(rp.deltaCents)} HT. Les BL déjà facturés ne changent jamais.`
-      : 'Aucun BL non facturé à recalculer.'}${draft}</div>`;
+      : 'Aucun BL non facturé à recalculer.'}${draft}</div>${olderHtml}`;
   };
-  Bill.repricedToast = (rp) => (rp && rp.orders ? ` · ${Bill.plural(rp.orders, 'BL non facturé recalculé', 'BL non facturés recalculés')}` : '');
+  Bill.repricedToast = (rp) => {
+    if (!rp) return '';
+    const done = rp.orders ? ` · ${Bill.plural(rp.orders, 'BL non facturé recalculé', 'BL non facturés recalculés')}` : '';
+    const old = rp.older && rp.older.orders ? ` · ${Bill.plural(rp.older.orders, 'BL plus ancien non recalculé', 'BL plus anciens non recalculés')}` : '';
+    return done + old;
+  };
 
   // Phrase décrivant une ligne du journal des prix.
   Bill.describePriceEvent = (ev) => {

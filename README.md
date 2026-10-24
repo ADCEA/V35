@@ -301,6 +301,10 @@ l'administration ; la création rapide d'un hôtel depuis « Nouvelle commande �
   **BL non facturés** de l'hôtel dont la date (livraison prévue, sinon création) est égale ou postérieure à la date d'effet,
   pour les seuls articles touchés. Un **BL déjà facturé ne change jamais** ; un BL **déjà dans un brouillon de facture** est
   laissé tel quel et **signalé** (supprimez le brouillon puis recréez-le pour qu'il reprenne le nouveau tarif) ;
+- les BL non facturés **datés d'avant la date d'effet** ne sont pas touchés, mais ils sont **annoncés** (nombre, date du plus ancien)
+  dans l'aperçu et dans le message de confirmation, avec un bouton pour reprendre la date du plus ancien (modification d'un prix,
+  opération en masse) ; la fenêtre de modification d'un prix et « Réappliquer aux BL non facturés » proposent aussi « depuis le BL
+  non facturé le plus ancien ». Attention : un BL facturé hors du logiciel (Sage) apparaît comme non facturé ;
 - l'impact (nombre de BL et de lignes, écart en euros) est **affiché dans l'aperçu avant validation** (import, opérations en
   masse) et rappelé dans la confirmation ; il est écrit dans le journal chaîné (`orders_repriced`, avec `via` = `import` ou `tarif`). Dans l'import, la case « Mettre à jour aussi
   les BL non facturés » est cochée par défaut et peut être décochée ;
@@ -546,7 +550,7 @@ relances. Sans SMTP, l'envoi répond « non configuré » (503) ; une relance fa
 
 ### Tests
 
-`npm test` (146 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
+`npm test` (147 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

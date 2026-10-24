@@ -343,6 +343,45 @@ test('un changement de tarif recalcule tout seul les BL non facturés (import, u
   assert.equal(back.repriced.orders, 1); assert.equal(frozen(late2), 1.35);
 });
 
+test('les BL non facturés plus anciens que la date d’effet sont annoncés (et jamais modifiés) ; une date plus ancienne les inclut', () => {
+  const hotel = addClient('Hôtel Anciens BL', 'anciens@exemple.fr');
+  const mk = (ticket, date) => {
+    const id = Number(db.prepare(`INSERT INTO orders (ticket, client_id, societe, contact, tel, adresse, livraison_prevue, status) VALUES (?,?,?,?,?,?,?,?)`).run(ticket, hotel, 'H', 'C', '06', 'adr', date, 'livree').lastInsertRowid);
+    db.prepare(`INSERT INTO order_items (order_id, service_id, name, code, sage_code, price, qty, delivered_qty) VALUES (?,?,?,?,?,?,?,?)`).run(id, drap, 'Drap plat 2 pers.', 'DP2', 'B-DP2', 1.35, 10, 10);
+    return id;
+  };
+  const frozen = (id) => db.prepare('SELECT price FROM order_items WHERE order_id=?').get(id).price;
+  const sept = mk('N-SEPT', '2026-09-10'); const oct1 = mk('N-OCT1', '2026-10-03'); const oct2 = mk('N-OCT2', '2026-10-12');
+  assert.deepEqual(catalog.unbilledInfo(hotel), { orders: 3, oldest: '2026-09-10', inDraft: 0 });
+
+  // le tarif commence le 1er octobre : 2 BL recalculés, le BL de septembre est annoncé mais garde son prix
+  const csv = 'client;code_sage;prix;date_debut\nHôtel Anciens BL;B-DP2;1,00;2026-10-01';
+  const pv = catalog.importPrices(csv, { apply: false });
+  assert.equal(pv.repriced.orders, 2);
+  assert.deepEqual(pv.repriced.older, { clients: 1, orders: 1 });
+  assert.deepEqual(pv.repriced.detail[0].older, { orders: 1, lines: 1, oldest: '2026-09-10' });
+  const one = catalog.setClientPrice(hotel, drap, 1.0, '2026-10-01');
+  assert.equal(one.repriced.orders, 2);
+  assert.deepEqual(one.repriced.older, { orders: 1, lines: 1, oldest: '2026-09-10' });
+  assert.equal(frozen(sept), 1.35, 'le BL plus ancien n’est pas touché'); assert.equal(frozen(oct1), 1.0); assert.equal(frozen(oct2), 1.0);
+
+  // l'aperçu en masse annonce aussi les anciens ; avec leur date, ils sont recalculés et plus rien n'est annoncé
+  const bulk = catalog.bulkPrices(hotel, { mode: 'percent', percent: 10, from: '2026-10-05', articleIds: [drap] }, { apply: false });
+  assert.equal(bulk.repriced.older.orders, 2, 'octobre (03) et septembre : deux BL plus anciens que le 5 octobre');
+  const earlier = catalog.setClientPrice(hotel, drap, 1.0, '2026-09-10');
+  assert.equal(earlier.repriced.orders, 1); assert.equal(earlier.repriced.older, null);
+  assert.equal(frozen(sept), 1.0);
+
+  // un BL déjà dans un brouillon n'est jamais compté parmi les anciens
+  const draftOne = mk('N-BROUILLON', '2026-09-12');
+  db.prepare(`UPDATE clients SET siret='55210055400013', adresse='1 rue', code_postal='84200', ville='Carpentras' WHERE id=?`).run(hotel);
+  engine.createDraftFromOrders(hotel, [draftOne]);
+  assert.equal(catalog.unbilledInfo(hotel).inDraft, 1);
+  const again = catalog.setClientPrice(hotel, drap, 0.9, '2026-10-20');
+  assert.equal(again.repriced.older.orders, 3, 'N-SEPT, N-OCT1 et N-OCT2 (le brouillon est exclu)');
+  assert.throws(() => catalog.unbilledInfo(999999), /introuvable/i);
+});
+
 test('journal des prix : filtrable par hôtel et par article', () => {
   const all = catalog.priceLog({}).events;
   assert.ok(all.length > 5);

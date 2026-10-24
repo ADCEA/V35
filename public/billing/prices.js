@@ -23,7 +23,7 @@
         <div class="bl-row2">
           <div class="bl-field"><label for="ep-price">Nouveau prix HT (€)</label><input id="ep-price" inputmode="decimal" value="${e(String(nego ? info.negotiatedPrice : info.catalogPrice).replace('.', ','))}"><div class="bl-hint" id="ep-delta"></div></div>
           <div class="bl-field"><label for="ep-date">À partir du</label><input id="ep-date" type="date" value="${Bill.today()}">
-            <div class="bl-hint"><button type="button" class="bl-btn link small" data-d="today">Aujourd'hui</button> · <button type="button" class="bl-btn link small" data-d="som">1er du mois</button> · <button type="button" class="bl-btn link small" data-d="nom">1er du mois prochain</button></div></div>
+            <div class="bl-hint"><button type="button" class="bl-btn link small" data-d="today">Aujourd'hui</button> · <button type="button" class="bl-btn link small" data-d="som">1er du mois</button> · <button type="button" class="bl-btn link small" data-d="nom">1er du mois prochain</button><span id="ep-old"></span></div></div>
         </div>
         <p class="bl-hint">Les BL <b>non facturés</b> de cet hôtel datés à partir de cette date sont recalculés automatiquement au nouveau tarif. Les BL déjà facturés ne changent jamais ; ceux qui sont dans un brouillon de facture sont laissés tels quels.</p>`,
       buttons: [
@@ -46,7 +46,14 @@
           m.$('#ep-delta').textContent = Number.isFinite(n) ? (n === info.catalogPrice ? 'Identique au prix catalogue.' : `${Bill.pct(info.catalogPrice, n)} par rapport au catalogue`) : '';
         };
         m.$('#ep-price').addEventListener('input', upd); upd();
-        m.el.querySelectorAll('[data-d]').forEach(b => b.onclick = () => { m.$('#ep-date').value = b.dataset.d === 'today' ? Bill.today() : b.dataset.d === 'som' ? firstOfMonth() : firstOfNextMonth(); });
+        const setDate = (b) => { m.$('#ep-date').value = b.dataset.d === 'today' ? Bill.today() : b.dataset.d === 'som' ? firstOfMonth() : b.dataset.d === 'nom' ? firstOfNextMonth() : b.dataset.d; };
+        m.el.querySelectorAll('[data-d]').forEach(b => b.onclick = () => setDate(b));
+        // BL non facturés de l'hôtel plus anciens que la date choisie : on le dit, et on propose de partir du plus ancien.
+        Bill.get(`/catalog/clients/${info.clientId}/unbilled`).then((u) => {
+          if (!u || !u.orders || !u.oldest || !m.$('#ep-old')) return;
+          m.$('#ep-old').innerHTML = ` · <button type="button" class="bl-btn link small" data-d="${e(u.oldest)}" title="Date du plus ancien BL non facturé de cet hôtel">Depuis le BL non facturé le plus ancien (${dFr(u.oldest)})</button>`;
+          m.$('#ep-old').querySelector('button').onclick = (ev) => setDate(ev.currentTarget);
+        }).catch(() => {});
       },
     });
   };
@@ -81,6 +88,7 @@
 
   function paintMatrix(main) {
     const box = main.querySelector('#pr-matrix');
+    if (!box) return;   // on a quitté la page pendant le chargement
     if (!M.articles.length) { box.innerHTML = '<div class="bl-empty"><b>Aucun article</b>Créez d\'abord votre catalogue dans « Articles ».</div>'; return; }
     if (!M.clients.length) { box.innerHTML = '<div class="bl-empty"><b>Aucun hôtel</b>Ajoutez vos hôtels dans « Hôtels » pour leur donner des tarifs.</div>'; return; }
     box.innerHTML = matrixHtml();
@@ -99,6 +107,7 @@
       M = await Bill.get('/catalog/prices/matrix');
       CATS = (await Bill.get('/catalog/articles')).categories;
     } catch (err) { return Bill.fail(err, main.querySelector('#pr-matrix')); }
+    if (!main.querySelector('#pr-matrix')) return;   // page quittée pendant le chargement : rien à repeindre
     paintMatrix(main);
     loadLog(main);
     const negotiated = Object.values(M.cells).reduce((s, row) => s + Object.values(row).filter(x => x.price != null).length, 0);
@@ -177,9 +186,11 @@
             ${unknown.map(u => `<tr><td>${e(u.name || '—')}${u.siret ? `<div class="bl-muted">SIRET ${e(u.siret)}</div>` : ''}</td><td class="r bl-num">${u.lines}</td><td><select class="ip-map" data-name="${e(u.name)}" aria-label="Fiche pour ${e(u.name)}">${options(u)}</select></td></tr>`).join('')}</tbody></table></div>
             <div style="margin-top:8px"><button type="button" class="bl-btn" id="ip-recheck">Revérifier avec ces choix</button></div></div>` : '';
         const rp = r.repriced || {};
+        const oldN = rp.older && rp.older.orders ? rp.older.orders : 0;
+        const olderHtml = oldN ? `<div class="bl-alert">${plural(oldN, 'BL non facturé plus ancien que la date d\'effet de son tarif garde son prix actuel', 'BL non facturés plus anciens que la date d\'effet de leur tarif gardent leur prix actuel')} (${plural(rp.older.clients, 'hôtel', 'hôtels')}, détail ci-dessous). Pour les inclure, mettez une <b>date_debut</b> plus ancienne dans le fichier, ou une date d'effet par défaut plus ancienne pour les lignes sans date.</div>` : '';
         const rpHtml = !rp.enabled ? '<p class="bl-hint">Les BL non facturés ne seront pas recalculés (case décochée).</p>'
-          : !s.changed ? '' : `${Bill.repricedAlert(rp)}${rp.detail && rp.detail.length ? `<details class="bl-details"><summary>Détail par hôtel (${rp.detail.length})</summary><div class="bl-tablewrap" style="max-height:200px;overflow:auto"><table class="bl-table"><thead><tr><th>Hôtel</th><th class="r">BL recalculés</th><th class="r">Écart HT</th><th class="r">Dans un brouillon</th></tr></thead><tbody>
-            ${rp.detail.map(d => `<tr><td>${e(d.client)}</td><td class="r bl-num">${d.orders}</td><td class="r bl-num">${Bill.eur(d.deltaCents)}</td><td class="r bl-num">${d.skippedInDraft || '—'}</td></tr>`).join('')}</tbody></table></div></details>` : ''}`;
+          : !s.changed ? '' : `${Bill.repricedAlert({ ...rp, older: null })}${olderHtml}${rp.detail && rp.detail.length ? `<details class="bl-details"${oldN ? ' open' : ''}><summary>Détail par hôtel (${rp.detail.length})</summary><div class="bl-tablewrap" style="max-height:200px;overflow:auto"><table class="bl-table"><thead><tr><th>Hôtel</th><th class="r">BL recalculés</th><th class="r">Écart HT</th><th class="r">Dans un brouillon</th><th class="r">Plus anciens non touchés</th></tr></thead><tbody>
+            ${rp.detail.map(d => `<tr><td>${e(d.client)}</td><td class="r bl-num">${d.orders}</td><td class="r bl-num">${Bill.eur(d.deltaCents)}</td><td class="r bl-num">${d.skippedInDraft || '—'}</td><td class="r bl-num">${d.older ? `${d.older.orders} <span class="bl-muted">(dès le ${dFr(d.older.oldest)})</span>` : '—'}</td></tr>`).join('')}</tbody></table></div></details>` : ''}`;
         const matched = r.matchedBy || {};
         const matchedHtml = (matched.siret || matched.choix) ? `<p class="bl-hint">${matched.siret ? `${plural(matched.siret, 'ligne rapprochée', 'lignes rapprochées')} par le SIRET. ` : ''}${matched.choix ? `${plural(matched.choix, 'ligne rapprochée', 'lignes rapprochées')} d'après votre choix.` : ''}</p>` : '';
         return {
