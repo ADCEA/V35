@@ -265,6 +265,11 @@
           };
         },
         apply: async () => { const r = await Bill.post(`/catalog/clients/${id}/prices/bulk`, { ...payload, apply: true }); Bill.toast(`${plural(r.count, 'tarif modifié', 'tarifs modifiés')}${Bill.repricedToast(r.repriced)}`); await afterWrite(); },
+        // « Utiliser le jj/mm » dans l'aperçu : reprend la date du plus ancien BL non facturé et relance l'aperçu.
+        onOpen: (m) => m.el.addEventListener('click', (ev) => {
+          const b = ev.target.closest && ev.target.closest('[data-older]');
+          if (b && m.$('#b-from')) { m.$('#b-from').value = b.dataset.older; m.recheck(); }
+        }),
       });
     }
 
@@ -273,7 +278,12 @@
       Bill.previewThenConfirm({
         title: 'Réappliquer les tarifs aux BL non facturés', applyLabel: 'Recalculer les BL', scope: () => `reprice:${id}`,
         body: `<p class="bl-note">Les changements de tarif recalculent déjà automatiquement les BL non facturés à partir de leur date d'effet ; cette action sert pour un recalcul à une autre date, ou après un changement de prix catalogue. Recalcule, au tarif en vigueur à leur date, les BL de « ${e(C.societe)} » (livrés ou en cours) qui ne figurent dans aucune facture ni aucun brouillon. Les BL déjà facturés ne sont jamais modifiés.</p>
-          <div class="bl-field" style="max-width:240px"><label for="rp-from">BL datés à partir du</label><input id="rp-from" type="date" value="${firstOfMonth()}"></div>`,
+          <div class="bl-field" style="max-width:300px"><label for="rp-from">BL datés à partir du</label><input id="rp-from" type="date" value="${firstOfMonth()}"><div class="bl-hint" id="rp-old"></div></div>`,
+        onOpen: (m) => Bill.get(`/catalog/clients/${id}/unbilled`).then((u) => {
+          if (!u || !u.orders || !u.oldest || !m.$('#rp-old')) return;
+          m.$('#rp-old').innerHTML = `${plural(u.orders, 'BL non facturé', 'BL non facturés')}, le plus ancien du ${dFr(u.oldest)} : <button type="button" class="bl-btn link small" id="rp-oldest">partir de cette date</button>`;
+          m.$('#rp-oldest').onclick = () => { m.$('#rp-from').value = u.oldest; m.invalidate && m.invalidate(); m.$('#pv-out').innerHTML = ''; };
+        }).catch(() => {}),
         preview: async (m) => {
           payload = { from: m.$('#rp-from').value };
           const r = await Bill.post(`/catalog/clients/${id}/reprice`, payload);

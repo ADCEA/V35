@@ -85,6 +85,7 @@ router.delete('/catalog/clients/:id/prices/:articleId', wrap((req, res) => {
 }));
 router.post('/catalog/clients/:id/prices/bulk', stepUpWhen(applying, req => `prices-bulk:${req.params.id}`),
   wrap((req, res) => res.json(catalog.bulkPrices(clientId(req), req.body, { apply: applying(req) }))));
+router.get('/catalog/clients/:id/unbilled', wrap((req, res) => res.json(catalog.unbilledInfo(clientId(req)))));
 router.post('/catalog/clients/:id/reprice', stepUpWhen(applying, req => `reprice:${req.params.id}`), wrap((req, res) => {
   const b = req.body || {};
   res.json(catalog.repriceUnbilled(clientId(req), { from: iso(b.from), articleIds: b.articleIds }, { apply: applying(req) }));

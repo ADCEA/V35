@@ -950,14 +950,15 @@ function importPrices(csvText, { apply = false, clientId = null, defaultDate = n
     if (reprice) {
       for (const t of touched.values()) {
         const r = repriceUnbilled(t.client.id, { from: t.from, articleIds: [...t.articleIds] }, { apply: true, via: 'import' });
-        if (r.orders.length || r.skippedInDraft) repricedList.push({ clientId: t.client.id, client: t.client.societe, ...repriceSummary(r) });
+        if (r.orders.length || r.skippedInDraft || (r.older && r.older.orders)) repricedList.push({ clientId: t.client.id, client: t.client.societe, ...repriceSummary(r) });
       }
     }
     return lines;
   });
   const n = (s) => lines.filter(l => l.status === s).length;
   const repriced = { enabled: !!reprice, clients: repricedList.length, orders: repricedList.reduce((s, r) => s + r.orders, 0), lines: repricedList.reduce((s, r) => s + r.lines, 0),
-    deltaCents: repricedList.reduce((s, r) => s + r.deltaCents, 0), skippedInDraft: repricedList.reduce((s, r) => s + r.skippedInDraft, 0), detail: repricedList.sort((a, b) => a.client.localeCompare(b.client, 'fr')) };
+    deltaCents: repricedList.reduce((s, r) => s + r.deltaCents, 0), skippedInDraft: repricedList.reduce((s, r) => s + r.skippedInDraft, 0),
+    older: { clients: repricedList.filter(r => r.older).length, orders: repricedList.reduce((s, r) => s + (r.older ? r.older.orders : 0), 0) }, detail: repricedList.sort((a, b) => a.client.localeCompare(b.client, 'fr')) };
   return {
     applied: !!apply, format: wide ? 'grille' : 'liste', summary: { total: lines.length, changed: n('ok'), same: n('same'), errors: n('error') }, lines, repriced,
     unknownClients: suggestClients([...unknown.values()], clients),
@@ -1029,10 +1030,9 @@ function matrixCsv() {
 
 // ---- réappliquer les tarifs aux BL non facturés ----
 
-function repriceCandidates(clientId, from, articleIds) {
-  const client = clientRow(clientId);
-  const wanted = Array.isArray(articleIds) && articleIds.length ? new Set(articleIds.map(String)) : null;
-  const orders = db.prepare(`
+/** BL d'un hôtel avec leur date de référence et leur état de facturation (facturé / dans un brouillon). */
+function ordersWithBilling(clientId) {
+  return db.prepare(`
     SELECT o.id, o.ticket, o.status, COALESCE(NULLIF(substr(o.livraison_prevue, 1, 10), ''), substr(o.created_at, 1, 10)) AS refDate,
       EXISTS (SELECT 1 FROM native_invoice_orders no JOIN native_invoices ni ON ni.id = no.invoice_id
               WHERE no.order_id = o.id AND ni.kind = 'invoice' AND ni.status = 'draft') AS inDraft,
@@ -1041,7 +1041,22 @@ function repriceCandidates(clientId, from, articleIds) {
                    WHERE no.order_id = o.id AND ni.kind = 'invoice' AND ni.status = 'issued'
                      AND NOT EXISTS (SELECT 1 FROM native_invoices cn WHERE cn.credits_invoice_id = ni.id AND cn.status = 'issued' AND cn.is_full_credit = 1))) AS billed
     FROM orders o WHERE o.client_id = ? ORDER BY refDate, o.id
-  `).all(clientId).filter(o => o.refDate >= from && !o.billed);
+  `).all(clientId);
+}
+
+/** Nombre de BL non facturés d'un hôtel (hors brouillons), le plus ancien, et ceux déjà dans un brouillon. */
+function unbilledInfo(clientId) {
+  clientRow(clientId);
+  const free = ordersWithBilling(clientId).filter(o => !o.billed);
+  const open = free.filter(o => !o.inDraft);
+  return { orders: open.length, oldest: open.length ? open[0].refDate : null, inDraft: free.length - open.length };
+}
+
+function repriceCandidates(clientId, from, articleIds) {
+  const client = clientRow(clientId);
+  const wanted = Array.isArray(articleIds) && articleIds.length ? new Set(articleIds.map(String)) : null;
+  const all = ordersWithBilling(clientId);
+  const orders = all.filter(o => o.refDate >= from && !o.billed);
   const itemsStmt = db.prepare('SELECT id, service_id, name, price, qty, delivered_qty FROM order_items WHERE order_id = ?');
   const result = []; let skippedInDraft = 0;
   for (const o of orders) {
@@ -1057,7 +1072,23 @@ function repriceCandidates(clientId, from, articleIds) {
     const deltaCents = lines.reduce((s, l) => s + Math.round((l.to - l.from) * l.qty * 100), 0);
     result.push({ id: o.id, ticket: o.ticket, status: o.status, date: o.refDate, lines, deltaCents });
   }
-  return { client, orders: result, skippedInDraft, deltaCents: result.reduce((s, o) => s + o.deltaCents, 0) };
+  // BL non facturés datés AVANT `from` : le tarif ne les touche pas, mais ils le prendraient avec une date d'effet plus ancienne.
+  // Calculé seulement pour un changement de tarif (articles connus), pour l'annoncer plutôt que le laisser passer en silence.
+  let older = null;
+  if (wanted) {
+    older = { orders: 0, lines: 0, oldest: null };
+    for (const o of all) {
+      if (o.refDate >= from || o.billed || o.inDraft) continue;
+      let hit = 0;
+      for (const it of itemsStmt.all(o.id)) {
+        if (!wanted.has(it.service_id)) continue;
+        const target = resolveClientPrice(clientId, it.service_id, from);
+        if (target != null && round3(target) !== round3(it.price)) hit++;
+      }
+      if (hit) { older.orders++; older.lines += hit; if (!older.oldest || o.refDate < older.oldest) older.oldest = o.refDate; }
+    }
+  }
+  return { client, orders: result, skippedInDraft, deltaCents: result.reduce((s, o) => s + o.deltaCents, 0), older };
 }
 
 /** Aperçu, ou application, du recalcul des BL non facturés à partir de `from` au tarif en vigueur à leur date. */
@@ -1072,11 +1103,11 @@ function repriceUnbilled(clientId, { from, articleIds } = {}, { apply = false, v
       log('orders_repriced', { clientId, client: r.client.societe, from: date, orders: r.orders.length, lines: r.orders.reduce((s, o) => s + o.lines.length, 0), deltaCents: r.deltaCents, ...(via ? { via } : {}) });
     })();
   }
-  return { applied: !!apply && r.orders.length > 0, from: date, skippedInDraft: r.skippedInDraft, deltaCents: r.deltaCents, orders: r.orders };
+  return { applied: !!apply && r.orders.length > 0, from: date, skippedInDraft: r.skippedInDraft, deltaCents: r.deltaCents, orders: r.orders, older: r.older };
 }
 
 /** Résumé court d'un recalcul (sans le détail des lignes), pour les réponses des changements de tarif. */
-const repriceSummary = (r) => ({ orders: r.orders.length, lines: r.orders.reduce((s, o) => s + o.lines.length, 0), deltaCents: r.deltaCents, skippedInDraft: r.skippedInDraft, from: r.from });
+const repriceSummary = (r) => ({ orders: r.orders.length, lines: r.orders.reduce((s, o) => s + o.lines.length, 0), deltaCents: r.deltaCents, skippedInDraft: r.skippedInDraft, from: r.from, older: r.older && r.older.orders ? r.older : null });
 /** Recalcule (dans la transaction en cours) les BL non facturés d'un hôtel touchés par un changement de tarif. */
 function repriceAfterTariff(clientId, from, articleIds, via) {
   if (!from || !articleIds.length) return null;
@@ -1107,5 +1138,5 @@ module.exports = {
   listClients, getClient, createClient, updateClient, setAccessCode, deleteClient,
   createToken, revokeToken, setWebhook, importClients, setAssignment, articleAccess, setArticleAccess,
   priceGrid, setClientPrice, removeClientPrice, bulkPrices, importPrices, priceMatrix, matrixCsv,
-  repriceUnbilled, priceLog,
+  repriceUnbilled, unbilledInfo, priceLog,
 };
