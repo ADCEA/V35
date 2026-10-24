@@ -135,6 +135,7 @@
     { key: 'month', label: 'Facturer le mois', badge: 'toInvoiceClients' },
     { group: 'Encaissements' },
     { key: 'payments', label: 'Règlements' },
+    { key: 'sdd', label: 'Prélèvements SEPA' },
     { key: 'reconcile', label: 'Rapprochement bancaire' },
     { key: 'reminders', label: 'Relances', badge: 'remindersDue' },
     { group: 'Hôtels et tarifs' },

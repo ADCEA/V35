@@ -328,6 +328,128 @@ module.exports = function applyBillingSchema(db) {
   const setCols = db.prepare('PRAGMA table_info(billing_settings)').all().map(c => c.name);
   if (!setCols.includes('pennylane_auto_since')) db.exec('ALTER TABLE billing_settings ADD COLUMN pennylane_auto_since TEXT');
 
+  // ---------- prélèvements SEPA ----------
+  // Identifiant créancier (ICS, délivré par la banque) et délai de préavis donné aux débiteurs.
+  if (!setCols.includes('sdd_ics')) db.exec('ALTER TABLE billing_settings ADD COLUMN sdd_ics TEXT');
+  if (!setCols.includes('sdd_notice_days')) db.exec('ALTER TABLE billing_settings ADD COLUMN sdd_notice_days INTEGER NOT NULL DEFAULT 14');
+
+  db.exec(`
+    -- Mandat de prélèvement : une autorisation signée par un hôtel pour UN compte bancaire.
+    -- Jamais supprimé (à conserver 14 mois après le dernier prélèvement) : on le révoque.
+    -- Changer de compte = révoquer et créer un nouveau mandat (nouvelle RUM, premier prélèvement « FRST »).
+    CREATE TABLE IF NOT EXISTS sdd_mandates (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id      INTEGER NOT NULL REFERENCES clients(id) ON DELETE RESTRICT,
+      umr            TEXT NOT NULL UNIQUE,                   -- référence unique du mandat (RUM), 35 caractères au plus
+      scheme         TEXT NOT NULL DEFAULT 'CORE' CHECK (scheme IN ('CORE','B2B')),
+      debtor_name    TEXT NOT NULL,
+      iban           TEXT NOT NULL,
+      bic            TEXT,
+      signed_on      TEXT NOT NULL,
+      status         TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','revoked')),
+      revoked_on     TEXT,
+      revoked_reason TEXT,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sdd_mandates_active ON sdd_mandates(client_id) WHERE status = 'active';
+
+    -- Lot de prélèvements = un fichier pain.008 remis à la banque.
+    -- prepared (fichier prêt) → sent (remis à la banque) → settled (encaissé, règlements enregistrés)
+    -- ou cancelled. Les coordonnées du créancier sont figées : le fichier se régénère à l'identique.
+    CREATE TABLE IF NOT EXISTS sdd_batches (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      msg_id           TEXT NOT NULL UNIQUE,
+      status           TEXT NOT NULL DEFAULT 'prepared' CHECK (status IN ('prepared','sent','settled','cancelled')),
+      collection_date  TEXT NOT NULL,
+      creditor_name    TEXT NOT NULL,
+      creditor_iban    TEXT NOT NULL,
+      creditor_bic     TEXT,
+      creditor_ics     TEXT NOT NULL,
+      item_count       INTEGER NOT NULL,
+      total_cents      INTEGER NOT NULL,
+      created_at       TEXT NOT NULL,
+      sent_at          TEXT,
+      settled_at       TEXT,
+      cancelled_at     TEXT,
+      cancel_reason    TEXT
+    );
+
+    -- Un prélèvement = un mandat = un montant (peut couvrir plusieurs factures du même hôtel).
+    CREATE TABLE IF NOT EXISTS sdd_batch_items (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id       INTEGER NOT NULL REFERENCES sdd_batches(id) ON DELETE RESTRICT,
+      mandate_id     INTEGER NOT NULL REFERENCES sdd_mandates(id) ON DELETE RESTRICT,
+      seq_type       TEXT NOT NULL CHECK (seq_type IN ('FRST','RCUR')),
+      scheme         TEXT NOT NULL CHECK (scheme IN ('CORE','B2B')),
+      amount_cents   INTEGER NOT NULL CHECK (amount_cents > 0),
+      end_to_end_id  TEXT NOT NULL,
+      remittance     TEXT NOT NULL,
+      umr            TEXT NOT NULL,
+      signed_on      TEXT NOT NULL,
+      debtor_name    TEXT NOT NULL,
+      debtor_iban    TEXT NOT NULL,
+      debtor_bic     TEXT,
+      status         TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','collected','rejected')),
+      reject_reason  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_sdd_items_batch ON sdd_batch_items(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_sdd_items_mandate ON sdd_batch_items(mandate_id);
+
+    CREATE TABLE IF NOT EXISTS sdd_item_invoices (
+      item_id       INTEGER NOT NULL REFERENCES sdd_batch_items(id) ON DELETE RESTRICT,
+      invoice_id    INTEGER NOT NULL REFERENCES native_invoices(id) ON DELETE RESTRICT,
+      amount_cents  INTEGER NOT NULL CHECK (amount_cents > 0),
+      PRIMARY KEY (item_id, invoice_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_sdd_item_invoices_invoice ON sdd_item_invoices(invoice_id);
+
+    DROP TRIGGER IF EXISTS trg_sdd_mandates_no_delete;
+    CREATE TRIGGER trg_sdd_mandates_no_delete BEFORE DELETE ON sdd_mandates
+    BEGIN SELECT RAISE(ABORT, 'Mandat de prélèvement : suppression interdite (à conserver 14 mois). Révoquez-le.'); END;
+
+    DROP TRIGGER IF EXISTS trg_sdd_mandates_no_update;
+    CREATE TRIGGER trg_sdd_mandates_no_update BEFORE UPDATE ON sdd_mandates
+    WHEN NEW.client_id IS NOT OLD.client_id OR NEW.umr IS NOT OLD.umr OR NEW.scheme IS NOT OLD.scheme
+      OR NEW.debtor_name IS NOT OLD.debtor_name OR NEW.iban IS NOT OLD.iban OR NEW.bic IS NOT OLD.bic
+      OR NEW.signed_on IS NOT OLD.signed_on OR NEW.created_at IS NOT OLD.created_at
+      OR (OLD.status = 'revoked' AND NEW.status <> 'revoked')
+    BEGIN SELECT RAISE(ABORT, 'Mandat de prélèvement : modification interdite. Révoquez-le et créez-en un nouveau.'); END;
+
+    DROP TRIGGER IF EXISTS trg_sdd_batches_no_delete;
+    CREATE TRIGGER trg_sdd_batches_no_delete BEFORE DELETE ON sdd_batches
+    BEGIN SELECT RAISE(ABORT, 'Lot de prélèvements : suppression interdite. Annulez-le.'); END;
+
+    DROP TRIGGER IF EXISTS trg_sdd_batches_no_update;
+    CREATE TRIGGER trg_sdd_batches_no_update BEFORE UPDATE ON sdd_batches
+    WHEN NEW.msg_id IS NOT OLD.msg_id OR NEW.collection_date IS NOT OLD.collection_date OR NEW.creditor_name IS NOT OLD.creditor_name
+      OR NEW.creditor_iban IS NOT OLD.creditor_iban OR NEW.creditor_bic IS NOT OLD.creditor_bic OR NEW.creditor_ics IS NOT OLD.creditor_ics
+      OR NEW.item_count IS NOT OLD.item_count OR NEW.total_cents IS NOT OLD.total_cents OR NEW.created_at IS NOT OLD.created_at
+      OR (OLD.status IN ('settled','cancelled') AND NEW.status <> OLD.status)
+      OR (OLD.status = 'sent' AND NEW.status = 'prepared')
+    BEGIN SELECT RAISE(ABORT, 'Lot de prélèvements : modification interdite.'); END;
+
+    DROP TRIGGER IF EXISTS trg_sdd_items_no_delete;
+    CREATE TRIGGER trg_sdd_items_no_delete BEFORE DELETE ON sdd_batch_items
+    BEGIN SELECT RAISE(ABORT, 'Prélèvement : suppression interdite.'); END;
+
+    DROP TRIGGER IF EXISTS trg_sdd_items_no_update;
+    CREATE TRIGGER trg_sdd_items_no_update BEFORE UPDATE ON sdd_batch_items
+    WHEN NEW.batch_id IS NOT OLD.batch_id OR NEW.mandate_id IS NOT OLD.mandate_id OR NEW.seq_type IS NOT OLD.seq_type
+      OR NEW.scheme IS NOT OLD.scheme OR NEW.amount_cents IS NOT OLD.amount_cents OR NEW.end_to_end_id IS NOT OLD.end_to_end_id
+      OR NEW.remittance IS NOT OLD.remittance OR NEW.umr IS NOT OLD.umr OR NEW.signed_on IS NOT OLD.signed_on
+      OR NEW.debtor_name IS NOT OLD.debtor_name OR NEW.debtor_iban IS NOT OLD.debtor_iban OR NEW.debtor_bic IS NOT OLD.debtor_bic
+      OR (OLD.status <> 'pending' AND NEW.status <> OLD.status)
+    BEGIN SELECT RAISE(ABORT, 'Prélèvement : modification interdite.'); END;
+
+    DROP TRIGGER IF EXISTS trg_sdd_item_invoices_no_update;
+    CREATE TRIGGER trg_sdd_item_invoices_no_update BEFORE UPDATE ON sdd_item_invoices
+    BEGIN SELECT RAISE(ABORT, 'Prélèvement : modification interdite.'); END;
+
+    DROP TRIGGER IF EXISTS trg_sdd_item_invoices_no_delete;
+    CREATE TRIGGER trg_sdd_item_invoices_no_delete BEFORE DELETE ON sdd_item_invoices
+    BEGIN SELECT RAISE(ABORT, 'Prélèvement : suppression interdite.'); END;
+  `);
+
   // ---------- réglages par défaut ----------
   // Ligne unique, créée au premier démarrage. Toute la facturation passe par
   // la facturation intégrée : le circuit Odoo est retiré (l'historique des

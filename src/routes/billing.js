@@ -287,5 +287,6 @@ router.use(require('./billingSales'));
 router.use(require('./billingCatalog'));
 router.use(require('./billingDeliveries'));
 router.use(require('./billingDaily'));
+router.use(require('./billingSdd'));
 
 module.exports = router;

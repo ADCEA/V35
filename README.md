@@ -258,8 +258,9 @@ Odoo reste en base et téléchargeable par les hôtels dans leur espace.
 | Hôtels | fiche de chaque hôtel : coordonnées, SIRET/TVA, tarifs négociés, catalogue accessible, jetons d'API et webhook |
 | Articles | catalogue (prix, codes Sage, dimensions pour la logistique), impact d'un changement de prix, import CSV |
 | Tarifs par hôtel | grille articles × hôtels, modification d'un tarif en un clic, import/export CSV, journal des changements |
-| Règlements | tous les encaissements |
-| Rapprochement bancaire | import d'un relevé CSV, propositions de factures, validation ligne par ligne ; une empreinte par ligne empêche tout double enregistrement |
+| Règlements | tous les encaissements ; **règlement en lot** de plusieurs factures d'un coup |
+| Prélèvements SEPA | mandats par hôtel, préparation d'un fichier de prélèvement pour la banque, suivi jusqu'à l'encaissement |
+| Rapprochement bancaire | import d'un relevé CSV, propositions de factures, **mode de règlement choisi ligne par ligne**, validation ligne par ligne ; une empreinte par ligne empêche tout double enregistrement |
 | Relances | factures échues, niveau conseillé (rappel / relance / dernier rappel), texte prêt ; **toujours déclenchées par une personne** |
 | Émetteur, Sécurité et sauvegardes, Pennylane, Contrôle et FEC | configuration |
 
@@ -345,6 +346,101 @@ aucun article** (la demande est refusée en entier). Les commandes déjà passé
 de commandes depuis le planning des chambres continue d'utiliser le catalogue complet. Chaque changement est écrit dans le journal chaîné
 (`client_article_access`) et visible dans l'historique de l'article comme dans celui de l'hôtel.
 
+### Règlements en lot et mode de règlement
+
+- **Rapprochement bancaire** : chaque ligne du relevé propose un mode de règlement (*prélèvement* détecté d'après le libellé
+  `PRLV` / `SEPA`, sinon virement, chèque…), modifiable avant validation. Une valeur inconnue est refusée au lieu d'être remplacée
+  en silence.
+- **Règlements en lot** (Facturation → Règlements) : on coche des factures ouvertes, on indique date, mode et référence ; un
+  **aperçu** exact s'affiche, puis l'enregistrement demande le code (`payments-bulk`). Tout ou rien : si une facture est refusée
+  (déjà soldée, montant dépassé…), aucun règlement du lot n'est enregistré.
+
+### Regrouper les bons de livraison à nom de client libre
+
+Certaines commandes ont été saisies avec un nom de client tapé à la main (pas de fiche hôtel). Facturation → Bons de livraison
+les regroupe pour les rattacher à la bonne fiche :
+
+- regroupement par **nom normalisé** (casse, accents, SAS/SARL, articles, pluriel, abréviations) ; la fiche hôtel proposée tient
+  compte du nom, du téléphone et de l'adresse, et n'est jamais présentée comme « sûre » s'il existe un doublon possible ;
+- **vérification bon par bon** : chaque regroupement se déplie, chaque BL peut être exclu avant d'appliquer ;
+- **aperçu exact** (le même calcul que l'application, simplement annulé), possibilité de créer la fiche hôtel au passage ;
+- option **recalculer les prix au tarif négocié** de l'hôtel (désactivée par défaut) ;
+- le nom tapé sur chaque BL n'est **jamais modifié** ; les numéros de BL rattachés sont écrits dans le journal chaîné ;
+  l'application demande le code (`orders-link`). **Il n'y a pas de bouton « annuler »** : une fois rattaché, un BL n'est plus dans la liste
+  des « noms libres ». Le journal garde les numéros de BL de chaque rattachement, ce qui permet de les corriger ;
+  vérifiez donc l'aperçu avant d'appliquer ;
+- seuls les BL sans fiche hôtel sont concernés ; le recalcul des prix ne touche jamais un BL déjà facturé ni dans un brouillon.
+
+### Tableau de bord journalier (Statistiques)
+
+Onglet **Statistiques** de l'administration : période rapide (7 / 30 jours, mois, 90 jours) ou dates libres, tuiles de synthèse,
+graphique jour par jour (au choix du chiffre affiché), tableau jour par jour avec détail dépliable (commandes reçues et livrées,
+valeur, factures, règlements) et export Excel (CSV).
+
+- **Exploitation** (commandes, pièces, poids, kilomètres, écarts commandé/livré) : `GET /api/admin/stats/daily`. Les commandes sont
+  datées à l'heure de Paris à la réception, à la date du BL à la livraison.
+- **Montants** (livré valorisé, facturé, avoirs, encaissé par mode de règlement, reste dû) : derrière le **verrou de la Facturation**.
+  Sans le code, aucun montant n'est affiché ni envoyé par le serveur (`GET /api/admin/billing/stats/daily[/:date]`).
+- Une annulation de règlement se voit dans la journée où elle est écrite.
+
+### Prélèvements SEPA
+
+Facturation → **Prélèvements SEPA** (menu *Encaissements*). Le module prépare un fichier de prélèvement (norme
+**pain.008.001.02**, accepté par les banques françaises) que vous remettez à votre banque ; il **n'envoie rien lui-même** et
+n'enregistre aucun règlement avant que le prélèvement soit passé.
+
+**Mise en place (une fois)** — bouton *Identifiant créancier et préavis* :
+1. **ICS** (identifiant créancier SEPA) : à demander à votre banque (en France, de la forme `FR12ZZZ123456`) ; le module en vérifie le format.
+2. Le nom et l'IBAN du créancier sont ceux de Facturation → Émetteur (raison sociale, IBAN, BIC).
+3. **Préavis** avant chaque prélèvement : 14 jours par défaut, réglable.
+
+**Mandats** (onglet *Mandats*) — un mandat est l'autorisation signée par l'hôtel :
+- *Nouveau mandat* : hôtel, IBAN, BIC (facultatif), type **CORE** ou **B2B**, date de signature ; la **RUM** est proposée
+  (`CEZ-0001-01`, 35 caractères maximum). Le IBAN est contrôlé (zone SEPA, longueur, clé modulo 97) ; l'enregistrement demande
+  le code (`sdd-mandate`).
+- *Formulaire à faire signer* : PDF au modèle européen (textes CORE ou B2B) prérempli avec les informations de l'hôtel.
+- **Un seul mandat actif par hôtel.** Pour changer de compte : créer un nouveau mandat en cochant « remplace l'ancien » (l'ancien est
+  révoqué). Un mandat n'est **jamais supprimé** (la loi demande de le conserver 14 mois après le dernier prélèvement) : on le révoque.
+  Un mandat sans prélèvement depuis **36 mois** est signalé caduc et n'est plus utilisé.
+- *Copie PDF* d'un mandat enregistré (code `sdd-copy:<id>`).
+
+**Préparer et suivre un prélèvement** :
+1. *À prélever* : factures émises encore ouvertes des hôtels qui ont un mandat actif, avec le montant restant dû (un règlement
+   partiel ou un avoir est déduit) ; les hôtels **sans mandat** sont listés à part avec la raison.
+2. Cocher, choisir la **date de prélèvement** (jour ouvré TARGET, au plus tôt le prochain jour ouvré, 90 jours au plus ; une date proposée
+   à +3 jours ouvrés). Un **aperçu** montre le nombre de prélèvements, le total de contrôle, FRST ou RCUR pour chacun.
+3. *Préparer le lot* (code `sdd-batch`) : un prélèvement **par hôtel** (les factures d'un même hôtel sont additionnées, le libellé les cite) ;
+   le lot est figé (créancier, IBAN et montants) — le fichier se régénère à l'identique.
+4. *Télécharger le fichier* (code `sdd-file:<id>`) → le remettre à la banque (espace en ligne de la banque) → **« Marquer comme envoyé à la banque »**.
+5. Une fois la date passée et le relevé vérifié, **Clôturer le lot** (code `sdd-settle:<id>`) : on marque les prélèvements **rejetés** (motif
+   obligatoire, option de révoquer le mandat) ; tous les autres sont enregistrés comme règlements (mode *prélèvement*, date = date de
+   prélèvement). Tout ou rien. Une facture rejetée reste impayée et redevient prélevable. La clôture est refusée avant la date de prélèvement, et si un
+   règlement a été enregistré à la main sur une facture depuis la préparation (annulez-le d'abord).
+6. Un lot *préparé* ou *envoyé* peut être annulé, avec un motif (code `sdd-cancel:<id>`) ; un lot clôturé ne le peut plus.
+
+**Règles appliquées**
+- **FRST** pour le premier prélèvement d'un mandat, **RCUR** ensuite (un prélèvement rejeté ne compte pas comme premier passage) ;
+- un seul lot « préparé » à la fois ; 500 prélèvements et 1 000 factures au plus par lot ; une facture déjà dans un lot préparé ou
+  envoyé n'est plus proposée ;
+- `MsgId` = `CEZ-SDD-AAAAMMJJHHMMSS-<n° de lot>` ; `EndToEndId` = numéro de la facture (si une seule) sinon `CEZ<lot>-<n>` ;
+- les textes sont ramenés au jeu de caractères SEPA (`Œ` → `OE`, accents retirés…) ;
+- **l'IBAN n'apparaît en clair que dans le fichier du lot et la copie PDF du mandat** ; partout ailleurs (liste, journal, réponses de l'API) :
+  pays, clé et quatre derniers caractères ;
+- chaque étape (mandat créé / révoqué, lot préparé / envoyé / clôturé / annulé, règlement) est écrite dans le journal chaîné.
+
+**À savoir avant le premier vrai prélèvement**
+- **Le fichier n'a pas pu être testé auprès d'une vraie banque** : il suit la norme EPC / ISO 20022 (pain.008.001.02) et passe tous les
+  contrôles internes, mais faites un **premier lot de faible montant**, et demandez à votre banque la version de format qu'elle accepte
+  et son horaire limite de remise ;
+- **le préavis est votre responsabilité** : le module avertit si la date choisie tombe avant l'échéance de la facture ou moins de 14 jours (réglable)
+  après sa date d'émission, mais ne l'impose pas. Le client doit avoir été prévenu du prélèvement et de son montant ;
+- les **PDF de facture** affichent toujours le bloc de virement (IBAN) pour un hôtel prélevé ; la mention « Réglé par prélèvement SEPA »
+  n'est pas ajoutée ;
+- un **retour après clôture** (contestation jusqu'à 8 semaines en CORE, 13 mois si non autorisé) se traite en annulant le règlement sur la
+  facture (écriture inverse) : elle redevient due ;
+- un hôtel est prélevé **une fois par lot** (ses factures sont additionnées) ;
+- les mandats et lots ne sont pas visibles par les hôtels dans leur espace client.
+
 ### PDF (factures, avoirs, devis, bons, annexes)
 
 Tous les PDF du site partagent une même charte, définie dans `src/utils/pdfKit.js` :
@@ -355,6 +451,7 @@ Tous les PDF du site partagent une même charte, définie dans `src/utils/pdfKit
 | Bon de livraison | `src/utils/pdf.js` | quantités commandées / livrées (astérisque si écart), notes, **zones de signature** « Remis par » / « Reçu par » |
 | Bon de préparation | `src/utils/pdf.js` | une carte par chariot avec jauges de volume et de poids (rouge au-delà de 95 %), cases à cocher numérotées dans l'ordre de chargement, encadré d'alerte pour ce qui ne rentre pas, visas |
 | Annexe de facture, récapitulatif | `src/utils/pdf.js` | détail BL par BL avec sous-totaux ; synthèse par article |
+| Mandat de prélèvement SEPA | `src/billing/sddPdf.js` | modèle européen (textes CORE ou B2B), champs à compléter, zones de lieu/date et de signature |
 
 - les polices (Inter et Instrument Serif, licence OFL) sont **dans le dépôt** (`src/assets/fonts`) : le rendu est identique partout ; sans elles, le PDF est produit avec Helvetica ;
 - l'identité de la société (en-tête, pied de page de chaque page) vient de Facturation → Émetteur ; les factures émises gardent l'identité figée à l'émission ;
@@ -373,7 +470,9 @@ un **second code, distinct du mot de passe administrateur**, défini à la premi
   création d'un avoir, émission groupée du mois, export FEC, modification des coordonnées de
   l'émetteur (dont l'IBAN), téléchargement d'une sauvegarde, activation de l'envoi automatique
   Pennylane, **suppression d'un article ou d'un hôtel**, **nouveau code d'accès d'un hôtel**, **régénération d'un secret de webhook**,
-  **application d'une opération en masse sur les tarifs**, **recalcul des BL non facturés** et **tout import CSV** (articles, hôtels, tarifs).
+  **application d'une opération en masse sur les tarifs**, **recalcul des BL non facturés**, **tout import CSV** (articles, hôtels, tarifs),
+  **règlement en lot**, **rattachement de BL à un hôtel**, et tout le circuit **SEPA** (réglages créancier, création / révocation d'un mandat,
+  copie PDF d'un mandat, préparation, téléchargement du fichier, clôture et annulation d'un lot).
   L'autorisation est à usage unique, liée à l'acte précis (ex. `issue:42`, `prices-bulk:7`) et valable 90 s ;
 - 5 erreurs de code → blocage 15 minutes, conservé en base (survit à un redémarrage) ;
 - **code oublié** : sur l'hébergeur, définir `BILLING_LOCK_RESET=<valeur quelconque>` puis
@@ -430,13 +529,14 @@ relances. Sans SMTP, l'envoi répond « non configuré » (503) ; une relance fa
 
 ### Tests
 
-`npm test` (bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
+`npm test` (143 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 
 - **Articles, tarifs et fiches hôtels exigent désormais le code de la Facturation** : un opérateur qui n'a que le mot de passe
   administrateur ne peut plus les modifier (il saisit toujours les commandes, voit la liste des hôtels et peut en créer un en
   « Nouvelle commande »). C'est voulu, à connaître avant de former l'équipe.
+- **Prélèvements SEPA : fichier non testé auprès d'une banque réelle** (voir « À savoir avant le premier vrai prélèvement » ci-dessus).
 - Un hôtel qui a des factures, avoirs ou devis ne peut pas être supprimé, un article utilisé par une règle de linge non plus.
 - L'ancien écran d'administration « Facture » (circuit Odoo) n'est plus relié à aucun bouton ; son code est conservé, inactif.
 

@@ -13,6 +13,7 @@ process.env.DATA_DIR = process.env.DATA_DIR || fs.mkdtempSync(path.join(os.tmpdi
 process.env.BACKUP_SCHEDULER = process.env.BACKUP_SCHEDULER || 'off';
 const { buildInvoicePdf } = require('../src/billing/pdf');
 const { buildDeliveryNotePdf, buildPreparationSlipPdf, buildInvoiceAnnexPdf, buildInvoiceSummaryPdf } = require('../src/utils/pdf');
+const { buildMandateFormPdf } = require('../src/billing/sddPdf');
 
 const seller = {
   legalName: 'Blanchisserie Cézanne', legalForm: 'SAS', shareCapital: '10 000 €', siren: '123 456 789', siret: '123 456 789 00012',
@@ -93,6 +94,10 @@ const SAMPLES = [
     ],
     unpacked: [{ name: 'Couverture 2 personnes', code: 'COU', qty: 6 }],
   })],
+  ['mandat-sepa', 1, () => buildMandateFormPdf({ umr: 'CEZ-0012-01', scheme: 'CORE', creditor: { name: 'Blanchisserie Cézanne', address: '12 avenue des Lavandes, 84200 Carpentras', ics: 'FR72ZZZ123456' },
+    debtor: { name: 'Hôtel Les Lavandes', contact: 'Mme Martin', lines: ['450 route de Malaucène', '84380 Mazan'] } })],
+  ['mandat-sepa-enregistre-b2b', 1, () => buildMandateFormPdf({ umr: 'CEZ-0012-02', scheme: 'B2B', creditor: { name: 'Blanchisserie Cézanne', address: '12 avenue des Lavandes, 84200 Carpentras', ics: 'FR72ZZZ123456' },
+    debtor: { name: 'Hôtel Les Lavandes', contact: '', lines: ['450 route de Malaucène', '84380 Mazan'] }, iban: 'FR7630006000011234567890189', bic: 'AGRIFRPP', signedOn: '2026-10-02' })],
   ['annexe-facture', 1, () => buildInvoiceAnnexPdf('FA-2026-000016', 'Hôtel Les Lavandes', annexOrders)],
   ['annexe-facture-longue', '2+', () => buildInvoiceAnnexPdf('FA-2026-000018', 'Hôtel Les Lavandes', manyOrders)],
   ['recapitulatif-facture', 1, () => buildInvoiceSummaryPdf('FA-2026-000016', 'Hôtel Les Lavandes', '2026-10-01', '2026-10-31', 3, [

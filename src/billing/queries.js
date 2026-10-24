@@ -71,6 +71,11 @@ const SORTERS = {
   balance: (d) => d.balanceCents ?? -1,
 };
 
+/** Toutes les factures émises qui ont un reste à payer (sans limite) : sert à préparer les prélèvements. */
+function listOpen(today = engine.todayParis()) {
+  return db.prepare(`${BASE_SQL} WHERE i.kind = 'invoice' AND i.status = 'issued'`).all().map(r => decorate(r, today)).filter(TAB_TEST.open);
+}
+
 /**
  * Liste des factures et avoirs.
  * f : { tab, clientId, q, from, to, sort, dir, limit, offset }
@@ -258,4 +263,4 @@ function listPayments({ from, to, q, limit = 300 } = {}) {
   };
 }
 
-module.exports = { listInvoices, dashboard, timeline, listPayments, decorate, BASE_SQL, norm, daysBetween };
+module.exports = { listInvoices, listOpen, dashboard, timeline, listPayments, decorate, BASE_SQL, norm, daysBetween };

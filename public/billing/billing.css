@@ -329,3 +329,12 @@ tr.ul-detail[hidden]{display:none;}
 
 tr.ul-g td.client{min-width:220px;}
 tr.ul-g td.client .sub{overflow-wrap:anywhere;}
+
+/* ---------- prélèvements SEPA ---------- */
+.sdd-w{color:var(--bl-wait);}
+.sdd-bar{display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:12px 14px; border:1px solid var(--line); border-top:none; border-radius:0 0 8px 8px; background:var(--bl-row);}
+.sdd-bar span{font-size:14px; color:var(--steel);}
+.sdd-steps{margin:0; padding-left:20px; font-size:13.5px; line-height:1.5;}
+.sdd-nomandate{margin-top:16px; border:1px solid var(--line); border-radius:8px; background:var(--paper);}
+.sdd-nomandate > summary{cursor:pointer; padding:11px 14px; font-size:14px; color:var(--ink); font-weight:500;}
+.sdd-nomandate[open] > summary{border-bottom:1px solid var(--line);}
