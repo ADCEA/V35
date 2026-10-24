@@ -198,6 +198,12 @@ test('import de tarifs : hôtel retrouvé par SIRET ou choisi à l’aperçu, ap
   const un = await call('GET', `${B}/catalog/clients/${hotel}/unbilled`);
   assert.equal(un.status, 200); assert.deepEqual(un.data, { orders: 0, oldest: null, inDraft: 0 });
   assert.equal((await call('GET', `${B}/catalog/clients/999999/unbilled`)).status, 404);
+  // « même date pour toutes les lignes » : transmis par l'API
+  const fdCsv = ['client;code_sage;prix;date_debut', 'Hôtel Rapproché;T-DT;1,70;2026-10-15'].join('\n');
+  const fd = await call('POST', `${B}/catalog/prices/import`, { csv: fdCsv, defaultDate: '2026-09-28', forceDate: true });
+  assert.equal(fd.status, 200); assert.equal(fd.data.lines[0].effective, '2026-09-28');
+  const nofd = await call('POST', `${B}/catalog/prices/import`, { csv: fdCsv, defaultDate: '2026-09-28' });
+  assert.equal(nofd.data.lines[0].effective, '2026-10-15', 'sans l\'option, la date du fichier est conservée');
   assert.equal(r.data.unknownClients.length, 1);
   assert.equal(r.data.unknownClients[0].name, 'Nom très différent');
   r = await call('POST', `${B}/catalog/prices/import`, { csv, clientMap: { 'Nom très différent': hotel } });

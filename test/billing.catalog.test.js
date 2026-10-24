@@ -382,6 +382,35 @@ test('les BL non facturés plus anciens que la date d’effet sont annoncés (et
   assert.throws(() => catalog.unbilledInfo(999999), /introuvable/i);
 });
 
+test('import : « même date pour toutes les lignes » ignore la colonne date_debut et recalcule les BL depuis cette date', () => {
+  const hotel = addClient('Hôtel Date Unique', 'dateunique@exemple.fr');
+  const gs = db.prepare('SELECT id, price, sage_code AS sage FROM articles WHERE id != ? AND sage_code IS NOT NULL ORDER BY id LIMIT 1').get(drap);
+  const mk = (ticket, date, art, price) => {
+    const id = Number(db.prepare(`INSERT INTO orders (ticket, client_id, societe, contact, tel, adresse, livraison_prevue, status) VALUES (?,?,?,?,?,?,?,?)`).run(ticket, hotel, 'H', 'C', '06', 'adr', date, 'livree').lastInsertRowid);
+    db.prepare(`INSERT INTO order_items (order_id, service_id, name, code, sage_code, price, qty, delivered_qty) VALUES (?,?,?,?,?,?,?,?)`).run(id, art, 'x', 'x', 'x', price, 10, 10);
+    return id;
+  };
+  const frozen = (id) => db.prepare('SELECT price FROM order_items WHERE order_id=?').get(id).price;
+  const b1 = mk('U-0929', '2026-09-29', drap, 1.35); const b2 = mk('U-0927', '2026-09-27', drap, 1.35); const b3 = mk('U-1008', '2026-10-08', gs.id, gs.price);
+  const csv = 'client;code_sage;prix;date_debut\nHôtel Date Unique;B-DP2;1,00;2026-10-05\nHôtel Date Unique;' + gs.sage + ';0,50;2026-10-20';
+
+  // sans l'option, chaque ligne garde sa date du fichier : aucun BL n'est touché, les deux plus anciens sont annoncés
+  const pv = catalog.importPrices(csv, { apply: false, defaultDate: '2026-09-28' });
+  assert.equal(pv.repriced.orders, 0);
+  assert.deepEqual(pv.lines.map(l => l.effective), ['2026-10-05', '2026-10-20']);
+  assert.equal(pv.repriced.older.orders, 2);
+
+  // avec l'option : les deux tarifs commencent le 28/09 et les BL non facturés depuis cette date sont recalculés
+  const fd = catalog.importPrices(csv, { apply: false, defaultDate: '2026-09-28', forceDate: true });
+  assert.deepEqual(fd.lines.map(l => l.effective), ['2026-09-28', '2026-09-28']);
+  assert.equal(fd.repriced.orders, 2);
+  assert.equal(frozen(b1), 1.35, "l'aperçu ne modifie rien");
+  catalog.importPrices(csv, { apply: true, defaultDate: '2026-09-28', forceDate: true });
+  assert.equal(frozen(b1), 1.0); assert.equal(frozen(b3), 0.5); assert.equal(frozen(b2), 1.35, 'le BL du 27/09 est antérieur à la date imposée');
+  assert.deepEqual(db.prepare('SELECT DISTINCT date_debut FROM client_prices WHERE client_id = ?').all(hotel).map(r => r.date_debut), ['2026-09-28']);
+  db.prepare('DELETE FROM client_prices WHERE client_id = ?').run(hotel);   // ne pas fausser les tests suivants
+});
+
 test('journal des prix : filtrable par hôtel et par article', () => {
   const all = catalog.priceLog({}).events;
   assert.ok(all.length > 5);

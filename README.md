@@ -330,6 +330,9 @@ sont retrouvés avec tolérance, sans jamais deviner en silence :
 - **article** : code Sage identique, sinon comparaison sans les espaces (« B- TAPIS » = « B-TAPIS ») sauf si deux articles ne se
   distinguent que par leurs espaces ;
 - le journal chaîné note comment chaque hôtel a été retrouvé (`hotelMatch` : `siret` ou `choix`).
+- **date d'effet** : chaque ligne prend sa `date_debut`, sinon la « date d'effet par défaut » de la fenêtre. La case **« Utiliser cette date pour
+  toutes les lignes »** impose la date de la fenêtre à toutes les lignes (la colonne `date_debut` est ignorée) : pratique quand tous les
+  hôtels doivent partir du même jour (par exemple le 28/09 pour que tous les BL non facturés depuis cette date reprennent les tarifs).
 
 ### Bons de livraison
 
@@ -550,7 +553,7 @@ relances. Sans SMTP, l'envoi répond « non configuré » (503) ; une relance fa
 
 ### Tests
 
-`npm test` (147 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
+`npm test` (148 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

@@ -46,7 +46,7 @@ router.get('/catalog/prices/export.csv', wrap((req, res) => {
 }));
 router.post('/catalog/prices/import', stepUpWhen(applying, 'prices-import'), wrap((req, res) => {
   const b = req.body || {};
-  res.json(catalog.importPrices(csvOf(b), { apply: applying(req), clientId: b.clientId ? Number(b.clientId) : null, defaultDate: iso(b.defaultDate), clientMap: b.clientMap, reprice: b.reprice !== false }));
+  res.json(catalog.importPrices(csvOf(b), { apply: applying(req), clientId: b.clientId ? Number(b.clientId) : null, defaultDate: iso(b.defaultDate), clientMap: b.clientMap, reprice: b.reprice !== false, forceDate: b.forceDate === true }));
 }));
 router.get('/catalog/prices/log', wrap((req, res) => {
   res.json(catalog.priceLog({ clientId: req.query.clientId ? Number(req.query.clientId) : undefined, articleId: req.query.articleId ? String(req.query.articleId) : undefined }));
