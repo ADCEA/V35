@@ -3,11 +3,20 @@
 const { spawn } = require('child_process');
 const os = require('os'); const path = require('path'); const fs = require('fs');
 
-let nextPort = 4100 + Math.floor(Math.random() * 400);
+// Port libre demandé au système : les fichiers de test tournent en parallèle, et un port tiré au hasard dans une plage étroite
+// finissait parfois par tomber sur celui d'un autre fichier (échec ponctuel « serveur arrêté »).
+const net = require('net');
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => resolve(port)); });
+  });
+}
 
 async function startServer({ dataDir, env = {} } = {}) {
   const DATA_DIR = dataDir || fs.mkdtempSync(path.join(os.tmpdir(), 'cezanne-test-'));
-  const PORT = nextPort++;
+  const PORT = await freePort();
   const BASE = `http://localhost:${PORT}`;
   const full = { ...process.env, DATA_DIR, PORT: String(PORT), SESSION_SECRET: 'test-secret', BACKUP_SCHEDULER: 'off', ...env };
   delete full.ODOO_URL; delete full.ODOO_API_KEY;
