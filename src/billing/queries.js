@@ -244,7 +244,10 @@ function timeline(invoiceId) {
   }
   for (const m of db.prepare('SELECT sent_at, kind, channel, to_email, status, error FROM native_mail_log WHERE invoice_id = ? ORDER BY id').all(invoiceId)) {
     const at = m.sent_at.includes('T') ? m.sent_at : m.sent_at.replace(' ', 'T') + 'Z';
-    const how = m.channel === 'manual' ? 'noté manuellement' : (m.status === 'failed' ? `ÉCHEC : ${m.error || 'envoi impossible'}` : `à ${m.to_email}`);
+    const how = m.channel === 'manual' ? 'noté manuellement'
+      : m.channel === 'outlook-draft' ? `brouillon créé dans Outlook, PDF joint${m.to_email ? ` (pour ${m.to_email})` : ''}`
+      : m.channel === 'outlook' ? `préparé dans Outlook${m.to_email ? ` pour ${m.to_email}` : ''}`
+      : (m.status === 'failed' ? `ÉCHEC : ${m.error || 'envoi impossible'}` : `à ${m.to_email}`);
     items.push({ at, type: `mail:${m.kind}`, label: MAIL_LABEL[m.kind] || m.kind, detail: how, failed: m.status === 'failed' });
   }
   return items.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));

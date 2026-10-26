@@ -93,25 +93,84 @@
     };
   };
 
-  // Fenêtre d'envoi par e-mail. kind : 'invoice' | 'reminder-N' | 'quote'.
-  Bill.mailModal = async function ({ title, previewPath, sendPath, sendExtra = {}, onDone }) {
+  // ---------- Outlook ----------
+  // Un site web ne peut pas joindre un fichier à Outlook : on ouvre le message prêt (destinataire, objet, texte)
+  // dans un nouvel onglet Outlook et on télécharge le PDF, qu'il ne reste qu'à glisser dans le message.
+  const OUTLOOK = {
+    pro: { label: 'Microsoft 365 (outlook.office.com)', url: 'https://outlook.office.com/mail/deeplink/compose' },
+    perso: { label: 'Outlook.com personnel (outlook.live.com)', url: 'https://outlook.live.com/mail/0/deeplink/compose' },
+  };
+  Bill.outlookHost = (set) => {
+    try { if (set && OUTLOOK[set]) localStorage.setItem('cz-outlook', set); const v = localStorage.getItem('cz-outlook'); return OUTLOOK[v] ? v : 'pro'; } catch (_) { return set && OUTLOOK[set] ? set : 'pro'; }
+  };
+  Bill.outlookOptions = (selected) => Object.entries(OUTLOOK).map(([k, v]) => `<option value="${k}" ${k === selected ? 'selected' : ''}>${e(v.label)}</option>`).join('');
+  Bill.outlookUrl = ({ to, subject, body, host }) => {
+    const list = String(to || '').split(/[;,\s]+/).filter(Boolean).join(',');
+    const q = [];
+    if (list) q.push(`to=${encodeURIComponent(list)}`);
+    q.push(`subject=${encodeURIComponent(subject || '')}`, `body=${encodeURIComponent(String(body || '').replace(/\r?\n/g, '\r\n'))}`);
+    return `${(OUTLOOK[host] || OUTLOOK.pro).url}?${q.join('&')}`;
+  };
+  // Bloc « Outlook » des fenêtres d'envoi : explique ce qui va se passer selon l'état de la connexion.
+  // Connecté : un brouillon avec le PDF joint est créé dans la boîte. Sinon : lien Outlook + PDF téléchargé (secours).
+  Bill.outlookBlock = (o, selectId) => {
+    o = o || {};
+    if (o.connected) return `<div class="bl-field"><label>Outlook</label><div class="bl-hint" style="margin-top:0">Un <b>brouillon</b> est créé dans votre boîte Outlook${o.account ? ` (${e(o.account)})` : ''}, avec le PDF déjà joint, et s'ouvre dans un nouvel onglet. Rien ne part tant que vous n'avez pas cliqué sur Envoyer dans Outlook.</div></div>`;
+    const why = o.needsReconnect ? 'La connexion à Outlook a expiré : reconnectez-la dans Configuration → Outlook pour que le PDF soit joint automatiquement.'
+      : 'Pour que le PDF soit joint automatiquement au brouillon, connectez Outlook une fois dans Configuration → Outlook.';
+    return `<div class="bl-field"><label for="${selectId}">Mon Outlook</label><select id="${selectId}">${Bill.outlookOptions(Bill.outlookHost())}</select>
+      <div class="bl-hint">Pour l'instant, Outlook s'ouvre avec ce message prêt et le PDF est téléchargé, à joindre vous-même. ${why}</div></div>`;
+  };
+
+  // À appeler directement depuis un clic (sinon le navigateur bloque la fenêtre). Note l'envoi dans l'historique, puis :
+  // Outlook connecté → ouvre le brouillon créé (PDF déjà joint) ; sinon ouvre le lien Outlook et télécharge le PDF.
+  // Les erreurs de saisie (objet vide, adresse invalide) ferment l'onglet et remontent.
+  Bill.outlookHandoff = async function ({ url, logPath, logBody, pdfPath }) {
+    const w = window.open('about:blank', '_blank');
+    if (!w) throw new Error("Le navigateur a bloqué l'ouverture d'Outlook : autorisez les fenêtres pop-up pour ce site, puis recommencez.");
+    try { w.opener = null; } catch (_) { /* déjà isolé */ }
+    let r;
+    try { r = await Bill.post(logPath, { ...logBody, channel: 'outlook' }); } catch (err) { w.close(); throw err; }
+    if (r.webLink) {
+      w.location.href = r.webLink;
+      Bill.toast('Brouillon créé dans Outlook, PDF joint : il ne reste qu\'à l\'envoyer', false, 7000);
+      return r;
+    }
+    w.location.href = url;
+    let saved = true;
+    try { await Bill.download(pdfPath, 'document.pdf'); } catch (err) { saved = false; r.draftError = r.draftError || err.message; }
+    if (r.draftError) Bill.toast(`Outlook est ouvert avec le message, mais sans le PDF joint automatiquement : ${r.draftError}${saved ? ' Le PDF est téléchargé, à joindre.' : ''}`, true, 12000);
+    else Bill.toast('Outlook est ouvert avec le message. Le PDF est téléchargé : à joindre au message.', false, 9000);
+    return r;
+  };
+
+  // Fenêtre d'envoi par e-mail. L'envoi par défaut passe par Outlook ; l'envoi direct par le serveur (SMTP) reste
+  // proposé quand il est configuré. pdfPath : le PDF à télécharger si le brouillon automatique n'est pas disponible.
+  Bill.mailModal = async function ({ title, previewPath, sendPath, pdfPath, sendExtra = {}, onDone }) {
     let pv;
     try { pv = await Bill.get(previewPath); } catch (err) { return Bill.fail(err); }
+    const buttons = [{ label: 'Annuler', onClick: async () => {} }];
+    if (pv.smtp) buttons.push({ label: 'Envoyer depuis le serveur', onClick: async (m) => {
+      const r = await Bill.post(sendPath, { ...sendExtra, to: m.$('#ml-to').value, subject: m.$('#ml-sub').value, body: m.$('#ml-body').value });
+      Bill.toast('E-mail envoyé à ' + (r.to || []).join(', '));
+      if (onDone) onDone(r);
+    } });
+    buttons.push({ label: pv.outlook && pv.outlook.connected ? 'Créer le brouillon Outlook' : 'Ouvrir dans Outlook', primary: true, onClick: async (m) => {
+      const to = m.$('#ml-to').value; const subject = m.$('#ml-sub').value; const body = m.$('#ml-body').value;
+      const host = m.$('#ml-ol') ? m.$('#ml-ol').value : Bill.outlookHost();
+      if (!subject.trim() || !body.trim()) throw new Error("L'objet et le message ne peuvent pas être vides.");
+      if (m.$('#ml-ol')) Bill.outlookHost(host);
+      const r = await Bill.outlookHandoff({ url: Bill.outlookUrl({ to, subject, body, host }), logPath: sendPath, logBody: { ...sendExtra, to, subject, body }, pdfPath });
+      if (onDone) onDone(r);
+    } });
     Bill.modal({
       title, wide: true,
-      body: `${pv.smtp ? '' : '<div class="bl-alert warn">L\'envoi d\'e-mails n\'est pas encore configuré sur le serveur (SMTP). Vous pouvez préparer le message, mais il ne partira pas.</div>'}
-        <div class="bl-field"><label for="ml-to">Destinataire</label><input id="ml-to" value="${e(pv.to)}" placeholder="adresse@hotel.fr">
-          <div class="bl-hint">Plusieurs adresses possibles, séparées par une virgule. Le PDF est joint automatiquement.</div></div>
+      body: `<div class="bl-field"><label for="ml-to">Destinataire</label><input id="ml-to" value="${e(pv.to)}" placeholder="adresse@hotel.fr">
+          <div class="bl-hint">Plusieurs adresses possibles, séparées par une virgule.</div></div>
         <div class="bl-field"><label for="ml-sub">Objet</label><input id="ml-sub" value="${e(pv.subject)}"></div>
-        <div class="bl-field"><label for="ml-body">Message</label><textarea id="ml-body">${e(pv.body)}</textarea></div>`,
-      buttons: [
-        { label: 'Annuler', onClick: async () => {} },
-        { label: 'Envoyer', primary: true, onClick: async (m) => {
-          const r = await Bill.post(sendPath, { ...sendExtra, to: m.$('#ml-to').value, subject: m.$('#ml-sub').value, body: m.$('#ml-body').value });
-          Bill.toast('E-mail envoyé à ' + (r.to || []).join(', '));
-          if (onDone) onDone(r);
-        } },
-      ],
+        <div class="bl-field"><label for="ml-body">Message</label><textarea id="ml-body">${e(pv.body)}</textarea></div>
+        ${Bill.outlookBlock(pv.outlook, 'ml-ol')}`,
+      buttons,
     });
   };
 

@@ -16,6 +16,8 @@ const mail = require('../billing/mail');
 const escompte = require('../billing/escompte');
 const docs = require('../billing/documents');
 const pennylane = require('../billing/pennylane');
+const outlookModule = require('../billing/outlook');
+const outlookState = () => { const s = outlookModule.status(); return { configured: s.configured, connected: s.connected, needsReconnect: s.needsReconnect, account: s.account && s.account.email }; };
 const { wrap, present } = require('../billing/http');
 
 const router = express.Router();
@@ -24,6 +26,9 @@ router.use(requireAdmin);
 // routes /lock/* restent accessibles verrouillées, tout le reste exige un
 // déverrouillage récent. Les actes sensibles exigent en plus une ressaisie.
 router.use('/lock', lock.router);
+// Retour de Microsoft après l'autorisation d'Outlook : avant le verrou (la personne revient d'un autre site) ; la demande
+// ne vaut que si elle a été lancée depuis cette session, après ressaisie du code (état + PKCE dans la session).
+router.get('/outlook/callback', require('./billingOutlook').callback);
 router.use(lock.requireUnlocked);
 
 // ---------- réglages ----------
@@ -211,17 +216,17 @@ router.get('/invoices/:id/mail-preview', wrap((req, res) => {
   if (inv.status !== 'issued') throw new engine.BillingError("Seul un document émis peut être envoyé.");
   const kind = ['invoice', 'reminder-1', 'reminder-2', 'reminder-3'].includes(req.query.kind) ? req.query.kind : 'invoice';
   const client = db.prepare('SELECT societe, email FROM clients WHERE id = ?').get(inv.client_id);
-  res.json({ ...mail.render(kind, inv, client?.societe), to: client?.email || '', smtp: require('../utils/mailer').isConfigured() });
+  res.json({ ...mail.render(kind, inv, client?.societe), to: client?.email || '', smtp: require('../utils/mailer').isConfigured(), outlook: outlookState() });
 }));
 
 router.post('/invoices/:id/send', wrap(async (req, res) => {
   const r = await mail.sendInvoice(Number(req.params.id), req.body || {});
-  res.json({ ok: true, to: r.to });
+  res.json({ ok: true, to: r.to, outlook: !!r.outlook, draft: !!r.draft, webLink: r.webLink || null, draftError: r.draftError || null });
 }));
 
 router.post('/invoices/:id/remind', wrap(async (req, res) => {
   const r = await mail.sendReminder(Number(req.params.id), req.body || {});
-  res.json({ ok: true, ...r });
+  res.json({ ok: true, ...r, webLink: r.webLink || null, draftError: r.draftError || null });
 }));
 
 router.get('/reminders', wrap((req, res) => {
@@ -316,6 +321,7 @@ router.post('/pennylane/auto', lock.requireStepUp('pennylane-auto'), wrap((req, 
 }));
 
 // Ventes : encaissements, rapprochement, facturation en lot, devis.
+router.use(require('./billingOutlook').router);
 router.use(require('./billingSales'));
 router.use(require('./billingCatalog'));
 router.use(require('./billingDeliveries'));

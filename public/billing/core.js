@@ -23,10 +23,10 @@
   };
   Bill.pill = (display) => `<span class="bl-pill ${e(display)}">${e(PILL[display] || display)}</span>`;
 
-  Bill.toast = (msg, bad) => {
+  Bill.toast = (msg, bad, ms) => {
     document.querySelectorAll('.bl-toast').forEach(x => x.remove());
     const t = document.createElement('div'); t.className = 'bl-toast' + (bad ? ' bad' : ''); t.setAttribute('role', 'status'); t.textContent = msg;
-    document.body.appendChild(t); setTimeout(() => t.remove(), bad ? 6000 : 3200);
+    document.body.appendChild(t); setTimeout(() => t.remove(), ms || (bad ? 6000 : 3200));
   };
 
   // ---------- appels API ----------
@@ -146,6 +146,7 @@
     { key: 'issuer', label: 'Émetteur' },
     { key: 'security', label: 'Sécurité et sauvegardes' },
     { key: 'pennylane', label: 'Pennylane' },
+    { key: 'outlook', label: 'Outlook' },
     { key: 'controls', label: 'Contrôle et FEC' },
   ];
 

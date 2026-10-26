@@ -255,7 +255,6 @@
     const rows = onlyDue ? r.invoices.filter(x => x.suggestedLevel) : r.invoices;
     main.innerHTML = `<div class="bl-head"><div><h2>Relances</h2><p>Les factures échues et non soldées. Le logiciel propose le bon moment et le bon ton ; c'est toujours vous qui décidez d'envoyer.</p></div>
       <div class="bl-actions"><label class="bl-check"><input type="checkbox" id="rm-only" ${onlyDue ? 'checked' : ''}> Seulement celles à relancer maintenant</label></div></div>
-      ${r.smtp ? '' : '<div class="bl-alert warn">L\'envoi d\'e-mails n\'est pas configuré sur le serveur. Vous pouvez noter une relance faite par téléphone, mais pas l\'envoyer ici.</div>'}
       <div class="bl-panel">${rows.length ? `<div class="bl-tablewrap"><table class="bl-table"><thead><tr><th>Hôtel</th><th>Facture</th><th>Retard</th><th class="r">Reste dû</th><th>Dernière relance</th><th>Conseil</th><th></th></tr></thead><tbody>
       ${rows.map(x => `<tr><td class="client">${e(x.clientName)}${x.email ? '' : '<span class="sub" style="color:var(--bl-wait)">pas d\'adresse e-mail</span>'}</td>
         <td class="bl-num"><a href="#" data-inv="${x.id}">${e(x.number)}</a><span class="sub">échue le ${dFr(x.dueDate)}</span></td>
@@ -279,31 +278,53 @@
       title: 'Relancer', wide: true,
       body: `<div class="bl-field"><label for="rl-lvl">Ton du message</label><select id="rl-lvl">${Object.entries(LEVELS).map(([k, v]) => `<option value="${k}" ${Number(k) === level ? 'selected' : ''}>${v}</option>`).join('')}</select>
           ${row && row.suggestedLevel ? `<div class="bl-hint">Conseillé ici : ${e(LEVELS[row.suggestedLevel])}.</div>` : ''}</div>
-        <div class="bl-field"><label class="bl-check"><input type="radio" name="rl-ch" value="email" checked> Envoyer un e-mail avec la facture en pièce jointe</label>
+        <div class="bl-field"><label class="bl-check"><input type="radio" name="rl-ch" value="outlook" checked> Préparer l'e-mail dans Outlook (brouillon avec la facture jointe)</label>
+        <label class="bl-check" id="rl-smtp-opt" style="margin-top:6px;display:none"><input type="radio" name="rl-ch" value="email"> Envoyer directement depuis le serveur, facture jointe</label>
         <label class="bl-check" style="margin-top:6px"><input type="radio" name="rl-ch" value="manual"> J'ai relancé par téléphone ou courrier : le noter seulement</label></div>
         <div id="rl-mail"><div class="bl-field"><label for="rl-to">Destinataire</label><input id="rl-to"></div><div class="bl-field"><label for="rl-sub">Objet</label><input id="rl-sub"></div>
-        <div class="bl-field"><label for="rl-body">Message</label><textarea id="rl-body"></textarea></div></div>
+        <div class="bl-field"><label for="rl-body">Message</label><textarea id="rl-body"></textarea></div>
+        <div id="rl-ol-wrap"></div></div>
         <div id="rl-note" style="display:none"><div class="bl-field"><label for="rl-nt">Note (facultatif)</label><input id="rl-nt" placeholder="Ex. appelé M. Martin, paiement promis vendredi"></div></div>`,
-      buttons: [{ label: 'Annuler', onClick: async () => {} }, { label: 'Envoyer', primary: true, onClick: async (mm) => {
-        const manual = mm.el.querySelector('input[name="rl-ch"]:checked').value === 'manual';
-        if (manual) await Bill.post(`/invoices/${invoiceId}/remind`, { level, channel: 'manual', subject: mm.$('#rl-nt').value.trim() || undefined });
-        else await Bill.post(`/invoices/${invoiceId}/remind`, { level, to: mm.$('#rl-to').value, subject: mm.$('#rl-sub').value, body: mm.$('#rl-body').value });
-        Bill.toast(manual ? 'Relance notée' : 'Relance envoyée'); if (onDone) onDone();
+      buttons: [{ label: 'Annuler', onClick: async () => {} }, { label: 'Ouvrir dans Outlook', primary: true, onClick: async (mm) => {
+        const channel = mm.el.querySelector('input[name="rl-ch"]:checked').value;
+        if (channel === 'manual') {
+          await Bill.post(`/invoices/${invoiceId}/remind`, { level, channel: 'manual', subject: mm.$('#rl-nt').value.trim() || undefined });
+          Bill.toast('Relance notée');
+        } else if (channel === 'outlook') {
+          const to = mm.$('#rl-to').value; const subject = mm.$('#rl-sub').value; const body = mm.$('#rl-body').value;
+          const host = mm.$('#rl-ol') ? mm.$('#rl-ol').value : Bill.outlookHost();
+          if (!subject.trim() || !body.trim()) throw new Error("L'objet et le message ne peuvent pas être vides.");
+          if (mm.$('#rl-ol')) Bill.outlookHost(host);
+          await Bill.outlookHandoff({ url: Bill.outlookUrl({ to, subject, body, host }), logPath: `/invoices/${invoiceId}/remind`, logBody: { level, to, subject, body }, pdfPath: `/invoices/${invoiceId}/pdf` });
+        } else {
+          await Bill.post(`/invoices/${invoiceId}/remind`, { level, to: mm.$('#rl-to').value, subject: mm.$('#rl-sub').value, body: mm.$('#rl-body').value });
+          Bill.toast('Relance envoyée');
+        }
+        if (onDone) onDone();
       } }],
     });
+    let outlookConnected = false;
     async function fill() {
       try {
         const pv = await Bill.get(`/invoices/${invoiceId}/mail-preview?kind=reminder-${level}`);
         m.$('#rl-to').value = pv.to; m.$('#rl-sub').value = pv.subject; m.$('#rl-body').value = pv.body;
-        if (!pv.smtp) m.err('L\'envoi d\'e-mails n\'est pas configuré sur le serveur : vous pouvez seulement noter la relance.');
+        m.$('#rl-smtp-opt').style.display = pv.smtp ? '' : 'none';
+        outlookConnected = !!(pv.outlook && pv.outlook.connected);
+        const keep = m.$('#rl-ol') ? m.$('#rl-ol').value : null;
+        m.$('#rl-ol-wrap').innerHTML = Bill.outlookBlock(pv.outlook, 'rl-ol');
+        if (keep && m.$('#rl-ol')) m.$('#rl-ol').value = keep;
+        syncChannel();
       } catch (err) { Bill.fail(err, m.$('.bl-err')); }
     }
     m.$('#rl-lvl').onchange = (ev) => { level = Number(ev.target.value); fill(); };
-    m.el.querySelectorAll('input[name="rl-ch"]').forEach(r => r.onchange = () => {
-      const manual = m.el.querySelector('input[name="rl-ch"]:checked').value === 'manual';
-      m.$('#rl-mail').style.display = manual ? 'none' : ''; m.$('#rl-note').style.display = manual ? '' : 'none';
-      m.el.querySelector('.bl-foot .primary').textContent = manual ? 'Noter la relance' : 'Envoyer';
-    });
+    const syncChannel = () => {
+      const ch = m.el.querySelector('input[name="rl-ch"]:checked').value;
+      m.$('#rl-mail').style.display = ch === 'manual' ? 'none' : ''; m.$('#rl-note').style.display = ch === 'manual' ? '' : 'none';
+      m.$('#rl-ol-wrap').style.display = ch === 'outlook' ? '' : 'none';
+      m.el.querySelector('.bl-foot .primary').textContent = ch === 'manual' ? 'Noter la relance' : ch === 'outlook' ? (outlookConnected ? 'Créer le brouillon Outlook' : 'Ouvrir dans Outlook') : 'Envoyer';
+    };
+    m.el.querySelectorAll('input[name="rl-ch"]').forEach(r => r.onchange = syncChannel);
+    syncChannel();
     fill();
   };
 })();

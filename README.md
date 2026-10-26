@@ -635,11 +635,38 @@ comptabilité et le rapprochement bancaire.
 ### E-mails
 
 `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` (voir plus haut) servent aussi à l'envoi des factures, devis et
-relances. Sans SMTP, l'envoi répond « non configuré » (503) ; une relance faite par téléphone peut quand même être notée.
+relances depuis le serveur. Sans SMTP, l'envoi depuis le serveur répond « non configuré » (503) ; une relance faite par
+téléphone peut quand même être notée.
+
+### Envoi par Outlook (brouillon avec le PDF joint)
+
+« Envoyer par e-mail » (facture, devis, relance) ouvre **un onglet Outlook avec un brouillon déjà prêt : destinataire,
+objet, texte et PDF en pièce jointe**. Rien ne part tant que vous n'avez pas cliqué sur Envoyer dans Outlook.
+
+Le brouillon est créé dans votre boîte par Microsoft Graph. Une fois, il faut déclarer l'application chez Microsoft :
+
+1. portal.azure.com → Microsoft Entra ID → Inscriptions d'applications → Nouvelle inscription (comptes professionnels
+   et personnels) ;
+2. type de redirection **Web**, adresse affichée sur Facturation → Outlook (`<adresse du site>/api/admin/billing/outlook/callback`) ;
+3. Autorisations API → Microsoft Graph → déléguées : `Mail.ReadWrite`, `User.Read`, `offline_access` (**pas** `Mail.Send`) ;
+4. Certificats et secrets → nouveau secret client → copier sa **valeur** ;
+5. variables d'environnement Render : `MS_CLIENT_ID`, `MS_CLIENT_SECRET` (et `MS_TENANT` si l'application est limitée à
+   votre organisation ; défaut `common`), plus `PUBLIC_URL` si `RENDER_EXTERNAL_URL` n'est pas défini ; redéployer ;
+6. Facturation → Outlook → « Connecter mon Outlook » (code de la Facturation demandé), puis accepter chez Microsoft.
+
+Sécurité : l'application ne peut que créer et modifier des brouillons (aucune permission d'envoi) ; le jeton de
+renouvellement est chiffré (AES-256-GCM, clé dérivée de `SESSION_SECRET` : changer ce secret impose de reconnecter) ;
+connexion et déconnexion exigent le code de la Facturation ; l'historique garde la trace (`outlook-draft`).
+Pièces jointes limitées à 3 Mo.
+
+Repli : si Outlook n'est pas connecté (ou si Microsoft refuse), le bouton ouvre le brouillon Outlook Web sans pièce jointe et
+télécharge le PDF à glisser dedans ; l'envoi est alors noté comme « préparé dans Outlook » (`outlook`).
+**Non vérifié sur un vrai compte Microsoft** (tests avec un faux serveur Microsoft) : à essayer une première fois avec une
+facture de test.
 
 ### Tests
 
-`npm test` (200 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (215 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

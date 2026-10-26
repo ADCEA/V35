@@ -25,7 +25,7 @@
 
   function followUp(d) {
     const out = [];
-    if (d.sentCount) out.push('<span class="bl-ind ok" title="Envoyée par e-mail">envoyée</span>');
+    if (d.sentCount) out.push('<span class="bl-ind ok" title="Envoyée par e-mail ou préparée dans Outlook">envoyée</span>');
     if (d.reminderCount) out.push(`<span class="bl-ind" title="Relances faites">${plural(d.reminderCount, 'relance', 'relances')}</span>`);
     if (d.pennylaneStatus === 'sent') out.push('<span class="bl-ind ok" title="Transmise à Pennylane">Pennylane</span>');
     if (d.pennylaneStatus === 'error') out.push('<span class="bl-ind bad" title="Échec d\'envoi à Pennylane">Pennylane !</span>');
@@ -376,7 +376,7 @@
         });
       },
       send() {
-        Bill.mailModal({ title: isCn() ? "Envoyer l'avoir" : 'Envoyer la facture', previewPath: `/invoices/${id}/mail-preview?kind=invoice`, sendPath: `/invoices/${id}/send`, onDone: async () => { mark(); await reload(); } });
+        Bill.mailModal({ title: isCn() ? "Envoyer l'avoir" : 'Envoyer la facture', previewPath: `/invoices/${id}/mail-preview?kind=invoice`, sendPath: `/invoices/${id}/send`, pdfPath: `/invoices/${id}/pdf`, onDone: async () => { mark(); await reload(); } });
       },
       remind() { if (Bill.remind) Bill.remind(id, { onDone: async () => { mark(); await reload(); } }); },
       pdf() { Bill.openPdf(`/invoices/${id}/pdf`); },
