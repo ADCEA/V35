@@ -10,6 +10,8 @@ const unlinked = require('../billing/unlinked');
 const lock = require('../billing/lock');
 const { buildDeliveryNotePdf } = require('../utils/pdf');
 const { mergePdfs } = require('../utils/pdfMerge');
+const mail = require('../billing/mail');
+const db = require('../db');
 const { wrap } = require('../billing/http');
 
 const router = express.Router();
@@ -51,6 +53,19 @@ router.post('/deliveries/unlinked/link',
 router.get('/deliveries/:id', wrap((req, res) => {
   const { order, items, ...d } = deliveries.getDelivery(parseInt(req.params.id, 10));
   res.json({ delivery: d });
+}));
+
+// Envoi d'un bon par Outlook, PDF joint : même fenêtre d'envoi que les factures (destinataire = e-mail de l'hôtel).
+router.get('/deliveries/:id/mail-preview', wrap((req, res) => {
+  const d = deliveries.getDelivery(parseInt(req.params.id, 10));
+  const client = d.client.id ? db.prepare('SELECT email FROM clients WHERE id = ?').get(d.client.id) : null;
+  res.json({ ...mail.renderDeliveryNote(d.order), to: (client && client.email) || '', smtp: false, outlook: mail.outlookState() });
+}));
+
+router.post('/deliveries/:id/send', wrap(async (req, res) => {
+  const d = deliveries.getDelivery(parseInt(req.params.id, 10));   // 404 si la commande n'est pas livrée
+  const r = await mail.sendDeliveryNote(d.id, req.body || {});
+  res.json({ ok: true, to: r.to, outlook: !!r.outlook, draft: !!r.draft, webLink: r.webLink || null, draftError: r.draftError || null, file: !!r.file, eml: r.eml || null, emlName: r.emlName || null });
 }));
 
 router.get('/deliveries/:id/pdf', wrap(async (req, res) => {

@@ -694,19 +694,31 @@ téléphone peut quand même être notée.
 
 ### Envoi par Outlook (message prêt, PDF joint)
 
-« Envoyer par e-mail » (facture, devis, relance) prépare **un message Outlook déjà prêt : destinataire, objet, texte et PDF en
-pièce jointe**. Rien ne part tant que vous n'avez pas cliqué sur Envoyer dans Outlook. Deux modes, au choix dans la fenêtre d'envoi
-ou dans Facturation → Outlook (choix mémorisé dans le navigateur) :
+« Envoyer par e-mail » (facture, avoir, devis, relance, **bon de livraison**) prépare **un message Outlook déjà prêt :
+destinataire, objet, texte et PDF en pièce jointe**. Rien ne part tant que vous n'avez pas cliqué sur Envoyer dans Outlook.
+Deux modes, au choix dans la fenêtre d'envoi ou dans Facturation → Outlook (choix mémorisé dans le navigateur ; clé
+`cz-outlook-mode2`, donc un ancien choix ne retient pas l'ouverture) :
 
-- **Outlook installé sur cet ordinateur** (par défaut, **rien à configurer**, aucun compte Microsoft à relier) : le serveur fabrique
-  un fichier message `.eml` (brouillon non envoyé, en-tête `X-Unsent: 1`, PDF en pièce jointe, sans expéditeur imposé : Outlook met
-  le compte de la personne). Le navigateur le télécharge ; un clic dessus l'ouvre dans Outlook. Un site web ne peut ni lancer
-  Outlook ni joindre un fichier par un lien `mailto:`, d'où ce fichier. Astuce : dans Chrome/Edge, flèche à côté du fichier →
-  « Toujours ouvrir les fichiers de ce type » ; si Windows ouvre une autre application, clic droit sur un `.eml` → Ouvrir avec →
-  Outlook → « Toujours utiliser ». Historique : `outlook-file`. **Non vérifié avec votre version d'Outlook** (essai à faire :
-  la version classique ouvre un `.eml` « X-Unsent » en fenêtre de rédaction ; le nouvel Outlook peut se comporter autrement).
-- **Outlook en ligne** (facultatif, détaillé ci-dessous) : brouillon créé dans la boîte par Microsoft Graph, ou, sans connexion,
-  lien Outlook Web + PDF à joindre.
+- **Outlook en ligne** (**par défaut** : à chaque clic, un **nouvel onglet** du navigateur s'ouvre sur Outlook) : brouillon créé
+  dans la boîte par Microsoft Graph, PDF déjà joint (détail ci-dessous), ou, tant qu'Outlook n'est pas connecté, message
+  prérempli dans Outlook Web + PDF téléchargé à joindre. L'onglet est ouvert dans le clic même (sinon le navigateur le bloque).
+- **Outlook installé sur cet ordinateur** (à choisir expressément ; **rien à configurer**, aucun compte Microsoft à relier) : le
+  serveur fabrique un fichier message `.eml` (brouillon non envoyé, en-tête `X-Unsent: 1`, PDF en pièce jointe, sans expéditeur
+  imposé : Outlook met le compte de la personne). Le navigateur le télécharge ; un clic dessus l'ouvre dans Outlook. Un site web
+  ne peut ni lancer Outlook ni joindre un fichier par un lien `mailto:`, d'où ce fichier. Astuce : dans Chrome/Edge, flèche à
+  côté du fichier → « Toujours ouvrir les fichiers de ce type » ; si Windows ouvre une autre application, clic droit sur un
+  `.eml` → Ouvrir avec → Outlook → « Toujours utiliser ». Historique : `outlook-file`. **Non vérifié avec votre version
+  d'Outlook** (la version classique ouvre un `.eml` « X-Unsent » en fenêtre de rédaction ; le nouvel Outlook peut se comporter
+  autrement).
+
+**Bons de livraison** : deux endroits, même mécanique (brouillon Outlook avec le PDF du bon). Fiche d'un BL (Facturation → Bons
+de livraison → « Envoyer par e-mail ») : fenêtre d'envoi habituelle, destinataire = e-mail de l'hôtel
+(`GET /deliveries/:id/mail-preview`, `POST /deliveries/:id/send`, réservé aux BL livrés). Fenêtre d'une commande
+(administration) : « Envoyer par e-mail (Outlook) », destinataire = e-mail des réglages (facultatif),
+`POST /api/admin/orders/:id/delivery-note` avec `channel` (`outlook` ou `outlook-file`) ; le PDF du bon peut aussi se
+télécharger (`GET /api/admin/orders/:id/delivery-note.pdf`) quand Outlook ne peut pas le joindre. Les bons n'ont **pas
+d'historique d'envoi** (le journal des e-mails ne concerne que factures, avoirs, devis et relances). L'ancien envoi direct par
+SMTP de la fenêtre d'une commande reste côté serveur (appel sans `channel`) mais l'écran passe désormais par Outlook.
 
 Pour le mode en ligne, le brouillon est créé dans votre boîte par Microsoft Graph. Une fois, il faut déclarer l'application chez Microsoft :
 
@@ -731,7 +743,7 @@ facture de test.
 
 ### Tests
 
-`npm test` (233 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (240 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

@@ -17,6 +17,7 @@ const { mergePdfs } = require('../utils/pdfMerge');
 const { sendWhatsAppNotification } = require('../utils/whatsapp');
 const { notifyOrderDelivered } = require('../utils/webhookNotify');
 
+const mail = require('../billing/mail');
 const router = express.Router();
 
 const STATUSES = ['recue', 'traitement', 'prete', 'livree'];
@@ -820,6 +821,19 @@ router.post('/orders/:id/delivery-note', async (req, res) => {
   const admin = getAdminRow();
   const to = admin?.delivery_email;
 
+  // Outlook (onglet en ligne ou Outlook installé) : brouillon avec le PDF du bon joint. L'adresse des réglages sert de
+  // destinataire (facultative : on peut la saisir dans Outlook). Rien ne part sans le clic sur Envoyer dans Outlook.
+  const channel = req.body && req.body.channel;
+  if (channel) {
+    try {
+      const msg = mail.renderDeliveryNote(orderWithItems);
+      const r = await mail.sendDeliveryNote(order.id, { to: to || '', subject: msg.subject, body: msg.body, channel });
+      return res.json({ ok: true, sent: false, ...msg, to: r.to, outlook: !!r.outlook, draft: !!r.draft, webLink: r.webLink || null, draftError: r.draftError || null, file: !!r.file, eml: r.eml || null, emlName: r.emlName || null, text });
+    } catch (err) {
+      return res.status(err.status || 502).json({ error: err.message, code: err.code || null });
+    }
+  }
+
   if (!to) {
     return res.json({ sent: false, reason: 'no_email', text });
   }
@@ -847,6 +861,20 @@ router.post('/orders/:id/delivery-note', async (req, res) => {
   } catch (err) {
     console.error('Échec envoi email :', err.message);
     res.status(502).json({ sent: false, reason: 'send_failed', text, to, error: err.message });
+  }
+});
+
+// GET /api/admin/orders/:id/delivery-note.pdf — le PDF du bon (téléchargé quand Outlook ne peut pas le joindre tout seul)
+router.get('/orders/:id/delivery-note.pdf', async (req, res) => {
+  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(Number(req.params.id));
+  if (!order) return res.status(404).json({ error: 'Commande introuvable.' });
+  try {
+    const pdf = await buildDeliveryNotePdf({ ...order, items: getItems(order.id) });
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="bon-livraison-${String(order.ticket).replace(/[^\w.-]+/g, '-')}.pdf"` });
+    res.send(pdf);
+  } catch (err) {
+    console.error('Échec PDF bon de livraison :', err.message);
+    res.status(500).json({ error: 'Erreur de génération du bon de livraison.' });
   }
 });
 

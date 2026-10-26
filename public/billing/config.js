@@ -278,16 +278,19 @@
   Bill.register('outlook', {
     async render(main) {
       const mode = Bill.outlookMode();
-      main.innerHTML = `<div class="bl-head"><div><h2>Outlook</h2><p>Envoyez factures, avoirs, devis et relances depuis Outlook : le message est prêt, avec le PDF déjà joint. Rien ne part sans votre clic sur Envoyer.</p></div></div>
-        <div class="bl-panel"><div class="bl-panel-h"><h3>Outlook installé sur cet ordinateur</h3></div><div class="bl-panel-b">
-          <p class="bl-note" style="margin-top:0">Mode par défaut, <b>rien à configurer</b>. « Envoyer par e-mail » télécharge un message prêt (destinataire, objet, texte et <b>PDF joint</b>) : un clic sur ce fichier l'ouvre dans votre Outlook.</p>
-          <p class="bl-note">Pour qu'il s'ouvre directement dans Outlook : dans Chrome ou Edge, flèche à côté du fichier téléchargé → « Toujours ouvrir les fichiers de ce type ». Si Windows ouvre une autre application, clic droit sur un fichier .eml → Ouvrir avec → Choisir une autre application → Outlook → « Toujours utiliser cette application ».</p>
-          <div class="bl-field" style="margin-bottom:0"><label>Mode utilisé par « Envoyer par e-mail » sur cet ordinateur</label>
-            <label class="bl-check"><input type="radio" name="ol-page-mode" data-olmode value="local" ${mode === 'local' ? 'checked' : ''}> Outlook installé sur cet ordinateur</label>
-            <label class="bl-check" style="margin-top:6px"><input type="radio" name="ol-page-mode" data-olmode value="web" ${mode === 'web' ? 'checked' : ''}> Outlook en ligne (dans le navigateur)</label></div>
+      main.innerHTML = `<div class="bl-head"><div><h2>Outlook</h2><p>Envoyez factures, avoirs, devis, relances et bons de livraison depuis Outlook : le message est prêt, avec le PDF déjà joint. Rien ne part sans votre clic sur Envoyer.</p></div></div>
+        <div class="bl-panel"><div class="bl-panel-h"><h3>Où s'ouvre le message</h3></div><div class="bl-panel-b">
+          <p class="bl-note" style="margin-top:0">« Envoyer par e-mail » ouvre à chaque fois <b>un nouvel onglet Outlook en ligne</b>, sur le brouillon prêt. Ce choix vaut pour cet ordinateur.</p>
+          <div class="bl-field" style="margin-bottom:0">
+            <label class="bl-check"><input type="radio" name="ol-page-mode" data-olmode value="web" ${mode === 'web' ? 'checked' : ''}> Outlook en ligne (onglet du navigateur)</label>
+            <label class="bl-check" style="margin-top:6px"><input type="radio" name="ol-page-mode" data-olmode value="local" ${mode === 'local' ? 'checked' : ''}> Outlook installé sur cet ordinateur (fichier message à ouvrir)</label></div>
         </div></div>
-        <h3 style="margin:22px 0 8px;font-size:16px">Outlook en ligne (facultatif)</h3>
-        <div id="ol-box"><div class="bl-spin">Chargement…</div></div>`;
+        <h3 style="margin:22px 0 8px;font-size:16px">Connexion à Outlook en ligne</h3>
+        <div id="ol-box"><div class="bl-spin">Chargement…</div></div>
+        <div class="bl-panel" style="margin-top:18px"><div class="bl-panel-h"><h3>Outlook installé sur cet ordinateur (si vous le choisissez ci-dessus)</h3></div><div class="bl-panel-b">
+          <p class="bl-note" style="margin-top:0">« Envoyer par e-mail » télécharge un message prêt (destinataire, objet, texte et <b>PDF joint</b>) : un clic sur ce fichier l'ouvre dans votre Outlook.</p>
+          <p class="bl-note" style="margin-bottom:0">Pour qu'il s'ouvre directement dans Outlook : dans Chrome ou Edge, flèche à côté du fichier téléchargé → « Toujours ouvrir les fichiers de ce type ». Si Windows ouvre une autre application, clic droit sur un fichier .eml → Ouvrir avec → Choisir une autre application → Outlook → « Toujours utiliser cette application ».</p>
+        </div></div>`;
       await paintOutlook(main);
     },
   });

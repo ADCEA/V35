@@ -833,8 +833,8 @@ async function openOrderModal(orderId, context) {
   if (isAdminContext) {
     noteBox.style.display = 'block';
     noteBox.innerHTML = `
-      <p style="font-size:12.5px;color:var(--steel);margin:0 0 12px;">Génère le bon de livraison et tente de l'envoyer par email à l'adresse configurée dans les réglages.</p>
-      <button class="btn-mail" id="btn-send-delivery">Générer le bon de livraison</button>
+      <p style="font-size:12.5px;color:var(--steel);margin:0 0 12px;">Ouvre Outlook dans un nouvel onglet avec le bon de livraison en pièce jointe, adressé à l'adresse configurée dans les réglages. Rien ne part sans votre clic sur Envoyer.</p>
+      <button class="btn-mail" id="btn-send-delivery">Envoyer par e-mail (Outlook)</button>
       <div class="modal-actions-note" id="delivery-status-note"></div>
     `;
     document.getElementById('btn-send-delivery').addEventListener('click', () => sendDeliveryNote(order.id));
@@ -1223,25 +1223,57 @@ function downloadDeliveryNotePdf(order) {
   doc.save(`bon-livraison-${order.ticket}.pdf`);
 }
 
+// Télécharge un fichier servi par l'API (session admin) : repli quand Outlook ne peut pas joindre le PDF tout seul.
+async function downloadApiFile(url, filename) {
+  const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+  if (!res.ok) throw new Error(`Téléchargement impossible (erreur ${res.status}).`);
+  const objUrl = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a'); a.href = objUrl; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(objUrl), 4000);
+}
+
+// Bon de livraison par Outlook : à chaque clic, un NOUVEL ONGLET Outlook en ligne s'ouvre sur un brouillon avec le PDF du
+// bon déjà joint (Outlook connecté) ; sinon sur un message prérempli, le PDF étant alors téléchargé pour être joint.
+// Mode « Outlook installé » (choix expressément fait dans Configuration → Outlook) : fichier .eml, PDF joint.
+// L'onglet est ouvert tout de suite, dans le clic, sinon le navigateur le bloque (la réponse du serveur arrive après).
 async function sendDeliveryNote(orderId) {
   const note = document.getElementById('delivery-status-note');
+  const btn = document.getElementById('btn-send-delivery');
   const order = adminOrdersCache.find(o => String(o.id) === String(orderId));
+  const mode = (typeof Bill !== 'undefined' && Bill.outlookMode) ? Bill.outlookMode() : 'web';
+  if (note) { note.classList.remove('error'); note.textContent = ''; }
+  let w = null;
+  if (mode === 'web') {
+    w = window.open('about:blank', '_blank');
+    if (!w) { if (note) { note.classList.add('error'); note.textContent = "Le navigateur a bloqué l'ouverture d'Outlook : autorisez les fenêtres pop-up pour ce site, puis recommencez."; } return; }
+    try { w.opener = null; } catch (_) { /* déjà isolé */ }
+  }
+  if (btn) btn.disabled = true;
   try {
-    const result = await api('POST', `/api/admin/orders/${orderId}/delivery-note`);
-    if (result.sent) {
-      if (note) note.textContent = `Email envoyé à ${result.to}, PDF joint ✓`;
+    const r = await api('POST', `/api/admin/orders/${orderId}/delivery-note`, { channel: mode === 'local' ? 'outlook-file' : 'outlook' });
+    if (r.file) {
+      Bill.saveEml(r.eml, r.emlName);
+      if (note) note.textContent = `Message prêt, PDF joint : cliquez sur « ${r.emlName} » dans la barre de téléchargement pour l'ouvrir dans Outlook.`;
       return;
     }
-    if (result.reason === 'no_email') {
-      if (note) note.textContent = "Merci de renseigner d'abord votre email dans « Réglages — Bons de livraison » en haut de l'espace administration.";
+    if (r.webLink) {
+      w.location.href = r.webLink;
+      if (note) note.textContent = 'Brouillon créé dans Outlook, PDF joint : il ne reste qu\'à l\'envoyer ✓';
       return;
     }
-    if (result.reason === 'smtp_not_configured') {
-      if (order) downloadDeliveryNotePdf(order);
-      if (note) note.innerHTML = `Envoi automatique non configuré côté serveur (voir .env). Le PDF a été téléchargé — <a href="${escHtml(buildOutlookFallback(result.to, 'Bon de livraison ' + (order ? order.ticket : ''), result.text))}" target="_blank" rel="noopener" style="color:var(--brand);text-decoration:underline;">ouvrez Outlook</a> avec le message prêt et glissez-y le PDF pour le joindre.`;
+    w.location.href = buildOutlookFallback(r.to && r.to.join(', '), r.subject, r.body);
+    let saved = true;
+    try { await downloadApiFile(`/api/admin/orders/${orderId}/delivery-note.pdf`, `bon-livraison-${order ? order.ticket : orderId}.pdf`); } catch (_) { saved = false; }
+    if (note) {
+      note.textContent = `Outlook est ouvert avec le message${saved ? '. Le PDF est téléchargé : à joindre au message.' : ', mais le PDF n\'a pas pu être téléchargé : réessayez.'}`
+        + (r.draftError ? ` (Pas de pièce jointe automatique : ${r.draftError})` : '');
+      if (!saved) note.classList.add('error');
     }
   } catch (err) {
-    if (note) note.textContent = err.message || "Échec de l'envoi.";
+    if (w) w.close();
+    if (note) { note.classList.add('error'); note.textContent = err.message || "Échec de l'envoi."; }
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 

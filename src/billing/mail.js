@@ -12,6 +12,7 @@ const queries = require('./queries');
 const mailer = require('../utils/mailer');
 const outlook = require('./outlook');
 const MailComposer = require('nodemailer/lib/mail-composer');
+const { buildDeliveryNotePdf } = require('../utils/pdf');
 
 const { BillingError } = engine;
 const EMAIL_RE = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
@@ -99,7 +100,7 @@ async function viaOutlookFile({ to, subject, body, logBase, pdf }) {
   if (!String(subject || '').trim() || !String(body || '').trim()) throw new BillingError("L'objet et le message ne peuvent pas être vides.");
   const { filename, buffer } = await pdf();
   const eml = await buildEml({ to: recipients, subject, body, filename, buffer });
-  logMail({ ...logBase, channel: 'outlook-file', to: recipients.join(', ') || null, subject: String(subject).slice(0, 200), status: 'sent' });
+  if (logBase) logMail({ ...logBase, channel: 'outlook-file', to: recipients.join(', ') || null, subject: String(subject).slice(0, 200), status: 'sent' });
   return { sent: false, outlook: true, file: true, to: recipients, eml: eml.toString('base64'), emlName: String(filename).replace(/\.pdf$/i, '') + '.eml' };
 }
 
@@ -117,7 +118,7 @@ async function viaOutlook({ to, subject, body, logBase, pdf }) {
       draft = await outlook.createDraft({ to: recipients, subject, body, filename, buffer });
     } catch (e) { draftError = e.message; draftCode = e.code || null; }
   }
-  logMail({ ...logBase, channel: draft ? 'outlook-draft' : 'outlook', to: recipients.join(', ') || null, subject: String(subject).slice(0, 200), status: 'sent' });
+  if (logBase) logMail({ ...logBase, channel: draft ? 'outlook-draft' : 'outlook', to: recipients.join(', ') || null, subject: String(subject).slice(0, 200), status: 'sent' });
   return { sent: false, outlook: true, to: recipients, draft: !!draft, webLink: draft ? draft.webLink : null, draftError, draftCode };
 }
 
@@ -178,6 +179,36 @@ async function sendQuote(quoteId, { to, subject, body, channel }) {
   return deliver({ to, subject, body, filename, buffer, logBase: { quoteId, kind: 'quote' } });
 }
 
+// ---------- bon de livraison ----------
+
+const orderItemsStmt = db.prepare('SELECT service_id AS id, name, code, sage_code AS sageCode, price, qty, delivered_qty AS deliveredQty FROM order_items WHERE order_id = ?');
+
+/** Commande + articles, au format attendu par le PDF du bon de livraison. */
+function loadDeliveryNote(orderId) {
+  const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+  if (!o) throw new BillingError('Commande introuvable.', 404);
+  return { ...o, items: orderItemsStmt.all(orderId) };
+}
+
+function renderDeliveryNote(order) {
+  const s = engine.getSettings();
+  const day = /^\d{4}-\d{2}-\d{2}/.test(order.livraison_prevue || '') ? dateFr(order.livraison_prevue.slice(0, 10)) : '';
+  return {
+    subject: `Bon de livraison ${order.ticket} — ${s.legal_name || 'Blanchisserie Cézanne'}`,
+    body: `Bonjour,\n\nVeuillez trouver ci-joint le bon de livraison ${order.ticket}${order.societe ? ` (${order.societe})` : ''}${day ? `, pour la livraison du ${day}` : ''}.\n\n${signature(s)}`,
+  };
+}
+
+/** Bon de livraison par Outlook (en ligne ou installé), PDF joint. Pas d'historique d'envoi pour les bons. */
+async function sendDeliveryNote(orderId, { to, subject, body, channel } = {}) {
+  if (!isOutlook(channel)) throw new BillingError("Le bon de livraison s'envoie par Outlook (en ligne ou installé sur l'ordinateur).");
+  const order = loadDeliveryNote(orderId);
+  const filename = `bon-livraison-${String(order.ticket).replace(/[^\w.-]+/g, '-')}.pdf`;
+  return outlookSend(channel, { to, subject, body, logBase: null, pdf: async () => ({ filename, buffer: await buildDeliveryNotePdf(order) }) });
+}
+
+const outlookState = () => { const s = outlook.status(); return { configured: s.configured, connected: s.connected, needsReconnect: s.needsReconnect, account: s.account && s.account.email }; };
+
 function renderQuote(q) {
   const s = engine.getSettings();
   return {
@@ -205,4 +236,4 @@ function remindersOverview(today = engine.todayParis()) {
   }));
 }
 
-module.exports = { render, renderQuote, sendInvoice, sendReminder, sendQuote, remindersOverview, suggestLevel, parseRecipients };
+module.exports = { render, renderQuote, renderDeliveryNote, loadDeliveryNote, sendDeliveryNote, outlookState, sendInvoice, sendReminder, sendQuote, remindersOverview, suggestLevel, parseRecipients };

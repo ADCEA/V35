@@ -111,11 +111,12 @@
     q.push(`subject=${encodeURIComponent(subject || '')}`, `body=${encodeURIComponent(String(body || '').replace(/\r?\n/g, '\r\n'))}`);
     return `${(OUTLOOK[host] || OUTLOOK.pro).url}?${q.join('&')}`;
   };
-  // Mode d'ouverture : « local » (Outlook installé sur l'ordinateur : fichier message, PDF joint — par défaut, rien à configurer)
-  // ou « web » (Outlook en ligne : brouillon créé dans la boîte si connectée, sinon lien + PDF à joindre).
+  // Mode d'ouverture : « web » (Outlook en ligne, dans un onglet du navigateur — PAR DÉFAUT : brouillon créé dans la boîte si
+  // connectée, PDF déjà joint ; sinon lien + PDF à joindre) ou « local » (Outlook installé : fichier message .eml, PDF joint,
+  // à choisir expressément). Clé de stockage propre à cette version : un ancien choix « local » ne retient pas l'ouverture.
   Bill.outlookMode = (set) => {
-    try { if (set === 'local' || set === 'web') localStorage.setItem('cz-outlook-mode', set); return localStorage.getItem('cz-outlook-mode') === 'web' ? 'web' : 'local'; }
-    catch (_) { return set === 'web' ? 'web' : 'local'; }
+    try { if (set === 'local' || set === 'web') localStorage.setItem('cz-outlook-mode2', set); return localStorage.getItem('cz-outlook-mode2') === 'local' ? 'local' : 'web'; }
+    catch (_) { return set === 'local' ? 'local' : 'web'; }
   };
   // Bloc « Outlook » des fenêtres d'envoi : choix du mode, puis explication selon le mode et l'état de la connexion.
   Bill.outlookBlock = (o, selectId) => {
@@ -131,10 +132,10 @@
     }
     const show = (m) => (mode === m ? '' : ' style="display:none"');
     return `<div class="bl-field bl-olmode"><label>Ouvrir dans</label>
-      <label class="bl-check"><input type="radio" name="${selectId}-mode" data-olmode value="local" ${mode === 'local' ? 'checked' : ''}> Outlook installé sur cet ordinateur</label>
-      <label class="bl-check" style="margin-top:6px"><input type="radio" name="${selectId}-mode" data-olmode value="web" ${mode === 'web' ? 'checked' : ''}> Outlook en ligne (dans le navigateur)</label>
-      <div class="bl-hint" data-ol="local"${show('local')}>Un fichier message est téléchargé, <b>PDF déjà joint</b> : cliquez dessus dans la barre de téléchargement du navigateur et il s'ouvre dans Outlook, prêt à envoyer. Rien ne part sans votre clic sur Envoyer.</div>
-      <div data-ol="web"${show('web')}>${web}</div></div>`;
+      <label class="bl-check"><input type="radio" name="${selectId}-mode" data-olmode value="web" ${mode === 'web' ? 'checked' : ''}> Outlook en ligne (nouvel onglet du navigateur)</label>
+      <label class="bl-check" style="margin-top:6px"><input type="radio" name="${selectId}-mode" data-olmode value="local" ${mode === 'local' ? 'checked' : ''}> Outlook installé sur cet ordinateur</label>
+      <div data-ol="web"${show('web')}>${web}</div>
+      <div class="bl-hint" data-ol="local"${show('local')}>Un fichier message est téléchargé, <b>PDF déjà joint</b> : cliquez dessus dans la barre de téléchargement du navigateur et il s'ouvre dans Outlook, prêt à envoyer. Rien ne part sans votre clic sur Envoyer.</div></div>`;
   };
   document.addEventListener('change', (ev) => {
     const r = ev.target; if (!r || !r.matches || !r.matches('input[data-olmode]')) return;
@@ -152,9 +153,10 @@
     setTimeout(() => URL.revokeObjectURL(url), 4000);
   };
 
-  // À appeler directement depuis un clic (sinon le navigateur bloque la fenêtre). Note l'envoi dans l'historique, puis :
-  // mode « ordinateur » → télécharge le message .eml (PDF joint) que l'on ouvre dans Outlook ; mode « en ligne » :
-  // Outlook connecté → ouvre le brouillon créé (PDF déjà joint) ; sinon ouvre le lien Outlook et télécharge le PDF.
+  // À appeler directement depuis un clic (sinon le navigateur bloque la fenêtre). Note l'envoi dans l'historique (factures,
+  // devis ; pas les bons de livraison), puis : mode « en ligne » (par défaut) : Outlook connecté → ouvre le brouillon créé
+  // (PDF déjà joint) dans un nouvel onglet ; sinon ouvre le lien Outlook et télécharge le PDF. Mode « ordinateur » :
+  // télécharge le message .eml (PDF joint) que l'on ouvre dans Outlook.
   // Les erreurs de saisie (objet vide, adresse invalide) ferment l'onglet et remontent.
   Bill.outlookHandoff = async function ({ url, logPath, logBody, pdfPath }) {
     if (Bill.outlookMode() === 'local') {

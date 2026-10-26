@@ -242,7 +242,7 @@
     let D;
     try { D = (await Bill.get('/deliveries/' + id)).delivery; } catch (err) { Bill.closeDrawer(); return Bill.fail(err); }
     const b = D.billing;
-    const actions = [`<button class="bl-btn primary" id="dd-pdf">Télécharger le PDF</button>`];
+    const actions = [`<button class="bl-btn primary" id="dd-mail">Envoyer par e-mail</button>`, `<button class="bl-btn" id="dd-pdf">Télécharger le PDF</button>`];
     if (b.status === 'invoiced' && b.invoiceId) actions.push(`<button class="bl-btn" id="dd-inv">Ouvrir la facture ${e(b.invoiceNumber || '')}</button>`);
     if (b.status === 'draft' && b.invoiceId) actions.push('<button class="bl-btn" id="dd-inv">Ouvrir le brouillon</button>');
     if (b.status === 'to_invoice') actions.push('<button class="bl-btn" id="dd-month">Facturer le mois</button>');
@@ -262,6 +262,7 @@
         </tbody></table></div>
         <div class="bl-panel-b"><div class="bl-totals"><div class="grand"><span>Total HT</span><span>${eur(D.htCents)}</span></div></div>
           <p class="bl-hint" style="margin-top:10px">Les prix sont ceux figés sur la commande au moment de sa saisie (tarif de l'hôtel à cette date).</p></div></div>`;
+    d.el.querySelector('#dd-mail').onclick = () => Bill.mailModal({ title: 'Envoyer le bon de livraison', previewPath: `/deliveries/${id}/mail-preview`, sendPath: `/deliveries/${id}/send`, pdfPath: `/deliveries/${id}/pdf` });
     d.el.querySelector('#dd-pdf').onclick = async (ev) => {
       const btn = ev.currentTarget; btn.disabled = true;
       try { await Bill.download(`/deliveries/${id}/pdf`, `bon-livraison-${D.ticket}.pdf`); } catch (err) { Bill.fail(err); } finally { btn.disabled = false; }
