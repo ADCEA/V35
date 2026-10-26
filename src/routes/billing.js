@@ -223,12 +223,12 @@ router.get('/invoices/:id/mail-preview', wrap((req, res) => {
 
 router.post('/invoices/:id/send', wrap(async (req, res) => {
   const r = await mail.sendInvoice(Number(req.params.id), req.body || {});
-  res.json({ ok: true, to: r.to, outlook: !!r.outlook, draft: !!r.draft, webLink: r.webLink || null, draftError: r.draftError || null });
+  res.json({ ok: true, to: r.to, outlook: !!r.outlook, draft: !!r.draft, webLink: r.webLink || null, draftError: r.draftError || null, file: !!r.file, eml: r.eml || null, emlName: r.emlName || null });
 }));
 
 router.post('/invoices/:id/remind', wrap(async (req, res) => {
   const r = await mail.sendReminder(Number(req.params.id), req.body || {});
-  res.json({ ok: true, ...r, webLink: r.webLink || null, draftError: r.draftError || null });
+  res.json({ ok: true, ...r, webLink: r.webLink || null, draftError: r.draftError || null, file: !!r.file, eml: r.eml || null, emlName: r.emlName || null });
 }));
 
 router.get('/reminders', wrap((req, res) => {

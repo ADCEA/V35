@@ -278,7 +278,7 @@
       title: 'Relancer', wide: true,
       body: `<div class="bl-field"><label for="rl-lvl">Ton du message</label><select id="rl-lvl">${Object.entries(LEVELS).map(([k, v]) => `<option value="${k}" ${Number(k) === level ? 'selected' : ''}>${v}</option>`).join('')}</select>
           ${row && row.suggestedLevel ? `<div class="bl-hint">Conseillé ici : ${e(LEVELS[row.suggestedLevel])}.</div>` : ''}</div>
-        <div class="bl-field"><label class="bl-check"><input type="radio" name="rl-ch" value="outlook" checked> Préparer l'e-mail dans Outlook (brouillon avec la facture jointe)</label>
+        <div class="bl-field"><label class="bl-check"><input type="radio" name="rl-ch" value="outlook" checked> Préparer l'e-mail dans Outlook (facture jointe)</label>
         <label class="bl-check" id="rl-smtp-opt" style="margin-top:6px;display:none"><input type="radio" name="rl-ch" value="email"> Envoyer directement depuis le serveur, facture jointe</label>
         <label class="bl-check" style="margin-top:6px"><input type="radio" name="rl-ch" value="manual"> J'ai relancé par téléphone ou courrier : le noter seulement</label></div>
         <div id="rl-mail"><div class="bl-field"><label for="rl-to">Destinataire</label><input id="rl-to"></div><div class="bl-field"><label for="rl-sub">Objet</label><input id="rl-sub"></div>
@@ -303,13 +303,11 @@
         if (onDone) onDone();
       } }],
     });
-    let outlookConnected = false;
     async function fill() {
       try {
         const pv = await Bill.get(`/invoices/${invoiceId}/mail-preview?kind=reminder-${level}`);
         m.$('#rl-to').value = pv.to; m.$('#rl-sub').value = pv.subject; m.$('#rl-body').value = pv.body;
         m.$('#rl-smtp-opt').style.display = pv.smtp ? '' : 'none';
-        outlookConnected = !!(pv.outlook && pv.outlook.connected);
         const keep = m.$('#rl-ol') ? m.$('#rl-ol').value : null;
         m.$('#rl-ol-wrap').innerHTML = Bill.outlookBlock(pv.outlook, 'rl-ol');
         if (keep && m.$('#rl-ol')) m.$('#rl-ol').value = keep;
@@ -321,7 +319,7 @@
       const ch = m.el.querySelector('input[name="rl-ch"]:checked').value;
       m.$('#rl-mail').style.display = ch === 'manual' ? 'none' : ''; m.$('#rl-note').style.display = ch === 'manual' ? '' : 'none';
       m.$('#rl-ol-wrap').style.display = ch === 'outlook' ? '' : 'none';
-      m.el.querySelector('.bl-foot .primary').textContent = ch === 'manual' ? 'Noter la relance' : ch === 'outlook' ? (outlookConnected ? 'Créer le brouillon Outlook' : 'Ouvrir dans Outlook') : 'Envoyer';
+      m.el.querySelector('.bl-foot .primary').textContent = ch === 'manual' ? 'Noter la relance' : ch === 'outlook' ? 'Ouvrir dans Outlook' : 'Envoyer';
     };
     m.el.querySelectorAll('input[name="rl-ch"]').forEach(r => r.onchange = syncChannel);
     syncChannel();
