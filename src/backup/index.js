@@ -9,6 +9,11 @@
 //     et/ou par e-mail — c'est ce qui protège réellement.
 // Un envoi hors serveur n'a lieu que si les données sont chiffrées
 // (BACKUP_PASSPHRASE) : jamais de base en clair qui quitte le serveur.
+//
+// Copie « chaque soir sur l'ordinateur » : le serveur ne peut pas écrire chez
+// l'utilisateur ; c'est l'ordinateur qui vient chercher la copie (programme
+// planifié, jeton dédié et révocable, voir routes/backupPull.js). La copie
+// reçue compte comme une copie hors serveur.
 
 const fs = require('fs');
 const path = require('path');
@@ -34,6 +39,17 @@ db.exec(`
     offsite_ok        INTEGER NOT NULL DEFAULT 0,
     destinations_json TEXT NOT NULL DEFAULT '[]',
     error             TEXT
+  );
+`);
+
+// Jeton de la copie vers l'ordinateur : seule l'empreinte est conservée (le jeton n'est montré qu'une fois, dans le programme généré).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS backup_pull (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    token_hash   TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    last_used_at TEXT,
+    last_name    TEXT
   );
 `);
 
@@ -75,7 +91,7 @@ function pruneLocal(keep) {
   }
 }
 
-async function runBackup({ trigger = 'auto', env = process.env, now = new Date(), fetchImpl } = {}) {
+async function runBackup({ trigger = 'auto', env = process.env, now = new Date(), fetchImpl, offsite = true } = {}) {
   if (running) throw new Error('Une sauvegarde est déjà en cours.');
   const job = (async () => {
     const cfg = config(env);
@@ -95,14 +111,14 @@ async function runBackup({ trigger = 'auto', env = process.env, now = new Date()
       destinations.push({ type: 'local', ok: true, detail: `${BACKUP_DIR}` });
       try { pruneLocal(cfg.keepLocal); } catch (e) { /* purge non bloquante */ }
 
-      if (cfg.s3.configured) {
+      if (offsite && cfg.s3.configured) {
         try {
           if (!encrypted) throw new Error('refusé : BACKUP_PASSPHRASE absente (aucune base en clair hors du serveur)');
           const r = await s3.putObject(cfg.s3, fileName, buf, { now, ...(fetchImpl ? { fetchImpl } : {}) });
           destinations.push({ type: 's3', ok: true, detail: `${cfg.s3.bucket}/${r.key}` });
         } catch (e) { destinations.push({ type: 's3', ok: false, detail: e.message }); }
       }
-      if (cfg.emailTo) {
+      if (offsite && cfg.emailTo) {
         try {
           if (!encrypted) throw new Error('refusé : BACKUP_PASSPHRASE absente (aucune base en clair par e-mail)');
           if (!smtpConfigured()) throw new Error('SMTP non configuré');
@@ -137,6 +153,57 @@ async function runBackup({ trigger = 'auto', env = process.env, now = new Date()
   })();
   running = job.finally(() => { running = null; });
   return job;
+}
+
+// ---------- copie vers l'ordinateur de l'utilisateur ----------
+
+const sha256hex = (v) => crypto.createHash('sha256').update(v).digest('hex');
+
+/** Crée (ou remplace) le jeton ; renvoie le jeton en clair, qui n'est jamais relisible ensuite. */
+function createPullToken(now = new Date()) {
+  const token = 'cz-' + crypto.randomBytes(32).toString('hex');
+  db.prepare(`INSERT INTO backup_pull (id, token_hash, created_at, last_used_at, last_name) VALUES (1, ?, ?, NULL, NULL)
+    ON CONFLICT(id) DO UPDATE SET token_hash = excluded.token_hash, created_at = excluded.created_at, last_used_at = NULL, last_name = NULL`)
+    .run(sha256hex(token), now.toISOString());
+  return token;
+}
+function revokePullToken() { return db.prepare('DELETE FROM backup_pull WHERE id = 1').run().changes > 0; }
+function checkPullToken(token) {
+  const row = db.prepare('SELECT token_hash FROM backup_pull WHERE id = 1').get();
+  if (!row || typeof token !== 'string' || token.length < 20 || token.length > 200) return false;
+  const a = Buffer.from(sha256hex(token)); const b = Buffer.from(row.token_hash);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function pullState(now = new Date()) {
+  const r = db.prepare('SELECT created_at, last_used_at, last_name FROM backup_pull WHERE id = 1').get();
+  if (!r) return { configured: false };
+  return {
+    configured: true, createdAt: r.created_at, lastUsedAt: r.last_used_at, lastName: r.last_name,
+    ageHours: r.last_used_at ? Math.round((now - Date.parse(r.last_used_at)) / 3.6e6) : null,
+  };
+}
+
+/** Dernière sauvegarde terminée dont le fichier est encore sur le disque. */
+function latestFile() {
+  const rows = db.prepare("SELECT id, file_name, sha256, encrypted FROM backup_runs WHERE status IN ('ok','partial') AND file_name IS NOT NULL ORDER BY id DESC LIMIT 10").all();
+  for (const r of rows) {
+    if (!FILE_RE.test(r.file_name)) continue;
+    const p = path.join(BACKUP_DIR, r.file_name);
+    if (fs.existsSync(p)) return { runId: r.id, path: p, name: r.file_name, sha256: r.sha256, encrypted: !!r.encrypted };
+  }
+  return null;
+}
+
+/** Le fichier est bien parti vers l'ordinateur : la copie compte comme copie hors serveur. */
+function markPulled(runId, name, now = new Date()) {
+  const r = db.prepare('SELECT destinations_json FROM backup_runs WHERE id = ?').get(runId);
+  if (!r) return;
+  const dests = JSON.parse(r.destinations_json || '[]').filter(d => d.type !== 'pc');
+  dests.push({ type: 'pc', ok: true, detail: 'ordinateur' });
+  const allOff = dests.filter(d => d.type !== 'local');
+  db.prepare("UPDATE backup_runs SET destinations_json = ?, offsite_ok = 1, status = ? WHERE id = ? AND status IN ('ok','partial')")
+    .run(JSON.stringify(dests), allOff.every(d => d.ok) ? 'ok' : 'partial', runId);
+  db.prepare('UPDATE backup_pull SET last_used_at = ?, last_name = ? WHERE id = 1').run(now.toISOString(), name);
 }
 
 // Alerte e-mail (au plus une par jour) si une sauvegarde échoue ou n'a pas pu partir hors serveur.
@@ -186,7 +253,8 @@ function getStatus(env = process.env, now = new Date()) {
   }));
   const lastOff = db.prepare("SELECT started_at FROM backup_runs WHERE offsite_ok = 1 ORDER BY id DESC LIMIT 1").get();
   const ageHours = lastOff ? Math.round((now - Date.parse(lastOff.started_at)) / 3.6e6) : null;
-  const offsiteConfigured = cfg.s3.configured || Boolean(cfg.emailTo);
+  const pull = pullState(now);
+  const offsiteConfigured = cfg.s3.configured || Boolean(cfg.emailTo) || pull.configured;
 
   let health = 'ok'; let message = `Dernière copie hors serveur il y a ${ageHours} h.`;
   if (!offsiteConfigured) { health = 'warning'; message = "Aucune destination hors serveur configurée : en cas de perte du disque du serveur, tout serait perdu."; }
@@ -200,6 +268,7 @@ function getStatus(env = process.env, now = new Date()) {
       passphraseSet: Boolean(cfg.passphrase),
       s3: { configured: cfg.s3.configured, host: cfg.s3.endpoint ? new URL(cfg.s3.endpoint).host : null, bucket: cfg.s3.bucket || null, prefix: cfg.s3.prefix },
       email: { configured: Boolean(cfg.emailTo), smtp: smtpConfigured() },
+      pull,
       keepLocal: cfg.keepLocal,
       scheduler: env.BACKUP_SCHEDULER !== 'off',
     },
@@ -214,4 +283,4 @@ function localFilePath(runId) {
   return fs.existsSync(p) ? { path: p, name: r.file_name } : null;
 }
 
-module.exports = { runBackup, startScheduler, getStatus, isDue, localFilePath, config, BACKUP_DIR };
+module.exports = { runBackup, startScheduler, getStatus, isDue, localFilePath, config, BACKUP_DIR, createPullToken, revokePullToken, checkPullToken, pullState, latestFile, markPulled };
