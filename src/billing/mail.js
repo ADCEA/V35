@@ -11,6 +11,7 @@ const docs = require('./documents');
 const queries = require('./queries');
 const mailer = require('../utils/mailer');
 const outlook = require('./outlook');
+const MailComposer = require('nodemailer/lib/mail-composer');
 
 const { BillingError } = engine;
 const EMAIL_RE = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
@@ -79,6 +80,32 @@ function logMail(row) {
  * Dans les deux cas on garde la trace dans l'historique (et pour les relances : le niveau suivant en tient compte).
  * Le destinataire reste facultatif : on peut le saisir dans Outlook.
  */
+// Message Outlook prêt à envoyer, sous forme de fichier .eml : « X-Unsent: 1 » indique à Outlook un brouillon non envoyé
+// (il s'ouvre en fenêtre de rédaction, modifiable), avec le PDF en pièce jointe. Pas d'expéditeur : Outlook met le sien.
+function buildEml({ to, subject, body, filename, buffer }) {
+  return new Promise((resolve, reject) => {
+    new MailComposer({
+      to: to.join(', '), subject: String(subject).slice(0, 200), text: String(body),
+      attachments: [{ filename, content: buffer, contentType: 'application/pdf' }],
+      headers: { 'X-Unsent': '1' },
+    }).compile().build((err, msg) => (err ? reject(err) : resolve(msg)));
+  });
+}
+
+/** Outlook installé sur l'ordinateur : renvoie le fichier message (base64) que le navigateur télécharge et qu'Outlook ouvre. */
+async function viaOutlookFile({ to, subject, body, logBase, pdf }) {
+  const raw = String(to || '').trim();
+  const recipients = raw ? parseRecipients(raw) : [];
+  if (!String(subject || '').trim() || !String(body || '').trim()) throw new BillingError("L'objet et le message ne peuvent pas être vides.");
+  const { filename, buffer } = await pdf();
+  const eml = await buildEml({ to: recipients, subject, body, filename, buffer });
+  logMail({ ...logBase, channel: 'outlook-file', to: recipients.join(', ') || null, subject: String(subject).slice(0, 200), status: 'sent' });
+  return { sent: false, outlook: true, file: true, to: recipients, eml: eml.toString('base64'), emlName: String(filename).replace(/\.pdf$/i, '') + '.eml' };
+}
+
+const isOutlook = (channel) => channel === 'outlook' || channel === 'outlook-file';
+const outlookSend = (channel, args) => (channel === 'outlook-file' ? viaOutlookFile(args) : viaOutlook(args));
+
 async function viaOutlook({ to, subject, body, logBase, pdf }) {
   const raw = String(to || '').trim();
   const recipients = raw ? parseRecipients(raw) : [];
@@ -110,11 +137,11 @@ async function deliver({ to, subject, body, filename, buffer, logBase }) {
 
 /** Envoie une facture ou un avoir ÉMIS au client. */
 async function sendInvoice(invoiceId, { to, subject, body, channel }) {
-  if (channel === 'outlook') {
+  if (isOutlook(channel)) {
     const doc = engine.loadInvoice(invoiceId);
     if (!doc) throw new BillingError('Facture introuvable.', 404);
     if (doc.status !== 'issued') throw new BillingError("Seul un document émis peut être envoyé (un brouillon n'a pas de valeur).");
-    return viaOutlook({ to, subject, body, logBase: { invoiceId, kind: 'invoice' }, pdf: () => docs.invoicePdf(invoiceId) });
+    return outlookSend(channel, { to, subject, body, logBase: { invoiceId, kind: 'invoice' }, pdf: () => docs.invoicePdf(invoiceId) });
   }
   const { buffer, inv, filename } = await docs.invoicePdf(invoiceId);
   if (inv.status !== 'issued') throw new BillingError("Seul un document émis peut être envoyé (un brouillon n'a pas de valeur).");
@@ -134,17 +161,17 @@ async function sendReminder(invoiceId, { level, to, subject, body, channel = 'em
     logMail({ invoiceId, kind, channel: 'manual', status: 'logged', subject: subject ? String(subject).slice(0, 200) : 'Relance par téléphone / courrier' });
     return { sent: false, logged: true };
   }
-  if (channel === 'outlook') return viaOutlook({ to, subject, body, logBase: { invoiceId, kind }, pdf: () => docs.invoicePdf(invoiceId) });
+  if (isOutlook(channel)) return outlookSend(channel, { to, subject, body, logBase: { invoiceId, kind }, pdf: () => docs.invoicePdf(invoiceId) });
   const { buffer, filename } = await docs.invoicePdf(invoiceId);
   return deliver({ to, subject, body, filename, buffer, logBase: { invoiceId, kind } });
 }
 
 async function sendQuote(quoteId, { to, subject, body, channel }) {
-  if (channel === 'outlook') {
+  if (isOutlook(channel)) {
     const q = quotes.loadQuote(quoteId);
     if (!q) throw new BillingError('Devis introuvable.', 404);
     if (q.status === 'draft') throw new BillingError('Finalisez le devis avant de l\'envoyer.');
-    return viaOutlook({ to, subject, body, logBase: { quoteId, kind: 'quote' }, pdf: () => docs.quotePdf(quoteId) });
+    return outlookSend(channel, { to, subject, body, logBase: { quoteId, kind: 'quote' }, pdf: () => docs.quotePdf(quoteId) });
   }
   const { buffer, quote, filename } = await docs.quotePdf(quoteId);
   if (quote.status === 'draft') throw new BillingError('Finalisez le devis avant de l\'envoyer.');

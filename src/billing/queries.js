@@ -255,6 +255,7 @@ function timeline(invoiceId) {
     const at = m.sent_at.includes('T') ? m.sent_at : m.sent_at.replace(' ', 'T') + 'Z';
     const how = m.channel === 'manual' ? 'noté manuellement'
       : m.channel === 'outlook-draft' ? `brouillon créé dans Outlook, PDF joint${m.to_email ? ` (pour ${m.to_email})` : ''}`
+      : m.channel === 'outlook-file' ? `message préparé pour Outlook (ordinateur), PDF joint${m.to_email ? ` (pour ${m.to_email})` : ''}`
       : m.channel === 'outlook' ? `préparé dans Outlook${m.to_email ? ` pour ${m.to_email}` : ''}`
       : (m.status === 'failed' ? `ÉCHEC : ${m.error || 'envoi impossible'}` : `à ${m.to_email}`);
     items.push({ at, type: `mail:${m.kind}`, label: MAIL_LABEL[m.kind] || m.kind, detail: how, failed: m.status === 'failed' });

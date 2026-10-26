@@ -176,7 +176,7 @@ module.exports = function applyBillingSchema(db) {
       invoice_id  INTEGER REFERENCES native_invoices(id) ON DELETE RESTRICT,
       quote_id    INTEGER REFERENCES native_quotes(id) ON DELETE RESTRICT,
       kind        TEXT NOT NULL,                 -- 'invoice' | 'reminder-1' | 'reminder-2' | 'reminder-3' | 'quote'
-      channel     TEXT NOT NULL DEFAULT 'email', -- 'email' | 'manual' (relance téléphonique, courrier…) | 'outlook' (lien Outlook) | 'outlook-draft' (brouillon créé avec le PDF joint)
+      channel     TEXT NOT NULL DEFAULT 'email', -- 'email' | 'manual' (relance téléphonique, courrier…) | 'outlook' (lien Outlook) | 'outlook-draft' (brouillon créé avec le PDF joint) | 'outlook-file' (fichier .eml, PDF joint, ouvert dans Outlook sur l'ordinateur)
       to_email    TEXT,
       subject     TEXT,
       status      TEXT NOT NULL,                 -- 'sent' | 'failed' | 'logged'

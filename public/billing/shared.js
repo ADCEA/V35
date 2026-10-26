@@ -111,21 +111,59 @@
     q.push(`subject=${encodeURIComponent(subject || '')}`, `body=${encodeURIComponent(String(body || '').replace(/\r?\n/g, '\r\n'))}`);
     return `${(OUTLOOK[host] || OUTLOOK.pro).url}?${q.join('&')}`;
   };
-  // Bloc « Outlook » des fenêtres d'envoi : explique ce qui va se passer selon l'état de la connexion.
-  // Connecté : un brouillon avec le PDF joint est créé dans la boîte. Sinon : lien Outlook + PDF téléchargé (secours).
+  // Mode d'ouverture : « local » (Outlook installé sur l'ordinateur : fichier message, PDF joint — par défaut, rien à configurer)
+  // ou « web » (Outlook en ligne : brouillon créé dans la boîte si connectée, sinon lien + PDF à joindre).
+  Bill.outlookMode = (set) => {
+    try { if (set === 'local' || set === 'web') localStorage.setItem('cz-outlook-mode', set); return localStorage.getItem('cz-outlook-mode') === 'web' ? 'web' : 'local'; }
+    catch (_) { return set === 'web' ? 'web' : 'local'; }
+  };
+  // Bloc « Outlook » des fenêtres d'envoi : choix du mode, puis explication selon le mode et l'état de la connexion.
   Bill.outlookBlock = (o, selectId) => {
     o = o || {};
-    if (o.connected) return `<div class="bl-field"><label>Outlook</label><div class="bl-hint" style="margin-top:0">Un <b>brouillon</b> est créé dans votre boîte Outlook${o.account ? ` (${e(o.account)})` : ''}, avec le PDF déjà joint, et s'ouvre dans un nouvel onglet. Rien ne part tant que vous n'avez pas cliqué sur Envoyer dans Outlook.</div></div>`;
-    const why = o.needsReconnect ? 'La connexion à Outlook a expiré : reconnectez-la dans Configuration → Outlook pour que le PDF soit joint automatiquement.'
-      : 'Pour que le PDF soit joint automatiquement au brouillon, connectez Outlook une fois dans Configuration → Outlook.';
-    return `<div class="bl-field"><label for="${selectId}">Mon Outlook</label><select id="${selectId}">${Bill.outlookOptions(Bill.outlookHost())}</select>
-      <div class="bl-hint">Pour l'instant, Outlook s'ouvre avec ce message prêt et le PDF est téléchargé, à joindre vous-même. ${why}</div></div>`;
+    const mode = Bill.outlookMode();
+    let web;
+    if (o.connected) web = `<div class="bl-hint" style="margin-top:6px">Un <b>brouillon</b> est créé dans votre boîte Outlook${o.account ? ` (${e(o.account)})` : ''}, avec le PDF déjà joint, et s'ouvre dans un nouvel onglet. Rien ne part tant que vous n'avez pas cliqué sur Envoyer dans Outlook.</div>`;
+    else {
+      const why = o.needsReconnect ? 'La connexion à Outlook a expiré : reconnectez-la dans Configuration → Outlook pour que le PDF soit joint automatiquement.'
+        : 'Pour que le PDF soit joint automatiquement au brouillon, connectez Outlook une fois dans Configuration → Outlook.';
+      web = `<div class="bl-field" style="margin-top:8px"><label for="${selectId}">Mon Outlook en ligne</label><select id="${selectId}">${Bill.outlookOptions(Bill.outlookHost())}</select>
+        <div class="bl-hint">Outlook s'ouvre avec ce message prêt et le PDF est téléchargé, à joindre vous-même. ${why}</div></div>`;
+    }
+    const show = (m) => (mode === m ? '' : ' style="display:none"');
+    return `<div class="bl-field bl-olmode"><label>Ouvrir dans</label>
+      <label class="bl-check"><input type="radio" name="${selectId}-mode" data-olmode value="local" ${mode === 'local' ? 'checked' : ''}> Outlook installé sur cet ordinateur</label>
+      <label class="bl-check" style="margin-top:6px"><input type="radio" name="${selectId}-mode" data-olmode value="web" ${mode === 'web' ? 'checked' : ''}> Outlook en ligne (dans le navigateur)</label>
+      <div class="bl-hint" data-ol="local"${show('local')}>Un fichier message est téléchargé, <b>PDF déjà joint</b> : cliquez dessus dans la barre de téléchargement du navigateur et il s'ouvre dans Outlook, prêt à envoyer. Rien ne part sans votre clic sur Envoyer.</div>
+      <div data-ol="web"${show('web')}>${web}</div></div>`;
+  };
+  document.addEventListener('change', (ev) => {
+    const r = ev.target; if (!r || !r.matches || !r.matches('input[data-olmode]')) return;
+    Bill.outlookMode(r.value);
+    const box = r.closest('.bl-olmode'); if (!box) return;
+    box.querySelectorAll('[data-ol]').forEach(el => { el.style.display = el.dataset.ol === r.value ? '' : 'none'; });
+  });
+
+  // Enregistre un message .eml (reçu en base64) : le navigateur le télécharge, un clic l'ouvre dans Outlook.
+  Bill.saveEml = (b64, name) => {
+    const bin = atob(b64); const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'message/rfc822' }));
+    const a = document.createElement('a'); a.href = url; a.download = name || 'message.eml'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
   };
 
   // À appeler directement depuis un clic (sinon le navigateur bloque la fenêtre). Note l'envoi dans l'historique, puis :
+  // mode « ordinateur » → télécharge le message .eml (PDF joint) que l'on ouvre dans Outlook ; mode « en ligne » :
   // Outlook connecté → ouvre le brouillon créé (PDF déjà joint) ; sinon ouvre le lien Outlook et télécharge le PDF.
   // Les erreurs de saisie (objet vide, adresse invalide) ferment l'onglet et remontent.
   Bill.outlookHandoff = async function ({ url, logPath, logBody, pdfPath }) {
+    if (Bill.outlookMode() === 'local') {
+      const r = await Bill.post(logPath, { ...logBody, channel: 'outlook-file' });
+      Bill.saveEml(r.eml, r.emlName);
+      Bill.toast(`Message prêt, PDF joint : cliquez sur « ${r.emlName} » dans la barre de téléchargement pour l'ouvrir dans Outlook`, false, 12000);
+      delete r.eml;
+      return r;
+    }
     const w = window.open('about:blank', '_blank');
     if (!w) throw new Error("Le navigateur a bloqué l'ouverture d'Outlook : autorisez les fenêtres pop-up pour ce site, puis recommencez.");
     try { w.opener = null; } catch (_) { /* déjà isolé */ }
@@ -155,7 +193,7 @@
       Bill.toast('E-mail envoyé à ' + (r.to || []).join(', '));
       if (onDone) onDone(r);
     } });
-    buttons.push({ label: pv.outlook && pv.outlook.connected ? 'Créer le brouillon Outlook' : 'Ouvrir dans Outlook', primary: true, onClick: async (m) => {
+    buttons.push({ label: 'Ouvrir dans Outlook', primary: true, onClick: async (m) => {
       const to = m.$('#ml-to').value; const subject = m.$('#ml-sub').value; const body = m.$('#ml-body').value;
       const host = m.$('#ml-ol') ? m.$('#ml-ol').value : Bill.outlookHost();
       if (!subject.trim() || !body.trim()) throw new Error("L'objet et le message ne peuvent pas être vides.");

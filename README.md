@@ -651,12 +651,23 @@ comptabilité et le rapprochement bancaire.
 relances depuis le serveur. Sans SMTP, l'envoi depuis le serveur répond « non configuré » (503) ; une relance faite par
 téléphone peut quand même être notée.
 
-### Envoi par Outlook (brouillon avec le PDF joint)
+### Envoi par Outlook (message prêt, PDF joint)
 
-« Envoyer par e-mail » (facture, devis, relance) ouvre **un onglet Outlook avec un brouillon déjà prêt : destinataire,
-objet, texte et PDF en pièce jointe**. Rien ne part tant que vous n'avez pas cliqué sur Envoyer dans Outlook.
+« Envoyer par e-mail » (facture, devis, relance) prépare **un message Outlook déjà prêt : destinataire, objet, texte et PDF en
+pièce jointe**. Rien ne part tant que vous n'avez pas cliqué sur Envoyer dans Outlook. Deux modes, au choix dans la fenêtre d'envoi
+ou dans Facturation → Outlook (choix mémorisé dans le navigateur) :
 
-Le brouillon est créé dans votre boîte par Microsoft Graph. Une fois, il faut déclarer l'application chez Microsoft :
+- **Outlook installé sur cet ordinateur** (par défaut, **rien à configurer**, aucun compte Microsoft à relier) : le serveur fabrique
+  un fichier message `.eml` (brouillon non envoyé, en-tête `X-Unsent: 1`, PDF en pièce jointe, sans expéditeur imposé : Outlook met
+  le compte de la personne). Le navigateur le télécharge ; un clic dessus l'ouvre dans Outlook. Un site web ne peut ni lancer
+  Outlook ni joindre un fichier par un lien `mailto:`, d'où ce fichier. Astuce : dans Chrome/Edge, flèche à côté du fichier →
+  « Toujours ouvrir les fichiers de ce type » ; si Windows ouvre une autre application, clic droit sur un `.eml` → Ouvrir avec →
+  Outlook → « Toujours utiliser ». Historique : `outlook-file`. **Non vérifié avec votre version d'Outlook** (essai à faire :
+  la version classique ouvre un `.eml` « X-Unsent » en fenêtre de rédaction ; le nouvel Outlook peut se comporter autrement).
+- **Outlook en ligne** (facultatif, détaillé ci-dessous) : brouillon créé dans la boîte par Microsoft Graph, ou, sans connexion,
+  lien Outlook Web + PDF à joindre.
+
+Pour le mode en ligne, le brouillon est créé dans votre boîte par Microsoft Graph. Une fois, il faut déclarer l'application chez Microsoft :
 
 1. portal.azure.com → Microsoft Entra ID → Inscriptions d'applications → Nouvelle inscription (comptes professionnels
    et personnels) ;
@@ -679,7 +690,7 @@ facture de test.
 
 ### Tests
 
-`npm test` (221 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (225 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 
