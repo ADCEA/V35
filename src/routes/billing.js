@@ -115,9 +115,11 @@ router.get('/dashboard', wrap((req, res) => {
 
 router.get('/invoices', wrap((req, res) => {
   const q = req.query;
-  const tab = ['all', 'draft', 'open', 'overdue', 'paid', 'credit_notes'].includes(q.tab) ? q.tab : 'all';
+  const KEYS = ['draft', 'open', 'unpaid', 'partial', 'overdue', 'paid', 'credit_notes'];
+  const tab = ['all', ...KEYS].includes(q.tab) ? q.tab : 'all';
+  const status = String(q.status || '').split(',').map(x => x.trim()).filter(k => KEYS.includes(k));
   res.json(queries.listInvoices({
-    tab, clientId: q.clientId, q: q.q ? String(q.q).slice(0, 80) : '',
+    tab, status, clientId: q.clientId, q: q.q ? String(q.q).slice(0, 80) : '',
     from: engine.isIsoDate(q.from) ? q.from : undefined, to: engine.isIsoDate(q.to) ? q.to : undefined,
     sort: q.sort, dir: q.dir, limit: q.limit, offset: q.offset,
   }));

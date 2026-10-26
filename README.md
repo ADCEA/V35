@@ -405,6 +405,19 @@ de commandes depuis le planning des chambres continue d'utiliser le catalogue co
   **aperçu** exact s'affiche, puis l'enregistrement demande le code (`payments-bulk`). Tout ou rien : si une facture est refusée
   (déjà soldée, montant dépassé…), aucun règlement du lot n'est enregistré.
 
+### Liste des factures : filtres de statut, affichage compact
+
+Facturation → Factures : des puces cliquables filtrent par statut, **plusieurs à la fois** (union) :
+Brouillons, À encaisser (émise, rien reçu, pas échue), En retard, Partielles (règlement partiel, échue ou non), Payées
+(y compris soldées par avoir) et Avoirs. Chaque puce affiche son nombre (et son montant) ; « Toutes » remet tout.
+La recherche, l'hôtel et les dates se combinent avec les statuts, et une ligne de synthèse donne le nombre de factures, le total TTC
+et le reste à encaisser de la sélection. L'API accepte `GET /invoices?status=overdue,partial` (l'ancien `tab=` fonctionne encore).
+
+Pour afficher un maximum de factures : lignes sur une seule ligne en police 13 px, tableau qui occupe toute la hauteur de l'écran
+(en-têtes fixes, défilement dans le tableau), bandeau « File de production » réduit dans la Facturation.
+Le menu **Bons de livraison** est masqué par défaut ; le lien discret « Afficher les bons de livraison » sous le menu le
+réaffiche (choix mémorisé dans le navigateur), et la page reste accessible depuis la fiche d'un hôtel.
+
 ### Clients particuliers (sans SIRET)
 
 Chaque fiche a un **type de client** : *Professionnel* (par défaut) ou *Particulier* (Facturation → Hôtels → Nouveau client, ou
@@ -666,7 +679,7 @@ facture de test.
 
 ### Tests
 
-`npm test` (215 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (221 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

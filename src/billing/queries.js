@@ -55,6 +55,8 @@ const TAB_TEST = {
   all: () => true,
   draft: (d) => d.status === 'draft',
   open: (d) => d.balanceCents > 0,                       // à encaisser (échues ou non)
+  unpaid: (d) => d.display === 'unpaid',                 // émise, rien reçu, pas encore échue
+  partial: (d) => d.balanceCents > 0 && d.paidCents > 0, // règlement partiel (échue ou non)
   overdue: (d) => d.overdueDays > 0,
   paid: (d) => d.display === 'paid' || d.display === 'credited',
   credit_notes: (d) => d.kind === 'credit_note',
@@ -78,7 +80,7 @@ function listOpen(today = engine.todayParis()) {
 
 /**
  * Liste des factures et avoirs.
- * f : { tab, clientId, q, from, to, sort, dir, limit, offset }
+ * f : { tab | status[], clientId, q, from, to, sort, dir, limit, offset }  (status : liste de clés de TAB_TEST, en union)
  * Les compteurs des onglets tiennent compte des filtres (client, recherche, dates) mais pas de l'onglet.
  */
 function listInvoices(f = {}, today = engine.todayParis()) {
@@ -99,11 +101,18 @@ function listInvoices(f = {}, today = engine.todayParis()) {
   for (const [tab, test] of Object.entries(TAB_TEST)) {
     const sel = rows.filter(test);
     counts[tab] = sel.length;
-    sums[tab] = sel.reduce((s, d) => s + (tab === 'open' || tab === 'overdue' ? d.balanceCents : d.totalTtcCents * (d.kind === 'credit_note' ? -1 : 1)), 0);
+    sums[tab] = sel.reduce((s, d) => s + (['open', 'overdue', 'unpaid', 'partial'].includes(tab) ? d.balanceCents : d.totalTtcCents * (d.kind === 'credit_note' ? -1 : 1)), 0);
   }
 
-  const test = TAB_TEST[f.tab] || TAB_TEST.all;
+  // Statuts cochés (plusieurs possibles, en union) ; à défaut, l'onglet historique.
+  const wanted = (Array.isArray(f.status) ? f.status : []).filter(k => k !== 'all' && TAB_TEST[k]);
+  const test = wanted.length ? (d => wanted.some(k => TAB_TEST[k](d))) : (TAB_TEST[f.tab] || TAB_TEST.all);
   let sel = rows.filter(test);
+  const selection = {
+    count: sel.length,
+    totalTtcCents: sel.reduce((s, d) => s + d.totalTtcCents * (d.kind === 'credit_note' ? -1 : 1), 0),
+    balanceCents: sel.reduce((s, d) => s + (d.balanceCents || 0), 0),
+  };
   const key = SORTERS[f.sort] || SORTERS.date;
   const dir = f.dir === 'asc' ? 1 : -1;
   sel.sort((a, b) => {
@@ -114,7 +123,7 @@ function listInvoices(f = {}, today = engine.todayParis()) {
   const total = sel.length;
   const limit = Math.min(Math.max(parseInt(f.limit, 10) || 100, 1), 500);
   const offset = Math.max(parseInt(f.offset, 10) || 0, 0);
-  return { invoices: sel.slice(offset, offset + limit), total, counts, sums };
+  return { invoices: sel.slice(offset, offset + limit), total, counts, sums, selection };
 }
 
 // ---------- tableau de bord ----------

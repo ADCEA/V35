@@ -338,3 +338,51 @@ tr.ul-g td.client .sub{overflow-wrap:anywhere;}
 .sdd-nomandate{margin-top:16px; border:1px solid var(--line); border-radius:8px; background:var(--paper);}
 .sdd-nomandate > summary{cursor:pointer; padding:11px 14px; font-size:14px; color:var(--ink); font-weight:500;}
 .sdd-nomandate[open] > summary{border-bottom:1px solid var(--line);}
+
+/* ---------- liste des factures : filtres de statut et lignes compactes ---------- */
+.bl-sr{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap;}
+.bl-head.tight{margin-bottom:10px; align-items:center;} .bl-head.tight h2{font-size:21px;} .bl-head.tight p{display:none;}
+.bl-statusbar{display:flex; align-items:center; gap:8px 14px; flex-wrap:wrap; padding:8px 12px; border-bottom:1px solid var(--line);}
+.bl-chipsrow{display:flex; flex-wrap:wrap; gap:5px;}
+.bl-chipf{display:inline-flex; align-items:center; gap:4px; height:28px; padding:0 8px; border:1px solid var(--line); border-radius:14px; background:var(--paper); color:var(--steel); font-size:12.5px; cursor:pointer; white-space:nowrap;}
+.bl-chipf:hover{border-color:#B9C8D8; color:var(--ink);}
+.bl-chipf b{font-weight:600; color:var(--ink); font-variant-numeric:tabular-nums;}
+.bl-chipf small{font-size:11.5px; color:#8C9DAE; font-variant-numeric:tabular-nums;}
+.bl-chipf.on{background:var(--ink); border-color:var(--ink); color:#fff;}
+.bl-chipf.on b{color:#fff;} .bl-chipf.on small{color:#C9D6E4;}
+.bl-chipf.late:not(.on) b{color:var(--bl-late);}
+.bl-chipf:focus-visible{outline:2px solid var(--brand); outline-offset:2px;}
+.bl-dot{width:8px; height:8px; border-radius:50%; flex:none; background:var(--bl-draft);}
+.bl-dot.unpaid{background:#D9A21B;} .bl-dot.partial{background:var(--bl-info);} .bl-dot.paid{background:var(--bl-ok);} .bl-dot.overdue{background:var(--bl-late);}
+.bl-chipf.on .bl-dot{box-shadow:0 0 0 1.5px #fff;}
+.bl-listsum{margin-left:auto; font-size:12.5px; color:var(--steel); white-space:nowrap;}
+.bl-listsum b{color:var(--ink); font-weight:600;}
+.bl-filters.inline{padding:8px 12px; gap:8px;}
+.bl-filters.inline .bl-field{min-width:0; display:flex; align-items:center; gap:6px;}
+.bl-filters.inline .bl-field.grow{min-width:200px;}
+.bl-filters.inline .bl-field select{min-width:150px;}
+.bl-filters.inline input,.bl-filters.inline select{height:32px; font-size:13px; padding-top:0; padding-bottom:0;}
+.bl-filters.inline .dates label{font-size:12.5px; color:var(--steel); margin:0;}
+.bl-filters.inline .dates input{width:132px;}
+table.bl-table.inv{font-size:13px; line-height:1.25;}
+.bl-table.inv th{font-size:12px; padding:6px 10px; position:sticky; top:0; z-index:1; border-bottom:none; box-shadow:0 1px 0 var(--line);}
+.bl-table.inv td{padding:4px 10px;}
+.bl-table.inv .bl-pill{padding:1px 8px; font-size:12px; gap:4px;}
+.bl-table.inv .bl-pill::before{width:5px; height:5px;}
+.bl-table.inv .bl-late-days{display:inline; margin:0 0 0 6px; font-size:12px; font-weight:500;}
+.bl-table.inv td.client{max-width:230px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.bl-table.inv .sub{display:inline; font-size:12px; margin-left:8px; color:#8C9DAE;}
+.bl-table.inv td.bl-follow{max-width:150px; white-space:normal; line-height:1.2;}
+.bl-table.inv .bl-ind{font-size:11.5px; margin-left:0; margin-right:7px; white-space:nowrap;}
+.bl-more{padding:8px 12px;}
+@media (min-width: 901px){ .bl-tablewrap.inv{max-height:calc(100vh - 260px); min-height:240px; overflow:auto;} }
+@media (max-width: 900px){ .bl-listsum{margin-left:0; white-space:normal;} .bl-filters.inline .dates input{width:128px;} .bl-filters.inline .bl-field{flex:1 1 100%;} .bl-filters.inline .bl-field.dates{flex-wrap:wrap;} .bl-chipsrow{flex-wrap:nowrap; overflow-x:auto; width:100%; padding-bottom:2px;} }
+.bl-links{display:flex; flex-direction:column; gap:2px;}
+.bl-navtoggle{margin:10px 0 0 10px; padding:0; background:none; border:none; color:#8C9DAE; font-size:12px; text-align:left; cursor:pointer; text-decoration:underline; text-underline-offset:2px;}
+.bl-navtoggle:hover{color:var(--ink);} .bl-navtoggle:focus-visible{outline:2px solid var(--brand); outline-offset:2px;}
+@media (max-width: 900px){ .bl-links{flex-direction:row; gap:4px;} .bl-navtoggle{margin:0 0 0 6px; white-space:nowrap; align-self:center;} }
+/* Dans la Facturation, le bandeau « File de production » et ses compteurs ne servent à rien : on libère la place pour les listes. */
+#admin-dashboard.billing-mode .stat-row{display:none;}
+#admin-dashboard.billing-mode .espace-header{margin-bottom:10px;}
+#admin-dashboard.billing-mode .espace-header .eyebrow,#admin-dashboard.billing-mode .espace-header p{display:none;}
+#admin-dashboard.billing-mode .espace-header h3{font-size:20px; margin:0;}

@@ -165,16 +165,29 @@
     } catch (err) { if (!err.locked) console.warn('[facturation] badges', err.message); return null; }
   };
 
+  // Le menu « Bons de livraison » est masqué par défaut (la page reste ouvrable depuis la fiche d'un hôtel) ; un lien discret le réaffiche.
+  const showBl = () => { try { return localStorage.getItem('cz-bl-nav') === '1'; } catch (_) { return false; } };
+  const setShowBl = (on) => { try { localStorage.setItem('cz-bl-nav', on ? '1' : '0'); } catch (_) { /* navigation privée : sans mémoire */ } };
+
   function railHtml() {
-    return NAV.map(n => n.group ? `<div class="bl-rail-group">${e(n.group)}</div>`
+    const bl = showBl() || Bill.state.page === 'deliveries';
+    return NAV.filter(n => n.key !== 'deliveries' || bl).map(n => n.group ? `<div class="bl-rail-group">${e(n.group)}</div>`
       : `<button class="bl-navlink ${Bill.state.page === n.key ? 'active' : ''}" data-go="${n.key}">${e(n.label)}${n.badge ? `<span class="bl-count ${n.hot ? 'hot' : ''}" data-badge="${n.badge}" style="display:none"></span>` : ''}</button>`).join('');
+  }
+
+  function paintRail() {
+    const box = document.getElementById('bl-links'); if (!box) return;
+    box.innerHTML = railHtml();
+    box.querySelectorAll('[data-go]').forEach(b => b.onclick = () => Bill.go(b.dataset.go));
+    box.querySelectorAll('[data-badge]').forEach(b => { const n = (Bill.state.badges || {})[b.dataset.badge] || 0; b.textContent = n; b.style.display = n ? '' : 'none'; });
+    const t = document.getElementById('bl-bl-toggle'); if (t) t.textContent = showBl() ? 'Masquer les bons de livraison' : 'Afficher les bons de livraison';
   }
 
   Bill.go = async function (key, params = {}) {
     if (!Bill.pages[key]) key = 'dashboard';
     Bill.closeDrawer();
     Bill.state.page = key; Bill.state.params = params;
-    document.querySelectorAll('.bl-navlink').forEach(b => b.classList.toggle('active', b.dataset.go === key));
+    paintRail();
     const m = main(); if (!m) return;
     const top = root().getBoundingClientRect().top + window.scrollY - 84;   // sous l'en-tête fixe du site
     if (window.scrollY > top) window.scrollTo({ top: Math.max(0, top) });
@@ -186,11 +199,16 @@
 
   function shell() {
     root().innerHTML = `<div class="bl">
-      <nav class="bl-rail" aria-label="Facturation">${railHtml()}
+      <nav class="bl-rail" aria-label="Facturation"><div id="bl-links" class="bl-links"></div>
+        <button class="bl-navtoggle" id="bl-bl-toggle" type="button"></button>
         <div class="bl-lockbox"><b>Facturation déverrouillée</b><span id="bl-countdown">Verrouillage dans —</span><button class="bl-btn small" id="bl-lock-now">Verrouiller maintenant</button></div>
       </nav>
       <section class="bl-main" id="bl-main" aria-live="polite"></section></div>`;
-    root().querySelectorAll('[data-go]').forEach(b => b.onclick = () => Bill.go(b.dataset.go));
+    paintRail();
+    document.getElementById('bl-bl-toggle').onclick = () => {
+      const on = !showBl(); setShowBl(on); paintRail();
+      if (!on && Bill.state.page === 'deliveries') Bill.go('invoices');
+    };
     document.getElementById('bl-lock-now').onclick = async () => { try { await Bill.post('/lock/lock'); } catch (_) { /* déjà verrouillé */ } Bill.showLock(); };
   }
 

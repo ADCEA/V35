@@ -2693,6 +2693,7 @@ function switchAdminView(view) {
   ADMIN_VIEWS.forEach(v => {
     document.getElementById('admin-view-' + v).style.display = v === view ? 'block' : 'none';
   });
+  document.getElementById('admin-dashboard').classList.toggle('billing-mode', view === 'billing');
   if (view === 'production') renderProductionKanban();
   if (view === 'kanban') refreshAdmin();
   if (view === 'logistics') renderLogisticsView();
