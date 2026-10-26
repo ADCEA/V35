@@ -418,6 +418,11 @@ Pour afficher un maximum de factures : lignes sur une seule ligne en police 13 p
 Le menu **Bons de livraison** est masqué par défaut ; le lien discret « Afficher les bons de livraison » sous le menu le
 réaffiche (choix mémorisé dans le navigateur), et la page reste accessible depuis la fiche d'un hôtel.
 
+Dans le menu de gauche, **Encaissements** et **Configuration** sont des titres sur lesquels on clique pour dérouler ou replier leurs
+sous-menus. Ils sont repliés par défaut ; le choix est mémorisé dans le navigateur, et ouvrir une page d'un groupe replié (lien,
+raccourci du tableau de bord) le déroule. Replié, « Encaissements » affiche le nombre de relances à faire. Sur mobile, le menu reste
+une rangée horizontale avec tous les liens.
+
 ### Clients particuliers (sans SIRET)
 
 Chaque fiche a un **type de client** : *Professionnel* (par défaut) ou *Particulier* (Facturation → Hôtels → Nouveau client, ou

@@ -133,7 +133,7 @@
     { key: 'deliveries', label: 'Bons de livraison' },
     { key: 'quotes', label: 'Devis' },
     { key: 'month', label: 'Facturer le mois', badge: 'toInvoiceClients' },
-    { group: 'Encaissements' },
+    { group: 'Encaissements', fold: true },
     { key: 'payments', label: 'Règlements' },
     { key: 'sdd', label: 'Prélèvements SEPA' },
     { key: 'reconcile', label: 'Rapprochement bancaire' },
@@ -142,7 +142,7 @@
     { key: 'clients', label: 'Hôtels' },
     { key: 'articles', label: 'Articles' },
     { key: 'prices', label: 'Tarifs par hôtel' },
-    { group: 'Configuration' },
+    { group: 'Configuration', fold: true },
     { key: 'issuer', label: 'Émetteur' },
     { key: 'security', label: 'Sécurité et sauvegardes' },
     { key: 'pennylane', label: 'Pennylane' },
@@ -161,6 +161,7 @@
       document.querySelectorAll('[data-badge]').forEach(b => {
         const n = Bill.state.badges[b.dataset.badge] || 0; b.textContent = n; b.style.display = n ? '' : 'none';
       });
+      paintFoldCounts();
       return d;
     } catch (err) { if (!err.locked) console.warn('[facturation] badges', err.message); return null; }
   };
@@ -169,17 +170,54 @@
   const showBl = () => { try { return localStorage.getItem('cz-bl-nav') === '1'; } catch (_) { return false; } };
   const setShowBl = (on) => { try { localStorage.setItem('cz-bl-nav', on ? '1' : '0'); } catch (_) { /* navigation privée : sans mémoire */ } };
 
-  function railHtml() {
-    const bl = showBl() || Bill.state.page === 'deliveries';
-    return NAV.filter(n => n.key !== 'deliveries' || bl).map(n => n.group ? `<div class="bl-rail-group">${e(n.group)}</div>`
-      : `<button class="bl-navlink ${Bill.state.page === n.key ? 'active' : ''}" data-go="${n.key}">${e(n.label)}${n.badge ? `<span class="bl-count ${n.hot ? 'hot' : ''}" data-badge="${n.badge}" style="display:none"></span>` : ''}</button>`).join('');
+  // Sous-menus repliables (« Encaissements », « Configuration ») : repliés par défaut, un clic sur le titre les déroule ;
+  // le choix est mémorisé. Aller vers une page d'un groupe replié (lien, raccourci) le déroule.
+  let foldMem = null;
+  const foldState = () => {
+    if (!foldMem) { try { foldMem = JSON.parse(localStorage.getItem('cz-bl-fold') || '{}') || {}; } catch (_) { foldMem = {}; } }
+    return foldMem;
+  };
+  const foldOpen = (name) => foldState()[name] === true;
+  const setFold = (name, open) => { foldState()[name] = !!open; try { localStorage.setItem('cz-bl-fold', JSON.stringify(foldMem)); } catch (_) { /* navigation privée : sans mémoire */ } };
+  const groupOf = (key) => { let g = null; for (const n of NAV) { if (n.group) g = n; else if (n.key === key) return g; } return null; };
+  const groupBadgeSum = (name) => {
+    let on = false; let sum = 0;
+    for (const n of NAV) { if (n.group) on = n.group === name; else if (on && n.badge) sum += (Bill.state.badges || {})[n.badge] || 0; }
+    return sum;
+  };
+  function paintFoldCounts() {
+    document.querySelectorAll('[data-foldcount]').forEach(c => {
+      const sum = groupBadgeSum(c.dataset.foldcount);
+      c.textContent = sum; c.style.display = sum && !foldOpen(c.dataset.foldcount) ? '' : 'none';   // replié : le total reste visible
+    });
   }
 
-  function paintRail() {
+  function railHtml() {
+    const bl = showBl() || Bill.state.page === 'deliveries';
+    let html = ''; let inFold = false; let n = 0;
+    const link = (it) => `<button class="bl-navlink ${Bill.state.page === it.key ? 'active' : ''}" data-go="${it.key}">${e(it.label)}${it.badge ? `<span class="bl-count ${it.hot ? 'hot' : ''}" data-badge="${it.badge}" style="display:none"></span>` : ''}</button>`;
+    for (const it of NAV.filter(x => x.key !== 'deliveries' || bl)) {
+      if (it.group) {
+        if (inFold) { html += '</div>'; inFold = false; }
+        if (it.fold) {
+          const open = foldOpen(it.group); n += 1;
+          html += `<button type="button" class="bl-rail-group bl-fold" data-fold="${e(it.group)}" aria-expanded="${open}" aria-controls="bl-fold-${n}"><i class="bl-chev" aria-hidden="true"></i>${e(it.group)}<span class="bl-count" data-foldcount="${e(it.group)}" style="display:none"></span></button><div class="bl-fold-body ${open ? '' : 'collapsed'}" id="bl-fold-${n}">`;
+          inFold = true;
+        } else html += `<div class="bl-rail-group">${e(it.group)}</div>`;
+      } else html += link(it);
+    }
+    if (inFold) html += '</div>';
+    return html;
+  }
+
+  function paintRail(focusFold) {
     const box = document.getElementById('bl-links'); if (!box) return;
     box.innerHTML = railHtml();
     box.querySelectorAll('[data-go]').forEach(b => b.onclick = () => Bill.go(b.dataset.go));
-    box.querySelectorAll('[data-badge]').forEach(b => { const n = (Bill.state.badges || {})[b.dataset.badge] || 0; b.textContent = n; b.style.display = n ? '' : 'none'; });
+    box.querySelectorAll('[data-fold]').forEach(b => b.onclick = () => { setFold(b.dataset.fold, !foldOpen(b.dataset.fold)); paintRail(b.dataset.fold); });
+    box.querySelectorAll('[data-badge]').forEach(b => { const c = (Bill.state.badges || {})[b.dataset.badge] || 0; b.textContent = c; b.style.display = c ? '' : 'none'; });
+    paintFoldCounts();
+    if (focusFold) { const f = [...box.querySelectorAll('[data-fold]')].find(x => x.dataset.fold === focusFold); if (f) f.focus(); }
     const t = document.getElementById('bl-bl-toggle'); if (t) t.textContent = showBl() ? 'Masquer les bons de livraison' : 'Afficher les bons de livraison';
   }
 
@@ -187,6 +225,7 @@
     if (!Bill.pages[key]) key = 'dashboard';
     Bill.closeDrawer();
     Bill.state.page = key; Bill.state.params = params;
+    const grp = groupOf(key); if (grp && grp.fold && !foldOpen(grp.group)) setFold(grp.group, true);
     paintRail();
     const m = main(); if (!m) return;
     const top = root().getBoundingClientRect().top + window.scrollY - 84;   // sous l'en-tête fixe du site
