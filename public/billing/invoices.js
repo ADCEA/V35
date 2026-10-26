@@ -1,7 +1,12 @@
 // Factures : liste filtrable + tiroir de détail (aperçu PDF, détail, historique) + actions.
 (function () {
   const { e, eur, eur0, dFr, dtFr, today, plural } = Bill;
-  const TABS = [['all', 'Toutes'], ['draft', 'Brouillons'], ['open', 'À encaisser'], ['overdue', 'En retard'], ['paid', 'Payées'], ['credit_notes', 'Avoirs']];
+  // Filtres de statut : plusieurs peuvent être cochés (union). [clé, libellé, couleur de la pastille, montant affiché]
+  const CHIPS = [['draft', 'Brouillons', 'draft', null], ['unpaid', 'À encaisser', 'unpaid', 'balance'], ['overdue', 'En retard', 'overdue', 'balance'],
+    ['partial', 'Partielles', 'partial', 'balance'], ['paid', 'Payées', 'paid', 'total'], ['credit_notes', 'Avoirs', 'credit_note', null]];
+  // Anciens liens (tableau de bord, relances…) : un onglet devient une sélection de statuts.
+  const TAB_TO_SEL = { all: [], open: ['unpaid', 'overdue', 'partial'] };
+  const setTab = (t) => { S.sel = new Set(TAB_TO_SEL[t] || (CHIPS.some(c => c[0] === t) ? [t] : [])); };
   const CATEGORY = { services: 'Prestation de services', goods: 'Livraison de biens', mixed: 'Livraison et prestation' };
   Bill.METHODS = { virement: 'Virement', cheque: 'Chèque', prelevement: 'Prélèvement', carte: 'Carte bancaire', especes: 'Espèces', autre: 'Autre' };
   const BUCKETS = {
@@ -9,14 +14,26 @@
     d31_60: ['31 à 60 jours de retard', d => d.overdueDays >= 31 && d.overdueDays <= 60], d61_90: ['61 à 90 jours de retard', d => d.overdueDays >= 61 && d.overdueDays <= 90],
     d90: ['Plus de 90 jours de retard', d => d.overdueDays > 90],
   };
-  const S = { tab: 'all', q: '', clientId: '', from: '', to: '', sort: 'date', dir: 'desc', limit: 100, bucket: null };
+  const S = { sel: new Set(), q: '', clientId: '', from: '', to: '', sort: 'date', dir: 'desc', limit: 100, bucket: null };
 
   // ---------- liste ----------
   function qs() {
-    const p = new URLSearchParams({ tab: S.tab, sort: S.sort, dir: S.dir, limit: S.bucket ? 500 : S.limit });
+    const p = new URLSearchParams({ sort: S.sort, dir: S.dir, limit: S.bucket ? 500 : S.limit });
+    if (S.sel.size) p.set('status', [...S.sel].join(','));
     if (S.q) p.set('q', S.q); if (S.clientId) p.set('clientId', S.clientId); if (S.from) p.set('from', S.from); if (S.to) p.set('to', S.to);
     return p.toString();
   }
+
+  // Sur ordinateur, la liste occupe toute la hauteur de l'écran (défilement dans le tableau, en-tête toujours visible) : un maximum de lignes d'un coup.
+  function fit(main, scroll) {
+    const wrap = main.querySelector('.bl-tablewrap.inv'); if (!wrap) return;
+    if (window.innerWidth <= 900) { wrap.style.maxHeight = ''; return; }
+    const mainTop = main.getBoundingClientRect().top + window.scrollY;
+    if (scroll) window.scrollTo({ top: Math.max(0, mainTop - 92) });
+    const off = wrap.getBoundingClientRect().top + window.scrollY - mainTop;
+    wrap.style.maxHeight = Math.max(240, window.innerHeight - 92 - off - 16) + 'px';
+  }
+  let fitBound = false;
 
   function titleOf(d) {
     if (d.status === 'draft') return d.kind === 'credit_note' ? "Brouillon d'avoir" : 'Brouillon';
@@ -35,14 +52,14 @@
   function rowHtml(d) {
     const isCn = d.kind === 'credit_note';
     return `<tr class="bl-row" tabindex="0" data-id="${d.id}">
-      <td>${Bill.pill(d.display)}${d.overdueDays ? `<span class="bl-late-days">${plural(d.overdueDays, 'jour', 'jours')} de retard</span>` : ''}</td>
-      <td class="bl-num"><b style="font-weight:600">${e(titleOf(d))}</b>${isCn ? '<span class="sub">Avoir</span>' : ''}</td>
-      <td class="client">${e(d.clientName)}${d.reference ? `<span class="sub">${e(d.reference)}</span>` : ''}</td>
+      <td>${Bill.pill(d.display)}${d.overdueDays ? `<span class="bl-late-days" title="${plural(d.overdueDays, 'jour', 'jours')} de retard">${d.overdueDays} j</span>` : ''}</td>
+      <td class="bl-num"><b style="font-weight:600">${e(titleOf(d))}</b></td>
+      <td class="client" title="${e(d.clientName)}${d.reference ? ' — ' + e(d.reference) : ''}">${e(d.clientName)}${d.reference ? `<span class="sub">${e(d.reference)}</span>` : ''}</td>
       <td class="bl-num">${d.issueDate ? dFr(d.issueDate) : '—'}</td>
       <td class="bl-num">${d.dueDate && !isCn ? dFr(d.dueDate) : '—'}</td>
       <td class="r bl-num">${eur(isCn ? -d.totalTtcCents : d.totalTtcCents)}</td>
       <td class="r bl-num">${d.balanceCents ? `<b>${eur(d.balanceCents)}</b>` : '<span class="bl-faint">—</span>'}</td>
-      <td>${followUp(d)}</td></tr>`;
+      <td class="bl-follow">${followUp(d)}</td></tr>`;
   }
 
   function sortTh(key, label, cls = '') {
@@ -56,20 +73,25 @@
     try { r = await Bill.get('/invoices?' + qs()); } catch (err) { return Bill.fail(err, box); }
     let rows = r.invoices;
     if (S.bucket) rows = rows.filter(d => d.balanceCents > 0 && BUCKETS[S.bucket][1](d));
-    main.querySelector('#il-tabs').innerHTML = TABS.map(([k, label]) => {
-      const sum = (k === 'open' || k === 'overdue' || k === 'paid') ? ` · ${eur0(r.sums[k])}` : '';
-      return `<button class="bl-tab ${S.tab === k ? 'active' : ''} ${k === 'overdue' && r.counts[k] ? 'late' : ''}" data-tab="${k}">${label}<small>${r.counts[k]}${sum}</small></button>`;
-    }).join('');
-    main.querySelectorAll('#il-tabs [data-tab]').forEach(b => b.onclick = () => { S.tab = b.dataset.tab; S.bucket = null; S.limit = 100; load(main); });
+    const sumOf = (k, kind) => (kind === 'balance' || kind === 'total') && r.counts[k] ? `<small>${eur0(r.sums[k])}</small>` : '';
+    main.querySelector('#il-tabs').innerHTML = `<button class="bl-chipf ${S.sel.size ? '' : 'on'}" data-st="all" aria-pressed="${S.sel.size ? 'false' : 'true'}">Toutes <b>${r.counts.all}</b></button>`
+      + CHIPS.map(([k, label, cls, kind]) => `<button class="bl-chipf ${S.sel.has(k) ? 'on' : ''} ${k === 'overdue' && r.counts[k] ? 'late' : ''}" data-st="${k}" aria-pressed="${S.sel.has(k)}"><i class="bl-dot ${cls}"></i>${label} <b>${r.counts[k]}</b>${sumOf(k, kind)}</button>`).join('');
+    main.querySelectorAll('#il-tabs [data-st]').forEach(b => b.onclick = () => {
+      const k = b.dataset.st;
+      if (k === 'all') S.sel.clear(); else if (S.sel.has(k)) S.sel.delete(k); else S.sel.add(k);
+      S.bucket = null; S.limit = 100; load(main);
+    });
+    const sel = r.selection || { count: r.total, totalTtcCents: 0, balanceCents: 0 };
+    main.querySelector('#il-sum').innerHTML = `<b>${plural(sel.count, 'facture', 'factures')}</b> · ${eur0(sel.totalTtcCents)} TTC${sel.balanceCents ? ` · <b>${eur0(sel.balanceCents)}</b> à encaisser` : ''}`;
     main.querySelector('#il-chip').innerHTML = S.bucket ? `<span class="bl-chip">${e(BUCKETS[S.bucket][0])} <button class="bl-btn link small" id="il-clear" aria-label="Retirer le filtre">×</button></span>` : '';
     const clr = main.querySelector('#il-clear'); if (clr) clr.onclick = () => { S.bucket = null; load(main); };
 
     if (!rows.length) {
       const filtered = S.q || S.clientId || S.from || S.to || S.bucket;
-      box.innerHTML = `<div class="bl-empty"><b>${filtered ? 'Aucun résultat' : 'Aucune facture ici'}</b>${filtered ? 'Essayez d\'élargir la recherche ou les dates.' : (S.tab === 'all' ? 'Créez une première facture avec « Nouvelle facture », ou facturez le mois d\'un coup.' : 'Rien dans cette catégorie pour le moment.')}</div>`;
+      box.innerHTML = `<div class="bl-empty"><b>${filtered ? 'Aucun résultat' : 'Aucune facture ici'}</b>${filtered ? 'Essayez d\'élargir la recherche ou les dates.' : (!S.sel.size ? 'Créez une première facture avec « Nouvelle facture », ou facturez le mois d\'un coup.' : 'Aucune facture avec ces statuts pour le moment.')}</div>`;
       return;
     }
-    box.innerHTML = `<div class="bl-tablewrap"><table class="bl-table"><thead><tr><th>Statut</th>${sortTh('number', 'Numéro')}${sortTh('client', 'Hôtel')}${sortTh('date', 'Émise le')}${sortTh('due', 'Échéance')}${sortTh('amount', 'Total TTC', 'r')}${sortTh('balance', 'Reste dû', 'r')}<th>Suivi</th></tr></thead>
+    box.innerHTML = `<div class="bl-tablewrap inv"><table class="bl-table inv"><thead><tr><th>Statut</th>${sortTh('number', 'Numéro')}${sortTh('client', 'Hôtel')}${sortTh('date', 'Émise le')}${sortTh('due', 'Échéance')}${sortTh('amount', 'Total TTC', 'r')}${sortTh('balance', 'Reste dû', 'r')}<th>Suivi</th></tr></thead>
       <tbody>${rows.map(rowHtml).join('')}</tbody></table></div>
       ${!S.bucket && r.total > rows.length ? `<div class="bl-more"><button class="bl-btn" id="il-more">Afficher la suite (${r.total - rows.length} de plus)</button></div>` : ''}`;
     box.querySelectorAll('[data-sort]').forEach(th => th.onclick = () => { const k = th.dataset.sort; if (S.sort === k) S.dir = S.dir === 'asc' ? 'desc' : 'asc'; else { S.sort = k; S.dir = (k === 'client' || k === 'number' || k === 'due') ? 'asc' : 'desc'; } load(main); });
@@ -78,22 +100,22 @@
       tr.onclick = open; tr.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); } };
     });
     const more = box.querySelector('#il-more'); if (more) more.onclick = () => { S.limit += 100; load(main); };
+    fit(main, false);
   }
 
   Bill.register('invoices', {
     async render(main, params = {}) {
-      if (params.tab) { S.tab = params.tab; S.limit = 100; }
-      if (params.clientId !== undefined) { S.clientId = String(params.clientId || ''); S.tab = params.tab || 'all'; S.q = ''; S.limit = 100; }
+      if (params.tab) { setTab(params.tab); S.limit = 100; }
+      if (params.clientId !== undefined) { S.clientId = String(params.clientId || ''); setTab(params.tab || 'all'); S.q = ''; S.limit = 100; }
       S.bucket = params.bucket || null;
       const clients = await Bill.clients();
-      main.innerHTML = `<div class="bl-head"><div><h2>Factures</h2><p>Toutes vos factures et avoirs. Cliquez sur une ligne pour l'ouvrir, l'envoyer ou enregistrer un règlement.</p></div>
+      main.innerHTML = `<div class="bl-head tight"><div><h2>Factures</h2><p>Toutes vos factures et avoirs. Cliquez sur une ligne pour l'ouvrir, l'envoyer ou enregistrer un règlement.</p></div>
         <div class="bl-actions"><button class="bl-btn" id="il-month">Facturer le mois</button><button class="bl-btn primary" id="il-new">Nouvelle facture</button></div></div>
-        <div class="bl-panel"><div class="bl-tabs" id="il-tabs" role="tablist"></div>
-        <div class="bl-filters">
-          <div class="bl-field grow"><label for="il-q">Rechercher</label><input id="il-q" type="search" value="${e(S.q)}" placeholder="Numéro, hôtel, référence ou montant"></div>
-          <div class="bl-field"><label for="il-c">Hôtel</label><select id="il-c"><option value="">Tous</option>${clients.map(c => `<option value="${c.id}" ${String(S.clientId) === String(c.id) ? 'selected' : ''}>${e(c.societe)}</option>`).join('')}</select></div>
-          <div class="bl-field"><label for="il-f">Du</label><input id="il-f" type="date" value="${e(S.from)}"></div>
-          <div class="bl-field"><label for="il-t">Au</label><input id="il-t" type="date" value="${e(S.to)}"></div>
+        <div class="bl-panel"><div class="bl-statusbar"><div class="bl-chipsrow" id="il-tabs" role="group" aria-label="Filtrer par statut"></div><div class="bl-listsum" id="il-sum" aria-live="polite"></div></div>
+        <div class="bl-filters inline">
+          <div class="bl-field grow"><label for="il-q" class="bl-sr">Rechercher</label><input id="il-q" type="search" value="${e(S.q)}" placeholder="Rechercher : numéro, hôtel, référence ou montant"></div>
+          <div class="bl-field"><label for="il-c" class="bl-sr">Hôtel</label><select id="il-c"><option value="">Tous les hôtels</option>${clients.map(c => `<option value="${c.id}" ${String(S.clientId) === String(c.id) ? 'selected' : ''}>${e(c.societe)}</option>`).join('')}</select></div>
+          <div class="bl-field dates"><label for="il-f">Du</label><input id="il-f" type="date" value="${e(S.from)}"><label for="il-t">au</label><input id="il-t" type="date" value="${e(S.to)}"></div>
           <div id="il-chip"></div>
         </div><div id="il-table"><div class="bl-spin">Chargement…</div></div></div>`;
       let timer;
@@ -104,6 +126,8 @@
       main.querySelector('#il-new').onclick = () => newInvoice(() => load(main));
       main.querySelector('#il-month').onclick = () => Bill.go('month');
       await load(main);
+      fit(main, true);
+      if (!fitBound) { fitBound = true; window.addEventListener('resize', () => { const m = document.getElementById('bl-main'); if (m && Bill.state.page === 'invoices') fit(m, false); }); }
       if (params.newInvoice) newInvoice(() => load(main));
       if (params.openId) Bill.openInvoice(params.openId, () => load(main));
     },
@@ -245,7 +269,7 @@
       const sign = isCn() ? -1 : 1;
       host.innerHTML = `${inv.status === 'draft' ? problemsAlert() : ''}
         <div class="bl-panel"><div class="bl-panel-b"><dl class="bl-kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></div></div>
-        <div class="bl-panel"><div class="bl-tablewrap"><table class="bl-table"><thead><tr><th>Désignation</th><th class="r">Qté</th><th class="r">Prix HT</th><th class="r">TVA</th><th class="r">Total HT</th></tr></thead><tbody>
+        <div class="bl-panel"><div class="bl-tablewrap inv"><table class="bl-table inv"><thead><tr><th>Désignation</th><th class="r">Qté</th><th class="r">Prix HT</th><th class="r">TVA</th><th class="r">Total HT</th></tr></thead><tbody>
           ${inv.lines.map(l => l.isSection ? `<tr><td colspan="5" style="background:var(--bl-row);font-weight:600">${e(l.description)}</td></tr>`
             : `<tr><td>${e(l.description)}</td><td class="r bl-num">${e(String(l.quantity).replace('.', ','))}</td><td class="r bl-num">${e(eur(Math.round(l.unitPrice * 100)))}</td><td class="r bl-num">${e(String(l.vatRate).replace('.', ','))} %</td><td class="r bl-num">${e(eur(sign * l.lineHtCents))}</td></tr>`).join('')}
         </tbody></table></div>
