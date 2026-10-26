@@ -454,14 +454,19 @@ function snapshotSeller(settings) {
   };
 }
 
+const isParticulier = (client) => Boolean(client) && client.client_type === 'particulier';
+
 function snapshotBuyer(client) {
   const billingAddress = client.adresse_facturation || client.adresse;
+  const part = isParticulier(client);
   return {
     clientId: client.id,
+    // La clé « type » n'est écrite que pour un particulier : les documents d'un professionnel restent identiques à avant.
+    ...(part ? { type: 'particulier' } : {}),
     name: client.societe,
-    siren: sirenFrom(client.siret),
-    siret: String(client.siret || '').replace(/\s/g, ''),
-    vatNumber: client.tva_number || '',
+    siren: part ? '' : sirenFrom(client.siret),
+    siret: part ? '' : String(client.siret || '').replace(/\s/g, ''),
+    vatNumber: part ? '' : (client.tva_number || ''),
     address: billingAddress,
     postalCode: client.code_postal || '',
     city: client.ville || '',
@@ -477,7 +482,8 @@ function snapshotTerms(settings, issueDate, kind, { client, inv } = {}) {
     paymentTermsDays: settings.payment_terms_days,
     dueDate,
     latePenaltyText: settings.late_penalty_text,
-    recoveryIndemnityCents: 4000, // indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.)
+    // indemnité forfaitaire de recouvrement : 40 € (art. D441-5 C. com.) — entre professionnels seulement, donc jamais pour un particulier
+    recoveryIndemnityCents: isParticulier(client) ? 0 : 4000,
     earlyPaymentDiscount: escompte.NO_DISCOUNT_TEXT,
     vatOnDebits: Boolean(settings.vat_on_debits),
     footerNote: settings.footer_note || null,
@@ -505,9 +511,11 @@ function missingMentions(seller, buyer, inv, issueDate) {
 
   need(buyer.name, "Client : dénomination manquante.");
   need(buyer.address, "Client : adresse de facturation manquante.");
-  // Le SIREN du client devient obligatoire sur les factures B2B émises depuis le 1er septembre 2026.
-  need(buyer.siren.length === 9, `Client « ${buyer.name} » : SIREN/SIRET manquant (fiche client) — obligatoire sur les factures depuis le 1er septembre 2026.`);
-  if (buyer.siren.length === 9) need(luhnOk(buyer.siren), `Client « ${buyer.name} » : SIREN/SIRET invalide (contrôle de clé).`);
+  // Le SIREN du client devient obligatoire sur les factures B2B émises depuis le 1er septembre 2026 ; un particulier n'en a pas.
+  if (buyer.type !== 'particulier') {
+    need(buyer.siren.length === 9, `Client « ${buyer.name} » : SIREN/SIRET manquant (fiche client) — obligatoire sur les factures depuis le 1er septembre 2026.`);
+    if (buyer.siren.length === 9) need(luhnOk(buyer.siren), `Client « ${buyer.name} » : SIREN/SIRET invalide (contrôle de clé).`);
+  }
 
   need(isIsoDate(issueDate), "Date d'émission invalide.");
   need(inv.lines.some(l => !l.is_section), 'Aucune ligne facturable.');
@@ -786,7 +794,7 @@ function previewDraft(invoiceId, issueDateOverride) {
 module.exports = {
   snapshotSeller, snapshotBuyer, snapshotTerms,
   previewDraft, logEvent, createDraftFromLines, estimateOrdersHtCents, sanitizeLines, isIsoDate, sha256,
-  BillingError, todayParis, addDays, lineCents, computeTotals, sirenFrom, luhnOk,
+  BillingError, todayParis, addDays, lineCents, computeTotals, sirenFrom, luhnOk, isParticulier,
   getSettings, loadInvoice, listInvoiceableOrders,
   createDraftFromOrders, updateDraft, deleteDraft, createCreditNoteDraft, issueInvoice,
   recordPayment, paidCents, cashCents, discountSums, escompteStatus, creditedCents, balanceCents, paymentStatus, verifyIntegrity,

@@ -183,7 +183,7 @@ async function buildInvoicePdf(inv, preview = null, extra = {}) {
     y += 84;
     legal.push(`Devis valable jusqu'au ${dateFr(quoteValidUntil)}. Délai de paiement : ${terms.paymentTermsDays} jours à compter de la date de facture.`);
     legal.push(terms.latePenaltyText);
-    legal.push(`Indemnité forfaitaire pour frais de recouvrement en cas de retard de paiement : ${eur(terms.recoveryIndemnityCents)} (art. D441-5 du Code de commerce).`);
+    if (terms.recoveryIndemnityCents > 0) legal.push(`Indemnité forfaitaire pour frais de recouvrement en cas de retard de paiement : ${eur(terms.recoveryIndemnityCents)} (art. D441-5 du Code de commerce).`);
   } else if (!isCredit) {
     if (seller.iban) {
       if (y + 74 > K.BOTTOM) y = K.nextPage(doc, continued());
@@ -216,7 +216,7 @@ async function buildInvoicePdf(inv, preview = null, extra = {}) {
     legal.push(inv.due_date ? `Échéance de règlement : ${dateFr(inv.due_date)} (${terms.paymentTermsDays} jours).` : `Délai de règlement : ${terms.paymentTermsDays} jours à compter de la date d'émission.`);
     legal.push(terms.earlyPaymentDiscount);
     legal.push(terms.latePenaltyText);
-    legal.push(`Indemnité forfaitaire pour frais de recouvrement en cas de retard de paiement : ${eur(terms.recoveryIndemnityCents)} (art. D441-5 du Code de commerce).`);
+    if (terms.recoveryIndemnityCents > 0) legal.push(`Indemnité forfaitaire pour frais de recouvrement en cas de retard de paiement : ${eur(terms.recoveryIndemnityCents)} (art. D441-5 du Code de commerce).`);
   } else {
     legal.push('Cet avoir vient en déduction de la facture visée ci-dessus.');
   }

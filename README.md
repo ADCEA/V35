@@ -293,7 +293,7 @@ Odoo reste en base et téléchargeable par les hôtels dans leur espace.
 **Avant la première facture** : renseigner Facturation → Émetteur (raison
 sociale, forme, capital, SIREN, RCS, n° de TVA, IBAN). L'émission est refusée
 tant qu'une mention obligatoire manque, et la fiche de chaque hôtel doit avoir
-un SIREN/SIRET valide (obligatoire sur les factures B2B depuis le 1er sept. 2026).
+un SIREN/SIRET valide (obligatoire sur les factures B2B depuis le 1er sept. 2026) — sauf les clients **particuliers**, voir plus bas.
 
 ### Principes du moteur
 
@@ -404,6 +404,42 @@ de commandes depuis le planning des chambres continue d'utiliser le catalogue co
 - **Règlements en lot** (Facturation → Règlements) : on coche des factures ouvertes, on indique date, mode et référence ; un
   **aperçu** exact s'affiche, puis l'enregistrement demande le code (`payments-bulk`). Tout ou rien : si une facture est refusée
   (déjà soldée, montant dépassé…), aucun règlement du lot n'est enregistré.
+
+### Clients particuliers (sans SIRET)
+
+Chaque fiche a un **type de client** : *Professionnel* (par défaut) ou *Particulier* (Facturation → Hôtels → Nouveau client, ou
+dans la fiche, section « Facturation » ; colonne facultative `type` à l'import CSV : `professionnel` / `particulier`, cellule vide
+= inchangé, ou professionnel pour un nouveau client).
+
+- **Pas de SIRET ni de n° de TVA** : les champs sont masqués (fiche et espace client) et toute valeur saisie est écartée ; l'émission d'une
+  facture ne les exige pas. Un professionnel sans SIRET reste refusé à l'émission.
+- La facture figée porte `buyer.type = "particulier"` : pas de SIREN, **pas d'indemnité forfaitaire de 40 €** (art. D441-5 : elle ne vise
+  que les relations entre professionnels) ni sur le PDF, ni dans les conditions figées, ni dans les relances 2 et 3 par e-mail.
+- **Escompte** : non proposé par défaut à un particulier, même si l'escompte est activé pour tous ; seulement si sa fiche le demande (« Oui »).
+- Les factures déjà émises ne changent jamais : changer le type d'une fiche n'a d'effet que sur les documents suivants.
+
+### Export FEC sur une période
+
+Facturation → Contrôle et FEC : choisir *Année en cours*, *Année précédente*, *Mois en cours*, *Mois dernier* ou *Dates au choix*
+(bornes incluses). Un aperçu indique, avant tout téléchargement, le nombre de factures, d'avoirs et de règlements repris, et le nombre de
+brouillons ignorés.
+
+- **Seuls les documents validés (émis)** sont repris — factures et avoirs ; un brouillon n'a ni numéro ni date d'émission et n'apparaît jamais.
+- Règlements et escomptes : ceux dont la **date** tombe dans la période, rattachés à une facture émise (un règlement d'octobre sur une
+  facture de septembre figure dans le FEC d'octobre, pas la facture).
+- Numérotation des écritures continue **depuis 1** dans le fichier ; débit = crédit (sinon l'export est refusé). Nom du fichier :
+  `SIRENFECAAAAMMJJ.txt`, avec la date de fin de période. Période vide ou invalide : refusée avec un message.
+- Le code de la Facturation est redemandé pour la période exacte demandée (`fec:AAAA-MM-JJ_AAAA-MM-JJ`) ; `?year=AAAA` reste accepté.
+- Un FEC partiel sert à un échange avec le comptable ; pour un contrôle fiscal, exporter l'exercice complet.
+- API : `GET /api/admin/billing/export/fec?from=AAAA-MM-JJ&to=AAAA-MM-JJ` et `…/export/fec/preview` (mêmes paramètres).
+
+### Dupliquer une commande
+
+Dans la fiche d'une commande (Préparation, Production, Historique…), **Gestion de la commande → Dupliquer la commande** ouvre le formulaire
+de création **prérempli** : même client, mêmes articles et **quantités commandées** (pas les quantités livrées), note « Copie de la
+commande CZ-… ». On choisit la date de livraison, on ajuste si besoin, puis « Créer » : nouveau ticket, statut *Reçue*, **tarifs du jour**
+(un tarif négocié récent s'applique). Les articles qui ne sont plus au catalogue ou plus attribués au client sont **signalés** dans le
+formulaire, jamais repris en silence. La commande d'origine n'est pas modifiée. API : `GET /api/admin/orders/:id/copy`.
 
 ### Escompte pour règlement anticipé
 
@@ -603,7 +639,7 @@ relances. Sans SMTP, l'envoi répond « non configuré » (503) ; une relance fa
 
 ### Tests
 
-`npm test` (180 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (200 tests ; bases SQLite jetables, serveurs HTTP factices pour S3 et Pennylane, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

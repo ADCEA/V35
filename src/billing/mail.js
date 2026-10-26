@@ -43,6 +43,7 @@ function render(kind, inv, clientName, today = engine.todayParis()) {
   const balance = inv.kind === 'invoice' ? engine.balanceCents(inv) : 0;
   const late = inv.due_date && inv.due_date < today ? queries.daysBetween(inv.due_date, today) : 0;
   const ref = `${isCredit ? "l'avoir" : 'la facture'} ${inv.number}`;
+  const pro = !(inv.buyer && inv.buyer.type === 'particulier');   // l'indemnité de 40 € n'existe qu'entre professionnels
   const bank = s.iban ? `\nPour régler par virement : IBAN ${s.iban}${s.bic ? ` — BIC ${s.bic}` : ''}, en rappelant le numéro de facture.\n` : '\n';
   let subject; let body;
   if (kind === 'invoice') {
@@ -55,10 +56,10 @@ function render(kind, inv, clientName, today = engine.todayParis()) {
     body = `Bonjour,\n\nSauf erreur de notre part, ${ref} du ${dateFr(inv.issue_date)}, d'un montant restant dû de ${eur(balance)} TTC, est arrivée à échéance le ${dateFr(inv.due_date)} et ne nous est pas encore parvenue.\n\nSi votre règlement a été effectué entre-temps, merci de ne pas tenir compte de ce message. Dans le cas contraire, nous vous remercions de bien vouloir y procéder dès que possible.\n${bank}\nLa facture est jointe à ce message pour mémoire.\n\n${signature(s)}`;
   } else if (kind === 'reminder-2') {
     subject = `Relance — facture ${inv.number} impayée (${late} jours de retard)`;
-    body = `Bonjour,\n\nMalgré notre précédent rappel, ${ref} du ${dateFr(inv.issue_date)} reste impayée à ce jour : ${eur(balance)} TTC, échue le ${dateFr(inv.due_date)} (${late} jours de retard).\n\nNous vous remercions de procéder au règlement sous huit jours. Nous vous rappelons que tout retard de paiement entraîne de plein droit des pénalités de retard ainsi qu'une indemnité forfaitaire de 40 € pour frais de recouvrement (articles L441-10 et D441-5 du Code de commerce).\n${bank}\nLa facture est jointe à ce message.\n\n${signature(s)}`;
+    body = `Bonjour,\n\nMalgré notre précédent rappel, ${ref} du ${dateFr(inv.issue_date)} reste impayée à ce jour : ${eur(balance)} TTC, échue le ${dateFr(inv.due_date)} (${late} jours de retard).\n\nNous vous remercions de procéder au règlement sous huit jours. ${pro ? "Nous vous rappelons que tout retard de paiement entraîne de plein droit des pénalités de retard ainsi qu'une indemnité forfaitaire de 40 € pour frais de recouvrement (articles L441-10 et D441-5 du Code de commerce)." : 'Nous vous rappelons que tout retard de paiement peut entraîner des pénalités de retard, selon nos conditions de règlement.'}\n${bank}\nLa facture est jointe à ce message.\n\n${signature(s)}`;
   } else if (kind === 'reminder-3') {
     subject = `Dernier rappel avant recouvrement — facture ${inv.number}`;
-    body = `Bonjour,\n\nNos précédentes relances étant restées sans effet, nous vous demandons de régler sous huit jours ${ref} du ${dateFr(inv.issue_date)}, soit ${eur(balance)} TTC échus depuis le ${dateFr(inv.due_date)} (${late} jours de retard).\n\nÀ défaut, nous serons contraints d'engager la procédure de recouvrement, avec application des pénalités de retard et de l'indemnité forfaitaire de 40 € pour frais de recouvrement, à votre charge.\n${bank}\nSi un désaccord existe sur cette facture, contactez-nous sans délai afin que nous le traitions.\n\n${signature(s)}`;
+    body = `Bonjour,\n\nNos précédentes relances étant restées sans effet, nous vous demandons de régler sous huit jours ${ref} du ${dateFr(inv.issue_date)}, soit ${eur(balance)} TTC échus depuis le ${dateFr(inv.due_date)} (${late} jours de retard).\n\nÀ défaut, nous serons contraints d'engager la procédure de recouvrement, avec application des pénalités de retard${pro ? " et de l'indemnité forfaitaire de 40 € pour frais de recouvrement" : ''}, à votre charge.\n${bank}\nSi un désaccord existe sur cette facture, contactez-nous sans délai afin que nous le traitions.\n\n${signature(s)}`;
   } else {
     throw new BillingError('Type de message inconnu.');
   }

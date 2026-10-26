@@ -57,6 +57,7 @@ function offeredTo(settings, client) {
   const c = client && client.escompte;
   if (c === 'on') return true;
   if (c === 'off') return false;
+  if (client && client.client_type === 'particulier') return false;   // un particulier n'a l'offre que si sa fiche le demande
   return Boolean(settings.early_discount_all);
 }
 

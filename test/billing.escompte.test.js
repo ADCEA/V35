@@ -125,6 +125,16 @@ test('dérogation par hôtel : « off » exclut, « on » inclut même si le ré
   setEscompte(1.5, 48, 1);
 });
 
+test('particulier : pas d\'escompte par défaut (même réglage général « oui »), seulement si sa fiche le demande', () => {
+  const E = require('../src/billing/escompte');
+  const settings = { early_discount_rate: 1.5, early_discount_all: 1 };
+  assert.equal(E.offeredTo(settings, { client_type: 'pro', escompte: null }), true);
+  assert.equal(E.offeredTo(settings, { client_type: 'particulier', escompte: null }), false);
+  assert.equal(E.offeredTo(settings, { client_type: 'particulier', escompte: 'on' }), true);
+  assert.equal(E.offeredTo(settings, { client_type: 'particulier', escompte: 'off' }), false);
+  assert.equal(E.offeredTo({ early_discount_rate: 0, early_discount_all: 1 }, { client_type: 'particulier', escompte: 'on' }), false, 'taux nul : jamais d\'offre');
+});
+
 test('pas d\'offre quand la date limite n\'est pas avant l\'échéance, ni sur un avoir', () => {
   db.prepare('UPDATE billing_settings SET payment_terms_days = 2 WHERE id = 1').run();
   assert.ok(!issued().inv.terms.earlyDiscount, 'échéance = date limite : un escompte n\'aurait aucun sens');

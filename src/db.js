@@ -232,6 +232,12 @@ if (clientsColumns.length > 0 && !clientsColumns.includes('escompte')) {
   db.exec(`ALTER TABLE clients ADD COLUMN escompte TEXT CHECK (escompte IS NULL OR escompte IN ('on','off'));`);
 }
 
+// Type de client : 'pro' (professionnel : SIREN/SIRET exigé sur ses factures) ou 'particulier' (aucun SIRET, pas d'indemnité
+// de recouvrement ; l'escompte n'est proposé que si la fiche le demande).
+if (clientsColumns.length > 0 && !clientsColumns.includes('client_type')) {
+  db.exec(`ALTER TABLE clients ADD COLUMN client_type TEXT NOT NULL DEFAULT 'pro' CHECK (client_type IN ('pro','particulier'));`);
+}
+
 // L'email client devient facultatif (fiche créée avec le seul nom). SQLite
 // ne sait pas retirer un NOT NULL : on recrée la table à l'identique, sans
 // cette contrainte. Les clés étrangères sont désactivées le temps de

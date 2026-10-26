@@ -567,6 +567,33 @@ router.post('/orders/manual', (req, res) => {
   res.status(201).json({ order: serializeOrder(order, resolved), ticket });
 });
 
+// GET /api/admin/orders/:id/copy — de quoi préremplir la création d'une commande identique à celle-ci :
+// même client, mêmes articles et quantités COMMANDÉES (pas les quantités livrées). Les articles sont
+// revérifiés pour ce client à l'instant T : ceux qui ne sont plus au catalogue ou plus attribués sont
+// signalés dans `skipped` au lieu d'être repris en silence. Les prix ne sont pas copiés : la nouvelle
+// commande prend les tarifs du jour à sa création (POST /orders/manual).
+router.get('/orders/:id/copy', (req, res) => {
+  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(Number(req.params.id));
+  if (!order) return res.status(404).json({ error: 'Commande introuvable.' });
+  if (!order.client_id) {
+    return res.status(409).json({ error: "Le client de cette commande n'existe plus : créez la nouvelle commande depuis une fiche client." });
+  }
+  const servicesById = getServicesByIdForClient(order.client_id);
+  const rows = db.prepare('SELECT service_id, name, qty FROM order_items WHERE order_id = ? ORDER BY id').all(order.id);
+  const kept = new Map(); const skipped = [];
+  for (const r of rows) {
+    const svc = servicesById[r.service_id];
+    if (!svc) { skipped.push({ name: r.name, qty: r.qty }); continue; }
+    const prev = kept.get(r.service_id);
+    if (prev) prev.qty += r.qty;
+    else kept.set(r.service_id, { serviceId: r.service_id, name: svc.name, code: svc.code, qty: r.qty });
+  }
+  if (kept.size === 0) {
+    return res.status(409).json({ error: "Aucun article de cette commande n'est encore proposé à ce client : rien à dupliquer." });
+  }
+  res.json({ clientId: order.client_id, societe: order.societe, items: [...kept.values()], skipped, notes: `Copie de la commande ${order.ticket}.` });
+});
+
 // GET /api/admin/orders — toutes les commandes, tous clients
 router.get('/orders', (req, res) => {
   const orders = db.prepare('SELECT * FROM orders ORDER BY created_at DESC').all();

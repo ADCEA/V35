@@ -101,7 +101,7 @@ function previewQuote(id) {
   const seller = engine.snapshotSeller(settings);
   const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(q.client_id);
   const buyer = engine.snapshotBuyer(client);
-  const terms = { ...engine.snapshotTerms(settings, issueDate, 'invoice') };
+  const terms = { ...engine.snapshotTerms(settings, issueDate, 'invoice', { client }) };
   delete terms.dueDate;
   const validUntil = q.valid_until || engine.addDays(issueDate, VALID_DAYS);
   terms.validUntil = validUntil;
