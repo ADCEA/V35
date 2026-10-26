@@ -418,6 +418,14 @@ Pour afficher un maximum de factures : lignes sur une seule ligne en police 13 p
 Le menu **Bons de livraison** est masqué par défaut ; le lien discret « Afficher les bons de livraison » sous le menu le
 réaffiche (choix mémorisé dans le navigateur), et la page reste accessible depuis la fiche d'un hôtel.
 
+### Typographie de l'administration
+
+Tous les onglets d'administration (Production, Préparation de commande, Logistique, Statistiques, Historique, Chariots et camions, Garage,
+Réglages) et les fenêtres de commande reprennent la typographie de la Facturation : texte et boutons en IBM Plex Sans (graisse moyenne,
+minuscules), Fredoka réservé aux titres (600) et aux chiffres, plus de capitales espacées. Les règles sont regroupées à la fin de
+`public/styles.css` (« Onglets d'administration »), limitées à `#admin-dashboard` et aux fenêtres de commande : l'espace client et la
+Facturation (styles `.bl-*`) ne sont pas touchés.
+
 ### Clients particuliers (sans SIRET)
 
 Chaque fiche a un **type de client** : *Professionnel* (par défaut) ou *Particulier* (Facturation → Hôtels → Nouveau client, ou
