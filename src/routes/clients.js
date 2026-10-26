@@ -5,6 +5,9 @@ const bcrypt = require('bcryptjs');
 const db = require('../db');
 const { requireClient } = require('../middleware/auth');
 const { serializeOrder } = require('../utils/serializeOrder');
+const crypto = require('crypto');
+const guard = require('../utils/loginGuard');
+const mailer = require('../utils/mailer');
 
 const router = express.Router();
 
@@ -56,10 +59,17 @@ router.post('/login', (req, res) => {
   if (!email || !code) {
     return res.status(400).json({ error: 'Merci de renseigner votre email et votre code.' });
   }
-  const client = db.prepare('SELECT * FROM clients WHERE email = ?').get(email.toLowerCase());
-  if (!client || !bcrypt.compareSync(code, client.code_hash)) {
+  // Essais limités par adresse e-mail saisie (existante ou non : la réponse ne révèle rien).
+  const key = `login:${String(email).trim().toLowerCase()}`;
+  const lock = guard.status(key);
+  if (lock.locked) return res.status(429).json({ error: guard.message(lock.retryAfterSec) });
+  const client = db.prepare('SELECT * FROM clients WHERE email = ?').get(String(email).trim().toLowerCase());
+  if (!client || !bcrypt.compareSync(String(code), client.code_hash)) {
+    const after = guard.fail(key);
+    if (after.locked) return res.status(429).json({ error: guard.message(after.retryAfterSec) });
     return res.status(401).json({ error: "Email ou code d'accès incorrect." });
   }
+  guard.ok(key);
   req.session.clientId = client.id;
   res.json({ client: publicClient(client) });
 });
@@ -96,6 +106,128 @@ router.put('/me/billing', requireClient, (req, res) => {
   res.json({ client: publicClient(client) });
 });
 
+// GET /api/clients/auth-options — ce que l'écran de connexion peut proposer : la réinitialisation
+// du code par e-mail n'existe que si l'envoi d'e-mails et l'adresse publique du site sont configurés.
+function publicBaseUrl() {
+  return String(process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').trim().replace(/\/+$/, '');
+}
+router.get('/auth-options', (req, res) => {
+  let contact = { phone: null, email: null };
+  try { contact = db.prepare('SELECT phone, email FROM billing_settings WHERE id = 1').get() || contact; } catch { /* facturation non initialisée */ }
+  res.json({ resetByEmail: mailer.isConfigured() && !!publicBaseUrl(), contact: { phone: contact.phone || null, email: contact.email || null } });
+});
+
+// PUT /api/clients/me/profile — l'hôtel tient lui-même ses coordonnées à jour. Le nom de
+// l'établissement reste géré par Blanchisserie Cézanne (il figure sur les factures). Changer
+// l'adresse e-mail (l'identifiant de connexion) exige le code d'accès actuel.
+router.put('/me/profile', requireClient, (req, res) => {
+  const b = req.body || {};
+  const cur = db.prepare('SELECT * FROM clients WHERE id = ?').get(req.session.clientId);
+  const text = (k, label, max) => {
+    const v = b[k] === undefined ? cur[k] : String(b[k] ?? '').trim();
+    if (!v) throw Object.assign(new Error(`Merci de renseigner ${label}.`), { status: 400 });
+    if (v.length > max) throw Object.assign(new Error(`${label[0].toUpperCase()}${label.slice(1)} est trop long.`), { status: 400 });
+    return v;
+  };
+  try {
+    const contact = text('contact', 'le nom du contact', 120);
+    const tel = text('tel', 'un numéro de téléphone', 40);
+    const adresse = text('adresse', "l'adresse", 300);
+    let email = cur.email;
+    if (b.email !== undefined && String(b.email).trim().toLowerCase() !== (cur.email || '')) {
+      email = String(b.email || '').trim().toLowerCase();
+      if (!EMAIL_RE.test(email)) throw Object.assign(new Error('Adresse email invalide.'), { status: 400 });
+      const key = `code:${cur.id}`;
+      const lock = guard.status(key);
+      if (lock.locked) throw Object.assign(new Error(guard.message(lock.retryAfterSec)), { status: 429 });
+      if (!b.currentCode || !bcrypt.compareSync(String(b.currentCode), cur.code_hash)) {
+        const after = guard.fail(key);
+        throw Object.assign(new Error(after.locked ? guard.message(after.retryAfterSec) : 'Pour changer votre adresse e-mail, saisissez votre code d\'accès actuel.'), { status: after.locked ? 429 : 403 });
+      }
+      guard.ok(key);
+      if (db.prepare('SELECT id FROM clients WHERE email = ? AND id != ?').get(email, cur.id)) {
+        throw Object.assign(new Error('Cet email est déjà utilisé par un autre compte.'), { status: 409 });
+      }
+    }
+    const changed = [['contact', contact], ['tel', tel], ['adresse', adresse], ['email', email]].filter(([k, v]) => (cur[k] || '') !== v).map(([k]) => k);
+    db.prepare('UPDATE clients SET contact = ?, tel = ?, adresse = ?, email = ? WHERE id = ?').run(contact, tel, adresse, email, cur.id);
+    if (changed.length) require('../billing/engine').logEvent('client_self_updated', null, { clientId: cur.id, client: cur.societe, fields: changed });
+    res.json({ client: publicClient(db.prepare('SELECT * FROM clients WHERE id = ?').get(cur.id)) });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
+
+// PUT /api/clients/me/code — changer son code d'accès (l'ancien est exigé).
+router.put('/me/code', requireClient, (req, res) => {
+  const { currentCode, newCode } = req.body || {};
+  const key = `code:${req.session.clientId}`;
+  const lock = guard.status(key);
+  if (lock.locked) return res.status(429).json({ error: guard.message(lock.retryAfterSec) });
+  const cur = db.prepare('SELECT * FROM clients WHERE id = ?').get(req.session.clientId);
+  if (!currentCode || !bcrypt.compareSync(String(currentCode), cur.code_hash)) {
+    const after = guard.fail(key);
+    return res.status(after.locked ? 429 : 403).json({ error: after.locked ? guard.message(after.retryAfterSec) : "Le code d'accès actuel est incorrect." });
+  }
+  if (!/^\d{4,8}$/.test(String(newCode || ''))) return res.status(400).json({ error: "Le nouveau code doit contenir entre 4 et 8 chiffres." });
+  guard.ok(key);
+  db.prepare('UPDATE clients SET code_hash = ? WHERE id = ?').run(bcrypt.hashSync(String(newCode), 10), cur.id);
+  db.prepare("UPDATE client_reset_tokens SET used_at = datetime('now') WHERE client_id = ? AND used_at IS NULL").run(cur.id);
+  require('../billing/engine').logEvent('client_code_changed', null, { clientId: cur.id, client: cur.societe, by: 'client' });
+  res.json({ ok: true });
+});
+
+// POST /api/clients/forgot-code — envoie un lien (valable 1 h, à usage unique) pour choisir un nouveau code.
+// La réponse est la même que l'adresse soit connue ou non : on ne révèle pas quels comptes existent.
+const RESET_TTL_MIN = 60;
+router.post('/forgot-code', async (req, res) => {
+  const email = String((req.body || {}).email || '').trim().toLowerCase();
+  if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Adresse email invalide.' });
+  const base = publicBaseUrl();
+  if (!mailer.isConfigured() || !base) {
+    return res.status(503).json({ error: "La réinitialisation par e-mail n'est pas disponible pour le moment. Contactez Blanchisserie Cézanne : nous vous attribuerons un nouveau code." });
+  }
+  const generic = { ok: true, message: "Si un compte existe avec cette adresse, un e-mail vient de lui être envoyé (valable une heure)." };
+  // Au plus 5 demandes par quart d'heure et par adresse ; au-delà, on répond pareil sans rien envoyer.
+  const key = `forgot:${email}`;
+  const tooMany = guard.status(key).locked;
+  guard.fail(key); // chaque demande compte ; 5 demandes → blocage 15 min
+  const client = tooMany ? null : db.prepare('SELECT id, societe, email FROM clients WHERE email = ?').get(email);
+  if (client) {
+    const token = crypto.randomBytes(32).toString('base64url');
+    const hash = crypto.createHash('sha256').update(token).digest('hex');
+    db.prepare("INSERT INTO client_reset_tokens (client_id, token_hash, expires_at) VALUES (?, ?, datetime('now', ?))").run(client.id, hash, `+${RESET_TTL_MIN} minutes`);
+    const link = `${base}/#reset=${token}`;
+    try {
+      await mailer.sendMail({
+        to: client.email,
+        subject: 'Votre nouveau code d\'accès — Blanchisserie Cézanne',
+        text: `Bonjour,\n\nVous avez demandé à choisir un nouveau code d'accès pour l'espace client de ${client.societe}.\n\nCliquez sur ce lien (valable ${RESET_TTL_MIN} minutes, utilisable une seule fois) :\n${link}\n\nSi vous n'êtes pas à l'origine de cette demande, ignorez simplement ce message : votre code actuel reste valable.\n\nBlanchisserie Cézanne`,
+      });
+    } catch (e) {
+      console.error('[clients] e-mail de réinitialisation non envoyé :', e.message);
+    }
+  }
+  res.json(generic);
+});
+
+// POST /api/clients/reset-code — choisit le nouveau code avec le jeton reçu par e-mail.
+router.post('/reset-code', (req, res) => {
+  const { token, code } = req.body || {};
+  if (!/^\d{4,8}$/.test(String(code || ''))) return res.status(400).json({ error: "Le code d'accès doit contenir entre 4 et 8 chiffres." });
+  const hash = crypto.createHash('sha256').update(String(token || '')).digest('hex');
+  const row = db.prepare("SELECT t.id, t.client_id, c.societe FROM client_reset_tokens t JOIN clients c ON c.id = t.client_id WHERE t.token_hash = ? AND t.used_at IS NULL AND t.expires_at > datetime('now')").get(hash);
+  if (!row) return res.status(400).json({ error: "Ce lien n'est plus valable. Demandez-en un nouveau depuis « Code oublié ? »." });
+  db.transaction(() => {
+    db.prepare('UPDATE clients SET code_hash = ? WHERE id = ?').run(bcrypt.hashSync(String(code), 10), row.client_id);
+    db.prepare("UPDATE client_reset_tokens SET used_at = datetime('now') WHERE client_id = ? AND used_at IS NULL").run(row.client_id);
+  })();
+  guard.ok(`login:${db.prepare('SELECT email FROM clients WHERE id = ?').get(row.client_id).email}`);
+  require('../billing/engine').logEvent('client_code_changed', null, { clientId: row.client_id, client: row.societe, by: 'e-mail' });
+  res.json({ ok: true });
+});
+
 // GET /api/clients/orders — historique du client connecté
 router.get('/orders', requireClient, (req, res) => {
   const orders = db.prepare(`
@@ -107,37 +239,56 @@ router.get('/orders', requireClient, (req, res) => {
   res.json({ orders: serialized });
 });
 
-// GET /api/clients/invoices — factures du client connecté dont le PDF est
-// déjà disponible (une facture encore en brouillon côté Odoo n'a rien à
-// montrer, elle reste invisible ici tant qu'elle n'en est pas là).
+// GET /api/clients/invoices — factures du client connecté. Pour la facturation intégrée : statut,
+// échéance, montant TTC, reste à payer et, tant qu'elle est ouverte, l'offre d'escompte pour
+// règlement anticipé. Les factures du circuit Odoo (anciennes) n'ont que ce dont on dispose.
 router.get('/invoices', requireClient, (req, res) => {
-  const invoices = db.prepare(`
+  const engine = require('../billing/engine');
+  const legacy = db.prepare(`
     SELECT id, odoo_number as odooNumber, total_ht as totalHt,
            period_start as periodStart, period_end as periodEnd, created_at as createdAt
     FROM invoices
     WHERE client_id = ? AND pdf_path IS NOT NULL
     ORDER BY period_start DESC
-  `).all(req.session.clientId);
+  `).all(req.session.clientId).map(i => ({ ...i, legacy: true, status: null }));
 
-  // Factures et avoirs de la facturation intégrée — uniquement une fois
-  // ÉMIS (un brouillon n'existe pas pour le client).
-  const native = db.prepare(`
-    SELECT id, number, kind, total_ht_cents, period_start as periodStart, period_end as periodEnd, issue_date as issueDate
-    FROM native_invoices
-    WHERE client_id = ? AND status = 'issued'
-  `).all(req.session.clientId).map(n => ({
-    id: `n${n.id}`,
-    odooNumber: n.number,
-    kind: n.kind,
-    totalHt: (n.kind === 'credit_note' ? -1 : 1) * n.total_ht_cents / 100,
-    periodStart: n.periodStart || n.issueDate,
-    periodEnd: n.periodEnd || n.issueDate,
-    createdAt: n.issueDate,
-    pdfUrl: `/api/clients/native-invoices/${n.id}/pdf`,
-  }));
+  // Uniquement les documents ÉMIS (un brouillon n'existe pas pour le client).
+  const today = engine.todayParis();
+  const sums = { dueCents: 0, overdueCents: 0, openCount: 0 };
+  const native = db.prepare("SELECT id FROM native_invoices WHERE client_id = ? AND status = 'issued'").all(req.session.clientId).map(({ id }) => {
+    const inv = engine.loadInvoice(id);
+    const isCn = inv.kind === 'credit_note';
+    const sign = isCn ? -1 : 1;
+    const balance = isCn ? 0 : engine.balanceCents(inv);
+    const esc = isCn ? null : engine.escompteStatus(inv, today);
+    if (balance > 0) {
+      sums.dueCents += balance; sums.openCount += 1;
+      if (inv.due_date && inv.due_date < today) sums.overdueCents += balance;
+    }
+    return {
+      id: `n${inv.id}`, legacy: false,
+      odooNumber: inv.number, number: inv.number, kind: inv.kind,
+      status: isCn ? 'credit_note' : engine.paymentStatus(inv),
+      totalHt: sign * inv.total_ht_cents / 100, totalTtcCents: sign * inv.total_ttc_cents,
+      periodStart: inv.period_start || inv.issue_date, periodEnd: inv.period_end || inv.issue_date,
+      createdAt: inv.issue_date, issueDate: inv.issue_date, dueDate: inv.due_date,
+      balanceCents: balance,
+      overdueDays: !isCn && balance > 0 && inv.due_date && inv.due_date < today ? Math.round((Date.parse(today) - Date.parse(inv.due_date)) / 86400000) : 0,
+      grantedDiscountCents: isCn ? 0 : engine.discountSums(inv.id).ttcCents,
+      escompte: esc && esc.open && esc.discountCents > 0 && balance > 0
+        ? { ratePct: esc.ratePct, deadline: esc.deadline, discountCents: esc.discountCents, netCents: esc.netCents } : null,
+      pdfUrl: `/api/clients/native-invoices/${inv.id}/pdf`,
+    };
+  });
 
-  const all = [...invoices, ...native].sort((a, b) => String(b.periodStart || '').localeCompare(String(a.periodStart || '')));
-  res.json({ invoices: all });
+  const all = [...legacy, ...native].sort((a, b) => String(b.issueDate || b.periodStart || '').localeCompare(String(a.issueDate || a.periodStart || '')) || String(b.number || '').localeCompare(String(a.number || '')));
+  // Coordonnées de virement : déjà imprimées sur chaque facture, on les rappelle tant qu'il y a quelque chose à payer.
+  let payment = null;
+  if (sums.dueCents > 0) {
+    const st = engine.getSettings();
+    if (st.iban) payment = { holder: st.legal_name || 'Blanchisserie Cézanne', iban: st.iban, bic: st.bic || null };
+  }
+  res.json({ invoices: all, summary: sums, payment });
 });
 
 // GET /api/clients/native-invoices/:id/pdf — PDF d'une facture/avoir ÉMIS de

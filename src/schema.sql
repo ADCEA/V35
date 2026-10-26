@@ -412,3 +412,15 @@ CREATE INDEX IF NOT EXISTS idx_comments_order ON order_comments(order_id);
 -- TABLE qui ajoutent ces colonnes aux bases déjà existantes — les créer
 -- ici casserait le démarrage sur une base où la table existe déjà sans
 -- ces colonnes (CREATE TABLE IF NOT EXISTS ne les ajoute pas rétroactivement).
+
+-- Réinitialisation du code d'accès d'un hôtel par e-mail : jeton à usage unique, valable une heure.
+-- Seule l'empreinte (SHA-256) du jeton est conservée : une copie de la base ne permet pas de s'en servir.
+CREATE TABLE IF NOT EXISTS client_reset_tokens (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id   INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  token_hash  TEXT NOT NULL UNIQUE,
+  expires_at  TEXT NOT NULL,
+  used_at     TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_client_reset_client ON client_reset_tokens(client_id);

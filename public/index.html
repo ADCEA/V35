@@ -48,6 +48,8 @@
         </div>
       </div>
 
+      <div class="reorder-note" id="reorder-note" role="status" style="display:none;"></div>
+
       <div class="order-grid">
         <div>
           <div class="card" style="margin-bottom:20px;">
@@ -103,16 +105,18 @@
         <div class="eyebrow" style="text-align:center;">Espace personnel</div>
         <h3 style="text-align:center;margin-bottom:22px;">Accédez à votre compte</h3>
 
-        <div class="auth-toggle">
+        <div class="auth-toggle" id="auth-toggle">
           <button data-auth="connexion" class="active">Connexion</button>
           <button data-auth="inscription">Inscription</button>
         </div>
 
         <div class="auth-form active card" id="form-connexion">
+          <div class="auth-info" id="info-connexion"></div>
           <div class="auth-error" id="err-connexion"></div>
-          <div class="field"><label>Email</label><input id="login-email" type="email" placeholder="vous@societe.fr"></div>
-          <div class="field"><label>Code d'accès</label><input id="login-code" type="password" inputmode="numeric" maxlength="8" placeholder="••••"></div>
+          <div class="field"><label for="login-email">Email</label><input id="login-email" type="email" autocomplete="email" placeholder="vous@societe.fr"></div>
+          <div class="field"><label for="login-code">Code d'accès</label><input id="login-code" type="password" inputmode="numeric" maxlength="8" autocomplete="current-password" placeholder="••••"></div>
           <button class="btn-primary" id="btn-login">Se connecter</button>
+          <button type="button" class="link-btn" id="btn-forgot">Code oublié ?</button>
         </div>
 
         <div class="auth-form card" id="form-inscription">
@@ -126,44 +130,123 @@
           <div class="field-hint">Merci d'inclure le code postal — ça évite les erreurs de localisation pour l'organisation des tournées.</div>
           <div class="field"><label>Email</label><input id="reg-email" type="email" placeholder="vous@societe.fr"></div>
           <div class="field-row">
-            <div class="field"><label>Code d'accès</label><input id="reg-code" type="password" inputmode="numeric" maxlength="8" placeholder="4 à 8 chiffres"></div>
-            <div class="field"><label>Confirmer le code</label><input id="reg-code2" type="password" inputmode="numeric" maxlength="8" placeholder="4 à 8 chiffres"></div>
+            <div class="field"><label>Code d'accès</label><input id="reg-code" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" placeholder="4 à 8 chiffres"></div>
+            <div class="field"><label>Confirmer le code</label><input id="reg-code2" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" placeholder="4 à 8 chiffres"></div>
           </div>
-          <div class="field-hint">Ce code protège l'accès à votre espace. Choisissez-en un dont vous vous souviendrez, il n'est pas récupérable en cas d'oubli.</div>
+          <div class="field-hint">Ce code protège l'accès à votre espace. Si vous l'oubliez, « Code oublié ? » sur l'écran de connexion vous permettra d'en choisir un nouveau.</div>
           <button class="btn-primary" id="btn-register">Créer mon compte</button>
+        </div>
+
+        <div class="auth-form card" id="form-oubli">
+          <h4 class="card-subhead">Code oublié</h4>
+          <div class="auth-error" id="err-oubli"></div>
+          <div class="auth-info" id="info-oubli"></div>
+          <div id="oubli-email-box">
+            <p class="auth-lead">Indiquez l'adresse e-mail de votre compte : nous vous envoyons un lien pour choisir un nouveau code.</p>
+            <div class="field"><label for="oubli-email">Email</label><input id="oubli-email" type="email" autocomplete="email" placeholder="vous@societe.fr"></div>
+            <button class="btn-primary" id="btn-oubli-send">Recevoir le lien</button>
+          </div>
+          <div id="oubli-contact-box" style="display:none;"></div>
+          <button type="button" class="link-btn" id="btn-oubli-back">Retour à la connexion</button>
+        </div>
+
+        <div class="auth-form card" id="form-reset">
+          <h4 class="card-subhead">Nouveau code d'accès</h4>
+          <div class="auth-error" id="err-reset"></div>
+          <p class="auth-lead">Choisissez un code de 4 à 8 chiffres.</p>
+          <div class="field-row">
+            <div class="field"><label for="reset-code">Nouveau code</label><input id="reset-code" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" placeholder="4 à 8 chiffres"></div>
+            <div class="field"><label for="reset-code2">Confirmer le code</label><input id="reset-code2" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" placeholder="4 à 8 chiffres"></div>
+          </div>
+          <button class="btn-primary" id="btn-reset-save">Enregistrer mon nouveau code</button>
+          <button type="button" class="link-btn" id="btn-reset-back">Retour à la connexion</button>
         </div>
       </div>
 
-      <div id="espace-dashboard" style="display:none;">
+      <div id="espace-dashboard" class="dash" style="display:none;">
         <div class="espace-header">
-          <div>
+          <div class="espace-id">
             <h3 id="dash-societe">—</h3>
             <span id="dash-email"></span>
           </div>
-          <button class="btn-logout" id="btn-logout">Se déconnecter</button>
+          <div class="espace-actions">
+            <button class="btn-logout" id="btn-open-account">Mon compte</button>
+            <button class="btn-logout" id="btn-logout">Se déconnecter</button>
+          </div>
         </div>
+
+        <div class="home-action">
+          <button class="btn-primary" id="btn-espace-new-order">Nouvelle commande</button>
+          <span class="home-action-note" id="home-action-note"></span>
+        </div>
+
+        <section class="dash-section" id="inprogress-section" style="display:none;">
+          <h4 class="card-subhead">Commandes en cours</h4>
+          <div class="own-orders" id="own-inprogress"></div>
+        </section>
+
+        <section class="dash-section" id="own-invoices-section" style="display:none;">
+          <h4 class="card-subhead">Vos factures</h4>
+          <div id="invoice-summary"></div>
+          <div id="invoice-payment"></div>
+          <div id="own-invoices"></div>
+        </section>
+
+        <section class="dash-section">
+          <h4 class="card-subhead">Historique des commandes</h4>
+          <div class="own-orders" id="own-orders"></div>
+        </section>
+
         <div id="nps-card"></div>
 
-        <div class="card" style="margin-bottom:24px;">
-          <h4 class="card-subhead" style="margin-bottom:4px;">Informations de facturation</h4>
-          <p style="font-size:12.5px;color:var(--steel);margin:0 0 12px;">Ces informations nous permettent d'établir vos factures correctement. Elles ne sont pas obligatoires pour commander, mais nécessaires pour la facturation.</p>
-          <div class="field-row">
-            <div class="field"><label>SIRET</label><input id="billing-siret" inputmode="numeric" maxlength="14" placeholder="14 chiffres"></div>
-            <div class="field"><label>N° TVA intracommunautaire</label><input id="billing-tva" placeholder="Ex. FR12345678901"></div>
-          </div>
-          <div class="field"><label>Adresse de facturation (si différente de l'adresse de collecte)</label><input id="billing-adresse" placeholder="Laisser vide pour utiliser l'adresse de collecte"></div>
-          <button class="btn-secondary" id="btn-save-billing" style="width:auto;margin-top:8px;">Enregistrer</button>
-          <div class="qty-save-note" id="billing-note"></div>
-        </div>
+        <section class="dash-section" id="account-section">
+          <h4 class="card-subhead">Mon compte</h4>
 
-        <button class="btn-secondary" id="btn-espace-new-order" style="margin-bottom:24px;">+ Nouvelle commande</button>
-        <h4 class="card-subhead">Historique de vos commandes</h4>
-        <div class="own-orders" id="own-orders"></div>
+          <details class="acct" id="acct-profile">
+            <summary>Mes coordonnées</summary>
+            <div class="acct-body">
+              <div class="auth-error" id="err-profile"></div>
+              <div class="field-row">
+                <div class="field"><label for="prof-contact">Nom du contact</label><input id="prof-contact" autocomplete="name"></div>
+                <div class="field"><label for="prof-tel">Téléphone</label><input id="prof-tel" type="tel" autocomplete="tel"></div>
+              </div>
+              <div class="field"><label for="prof-adresse">Adresse de collecte</label><input id="prof-adresse" autocomplete="street-address"></div>
+              <div class="field"><label for="prof-email">E-mail de connexion</label><input id="prof-email" type="email" autocomplete="email"></div>
+              <div class="field" id="prof-code-field" style="display:none;"><label for="prof-current-code">Votre code d'accès actuel (pour confirmer le changement d'e-mail)</label><input id="prof-current-code" type="password" inputmode="numeric" maxlength="8" autocomplete="current-password"></div>
+              <div class="field-hint" id="prof-name-hint"></div>
+              <button class="btn-secondary" id="btn-save-profile" style="width:auto;">Enregistrer</button>
+              <div class="qty-save-note" id="profile-note"></div>
+            </div>
+          </details>
 
-        <div id="own-invoices-section" style="display:none;margin-top:24px;">
-          <h4 class="card-subhead">Vos factures</h4>
-          <div id="own-invoices"></div>
-        </div>
+          <details class="acct" id="acct-billing">
+            <summary>Informations de facturation</summary>
+            <div class="acct-body">
+              <p class="acct-lead">Ces informations nous permettent d'établir vos factures correctement. Elles ne sont pas obligatoires pour commander.</p>
+              <div class="field-row">
+                <div class="field"><label for="billing-siret">SIRET</label><input id="billing-siret" inputmode="numeric" maxlength="14" placeholder="14 chiffres"></div>
+                <div class="field"><label for="billing-tva">N° TVA intracommunautaire</label><input id="billing-tva" placeholder="Ex. FR12345678901"></div>
+              </div>
+              <div class="field"><label for="billing-adresse">Adresse de facturation (si différente de l'adresse de collecte)</label><input id="billing-adresse" placeholder="Laisser vide pour utiliser l'adresse de collecte"></div>
+              <button class="btn-secondary" id="btn-save-billing" style="width:auto;">Enregistrer</button>
+              <div class="qty-save-note" id="billing-note"></div>
+            </div>
+          </details>
+
+          <details class="acct" id="acct-code">
+            <summary>Mon code d'accès</summary>
+            <div class="acct-body">
+              <div class="auth-error" id="err-code"></div>
+              <div class="field"><label for="code-current">Code actuel</label><input id="code-current" type="password" inputmode="numeric" maxlength="8" autocomplete="current-password"></div>
+              <div class="field-row">
+                <div class="field"><label for="code-new">Nouveau code</label><input id="code-new" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" placeholder="4 à 8 chiffres"></div>
+                <div class="field"><label for="code-new2">Confirmer le nouveau code</label><input id="code-new2" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" placeholder="4 à 8 chiffres"></div>
+              </div>
+              <button class="btn-secondary" id="btn-save-code" style="width:auto;">Changer mon code</button>
+              <div class="qty-save-note" id="code-note"></div>
+            </div>
+          </details>
+        </section>
       </div>
 
     </section>
@@ -493,7 +576,10 @@
 
 </main>
 
-<footer>Blanchisserie Cézanne — application connectée à une base de données SQLite · <button id="footer-admin-link" style="background:none;border:none;padding:0;font:inherit;color:inherit;text-decoration:underline;cursor:pointer;">Administration</button></footer>
+<footer>
+  <span id="footer-contact">Blanchisserie Cézanne</span>
+  <button id="footer-admin-link" class="footer-link" type="button">Accès équipe</button>
+</footer>
 
 <script src="/app.js"></script>
 <script src="/stats-daily.js"></script>
