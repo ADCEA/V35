@@ -1104,6 +1104,12 @@ async function saveModalQuantities(orderId) {
 function buildMailtoFallback(to, subject, text) {
   return `mailto:${encodeURIComponent(to || '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
 }
+// Lien Outlook (nouvel onglet) avec le message prêt ; repli sur la messagerie par défaut si l'espace Facturation n'est pas chargé.
+function buildOutlookFallback(to, subject, text) {
+  return (typeof Bill !== 'undefined' && Bill.outlookUrl)
+    ? Bill.outlookUrl({ to, subject, body: text, host: Bill.outlookHost() })
+    : buildMailtoFallback(to, subject, text);
+}
 
 // Génère le même PDF que le serveur, mais côté navigateur — utilisé quand
 // le SMTP n'est pas configuré, puisque mailto: ne peut pas joindre de fichier.
@@ -1232,7 +1238,7 @@ async function sendDeliveryNote(orderId) {
     }
     if (result.reason === 'smtp_not_configured') {
       if (order) downloadDeliveryNotePdf(order);
-      if (note) note.innerHTML = `Envoi automatique non configuré côté serveur (voir .env). Le PDF a été téléchargé — <a href="${buildMailtoFallback(result.to, 'Bon de livraison ' + (order ? order.ticket : ''), result.text)}" style="color:var(--brand);text-decoration:underline;">ouvrez votre messagerie</a> et joignez-le manuellement.`;
+      if (note) note.innerHTML = `Envoi automatique non configuré côté serveur (voir .env). Le PDF a été téléchargé — <a href="${escHtml(buildOutlookFallback(result.to, 'Bon de livraison ' + (order ? order.ticket : ''), result.text))}" target="_blank" rel="noopener" style="color:var(--brand);text-decoration:underline;">ouvrez Outlook</a> avec le message prêt et glissez-y le PDF pour le joindre.`;
     }
   } catch (err) {
     if (note) note.textContent = err.message || "Échec de l'envoi.";

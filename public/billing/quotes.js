@@ -151,7 +151,7 @@
           } }],
         });
       },
-      send() { Bill.mailModal({ title: 'Envoyer le devis', previewPath: `/quotes/${id}/mail-preview`, sendPath: `/quotes/${id}/send`, onDone: async () => { mark(); await reload(); } }); },
+      send() { Bill.mailModal({ title: 'Envoyer le devis', previewPath: `/quotes/${id}/mail-preview`, sendPath: `/quotes/${id}/send`, pdfPath: `/quotes/${id}/pdf`, onDone: async () => { mark(); await reload(); } }); },
       accept() { decide('accepted'); },
       async refuse() { if (await Bill.confirm('Marquer ce devis refusé ?', 'Vous pourrez revenir dessus si le client change d\'avis.', 'Marquer refusé')) decide('refused'); },
       async convert() {

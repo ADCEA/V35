@@ -194,6 +194,47 @@
     },
   });
 
+  // ================= Outlook =================
+  async function paintOutlook(main) {
+    const box = main.querySelector('#ol-box');
+    let s; try { s = await Bill.get('/outlook/status'); } catch (err) { return Bill.fail(err, box); }
+    if (s.connected) {
+      box.innerHTML = `<div class="bl-panel"><div class="bl-panel-h"><h3>Outlook est connecté</h3><button class="bl-btn" id="ol-off">Déconnecter</button></div><div class="bl-panel-b">
+        <p class="bl-note" style="margin:0 0 8px"><b>${e(s.account && (s.account.name || s.account.email) || 'Compte Microsoft')}</b>${s.account && s.account.name && s.account.email ? ` — ${e(s.account.email)}` : ''}${s.account && s.account.connectedAt ? `, connecté le ${e(dtFr(s.account.connectedAt.replace(' ', 'T') + 'Z'))}` : ''}.</p>
+        <p class="bl-note" style="margin:0">« Envoyer par e-mail » crée maintenant un <b>brouillon dans cette boîte</b>, avec la facture, l'avoir ou le devis déjà joint en PDF, et l'ouvre dans un nouvel onglet Outlook. Le logiciel ne peut rien envoyer lui-même : il n'a que le droit de créer des brouillons que vous envoyez vous-même.</p></div></div>`;
+      box.querySelector('#ol-off').onclick = () => Bill.sensitive({ title: 'Déconnecter Outlook', scope: 'outlook-disconnect', okLabel: 'Déconnecter', danger: true,
+        text: "Le logiciel n'aura plus accès à votre boîte. « Envoyer par e-mail » ouvrira un message Outlook simple, sans le PDF joint.",
+        onSubmit: async () => { await Bill.post('/outlook/disconnect'); Bill.toast('Outlook déconnecté'); paintOutlook(main); } });
+      return;
+    }
+    if (s.configured) {
+      box.innerHTML = `<div class="bl-panel"><div class="bl-panel-h"><h3>Connecter Outlook</h3></div><div class="bl-panel-b">
+        ${s.needsReconnect ? '<div class="bl-alert warn">La connexion précédente n\'est plus valable : reconnectez-la.</div>' : ''}
+        <p class="bl-note" style="margin-top:0">Une seule fois : vous autorisez le logiciel à <b>créer des brouillons</b> dans votre boîte Outlook. Ensuite, « Envoyer par e-mail » prépare le message avec le PDF déjà joint et l'ouvre dans Outlook. Rien ne part sans votre clic sur Envoyer dans Outlook.</p>
+        <button class="bl-btn primary" id="ol-on">Connecter mon Outlook…</button></div></div>`;
+      box.querySelector('#ol-on').onclick = () => Bill.sensitive({ title: 'Connecter Outlook', scope: 'outlook-connect', okLabel: 'Continuer vers Microsoft',
+        text: 'Vous allez être redirigé vers Microsoft pour choisir votre compte et autoriser la création de brouillons.',
+        onSubmit: async () => { const r = await Bill.post('/outlook/connect'); window.location.href = r.url; return true; } });
+      return;
+    }
+    box.innerHTML = `<div class="bl-panel"><div class="bl-panel-h"><h3>Connexion à préparer (une seule fois)</h3></div><div class="bl-panel-b">
+      <p class="bl-note" style="margin-top:0">Pour que la facture soit <b>déjà jointe</b> au brouillon, Microsoft demande d'enregistrer cette application (gratuit, environ 10 minutes). Il manque : <b>${e(s.missing.join(', '))}</b>.</p>
+      <ol class="bl-note" style="padding-left:20px;line-height:1.6;margin:0 0 10px">
+        <li>Sur <b>entra.microsoft.com</b> (compte Microsoft ou professionnel) : <i>Applications → Inscriptions d'applications → Nouvelle inscription</i>.</li>
+        <li>Nom au choix (ex. « Blanchisserie Cézanne — brouillons »). Types de comptes : <i>comptes de tout annuaire et comptes Microsoft personnels</i> (ou <i>cet annuaire uniquement</i> pour un Microsoft 365 d'entreprise).</li>
+        <li>URI de redirection, type <b>Web</b> : <code>${e(s.redirectUri || '(adresse publique du site à renseigner : variable PUBLIC_URL)')}</code></li>
+        <li><i>Autorisations d'API → Microsoft Graph → Autorisations déléguées</i> : <b>Mail.ReadWrite</b>, <b>User.Read</b>, <b>offline_access</b>.</li>
+        <li><i>Certificats et secrets → Nouveau secret client</i> : copiez la <b>valeur</b> du secret tout de suite (elle ne s'affiche qu'une fois).</li>
+        <li>Sur l'hébergeur (Render → Environment), ajoutez <code>MS_CLIENT_ID</code> (ID d'application), <code>MS_CLIENT_SECRET</code> (valeur du secret) et, pour un annuaire d'entreprise seulement, <code>MS_TENANT</code> (ID de l'annuaire), puis redéployez.</li>
+      </ol><p class="bl-hint" style="margin:0">En attendant, « Envoyer par e-mail » ouvre un message Outlook prérempli et télécharge le PDF à joindre.</p></div></div>`;
+  }
+  Bill.register('outlook', {
+    async render(main) {
+      main.innerHTML = `<div class="bl-head"><div><h2>Outlook</h2><p>Envoyez factures, avoirs, devis et relances depuis votre boîte Outlook : le brouillon est créé avec le PDF déjà joint.</p></div></div><div id="ol-box"><div class="bl-spin">Chargement…</div></div>`;
+      await paintOutlook(main);
+    },
+  });
+
   // ================= Contrôle et FEC =================
   Bill.register('controls', {
     async render(main) {

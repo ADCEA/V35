@@ -176,7 +176,7 @@ module.exports = function applyBillingSchema(db) {
       invoice_id  INTEGER REFERENCES native_invoices(id) ON DELETE RESTRICT,
       quote_id    INTEGER REFERENCES native_quotes(id) ON DELETE RESTRICT,
       kind        TEXT NOT NULL,                 -- 'invoice' | 'reminder-1' | 'reminder-2' | 'reminder-3' | 'quote'
-      channel     TEXT NOT NULL DEFAULT 'email', -- 'email' | 'manual' (relance téléphonique, courrier…)
+      channel     TEXT NOT NULL DEFAULT 'email', -- 'email' | 'manual' (relance téléphonique, courrier…) | 'outlook' (lien Outlook) | 'outlook-draft' (brouillon créé avec le PDF joint)
       to_email    TEXT,
       subject     TEXT,
       status      TEXT NOT NULL,                 -- 'sent' | 'failed' | 'logged'
@@ -184,6 +184,16 @@ module.exports = function applyBillingSchema(db) {
       sent_at     TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_native_mail_invoice ON native_mail_log(invoice_id);
+
+    -- Connexion à Outlook (Microsoft Graph) : sert à créer des brouillons avec le PDF joint. Une seule ligne ;
+    -- le jeton de renouvellement est chiffré (voir src/billing/outlook.js), jamais stocké en clair.
+    CREATE TABLE IF NOT EXISTS outlook_connection (
+      id                INTEGER PRIMARY KEY CHECK (id = 1),
+      account_email     TEXT,
+      account_name      TEXT,
+      refresh_token_enc TEXT NOT NULL,
+      connected_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
 
     -- Suivi de l'envoi des factures émises vers Pennylane (une ligne par document).
     CREATE TABLE IF NOT EXISTS pennylane_sync (

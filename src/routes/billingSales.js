@@ -133,12 +133,13 @@ router.get('/quotes/:id/mail-preview', wrap((req, res) => {
   if (!q) throw new engine.BillingError('Devis introuvable.', 404);
   if (q.status === 'draft') throw new engine.BillingError('Finalisez le devis avant de l\'envoyer.');
   const client = db.prepare('SELECT email FROM clients WHERE id = ?').get(q.client_id);
-  res.json({ ...mail.renderQuote(q), to: client?.email || '', smtp: require('../utils/mailer').isConfigured() });
+  const ol = require('../billing/outlook').status();
+  res.json({ ...mail.renderQuote(q), to: client?.email || '', smtp: require('../utils/mailer').isConfigured(), outlook: { configured: ol.configured, connected: ol.connected, needsReconnect: ol.needsReconnect, account: ol.account && ol.account.email } });
 }));
 
 router.post('/quotes/:id/send', wrap(async (req, res) => {
   const r = await mail.sendQuote(Number(req.params.id), req.body || {});
-  res.json({ ok: true, to: r.to });
+  res.json({ ok: true, to: r.to, outlook: !!r.outlook, draft: !!r.draft, webLink: r.webLink || null, draftError: r.draftError || null });
 }));
 
 module.exports = router;
