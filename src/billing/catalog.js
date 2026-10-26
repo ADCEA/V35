@@ -326,7 +326,7 @@ function listClients() {
   const today = todayParis();
   const rows = db.prepare(`
     SELECT c.id, c.societe, c.contact, c.tel, c.email, c.adresse, c.code_postal AS codePostal, c.ville, c.siret,
-           c.tva_number AS tvaNumber, c.adresse_facturation AS adresseFacturation, c.invoice_detail_level AS invoiceDetailLevel,
+           c.tva_number AS tvaNumber, c.adresse_facturation AS adresseFacturation, c.invoice_detail_level AS invoiceDetailLevel, c.escompte,
            c.created_at AS createdAt,
            (SELECT COUNT(*) FROM client_prices cp WHERE cp.client_id = c.id AND cp.date_debut <= @t AND (cp.date_fin IS NULL OR cp.date_fin >= @t)) AS negotiatedCount,
            (SELECT COUNT(*) FROM client_prices cp WHERE cp.client_id = c.id AND cp.date_debut > @t) AS upcomingCount,
@@ -346,7 +346,7 @@ function listClients() {
 function getClient(id) {
   const c = db.prepare(`
     SELECT id, societe, contact, tel, email, adresse, code_postal AS codePostal, ville, siret, tva_number AS tvaNumber,
-           adresse_facturation AS adresseFacturation, invoice_detail_level AS invoiceDetailLevel, created_at AS createdAt,
+           adresse_facturation AS adresseFacturation, invoice_detail_level AS invoiceDetailLevel, escompte, created_at AS createdAt,
            webhook_url AS webhookUrl, webhook_secret AS webhookSecret
     FROM clients WHERE id = ?
   `).get(id);
@@ -376,8 +376,11 @@ function cleanClientFields(body, existing) {
   if (siret && !/^\d{14}$/.test(siret)) throw new BillingError('Le SIRET doit comporter exactement 14 chiffres.');
   const level = has('invoiceDetailLevel') ? b.invoiceDetailLevel : (existing?.invoice_detail_level || 'detail');
   if (!['detail', 'per_bl', 'aggregated'].includes(level)) throw new BillingError('Niveau de détail de facture invalide.');
+  // Escompte pour règlement anticipé : '' (ou null) = suit le réglage général, 'on' = toujours, 'off' = jamais.
+  const esc = has('escompte') ? (b.escompte === '' || b.escompte === null ? null : b.escompte) : (existing?.escompte ?? null);
+  if (esc !== null && !['on', 'off'].includes(esc)) throw new BillingError("Option d'escompte invalide.");
   return {
-    societe, email, siret,
+    societe, email, siret, escompte: esc,
     contact: str('contact', existing?.contact),
     tel: str('tel', existing?.tel),
     adresse: str('adresse', existing?.adresse),
@@ -402,15 +405,15 @@ function createClient(body) {
   let id;
   db.transaction(() => {
     id = db.prepare(`
-      INSERT INTO clients (email, societe, contact, tel, adresse, code_postal, ville, code_hash, siret, tva_number, adresse_facturation, invoice_detail_level)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(f.email, f.societe, f.contact, f.tel, f.adresse, f.codePostal, f.ville, hash, f.siret, f.tvaNumber, f.adresseFacturation, f.invoiceDetailLevel).lastInsertRowid;
+      INSERT INTO clients (email, societe, contact, tel, adresse, code_postal, ville, code_hash, siret, tva_number, adresse_facturation, invoice_detail_level, escompte)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(f.email, f.societe, f.contact, f.tel, f.adresse, f.codePostal, f.ville, hash, f.siret, f.tvaNumber, f.adresseFacturation, f.invoiceDetailLevel, f.escompte).lastInsertRowid;
     log('client_created', { clientId: Number(id), client: f.societe });
   })();
   return getClient(Number(id));
 }
 
-const CLIENT_FIELD_LABELS = { societe: 'nom', contact: 'contact', tel: 'téléphone', email: 'e-mail', adresse: 'adresse', codePostal: 'code postal', ville: 'ville', siret: 'SIRET', tvaNumber: 'n° TVA', adresseFacturation: 'adresse de facturation', invoiceDetailLevel: 'détail des factures' };
+const CLIENT_FIELD_LABELS = { societe: 'nom', contact: 'contact', tel: 'téléphone', email: 'e-mail', adresse: 'adresse', codePostal: 'code postal', ville: 'ville', siret: 'SIRET', tvaNumber: 'n° TVA', adresseFacturation: 'adresse de facturation', invoiceDetailLevel: 'détail des factures', escompte: 'escompte' };
 
 function updateClient(id, body) {
   const existing = db.prepare('SELECT * FROM clients WHERE id = ?').get(id);
@@ -419,13 +422,13 @@ function updateClient(id, body) {
   const before = {
     societe: existing.societe, contact: existing.contact ?? '', tel: existing.tel ?? '', email: existing.email, adresse: existing.adresse ?? '',
     codePostal: existing.code_postal, ville: existing.ville, siret: existing.siret, tvaNumber: existing.tva_number,
-    adresseFacturation: existing.adresse_facturation, invoiceDetailLevel: existing.invoice_detail_level || 'detail',
+    adresseFacturation: existing.adresse_facturation, invoiceDetailLevel: existing.invoice_detail_level || 'detail', escompte: existing.escompte ?? null,
   };
   const changed = Object.keys(CLIENT_FIELD_LABELS).filter(k => (f[k] ?? null) !== (before[k] ?? null));
   db.transaction(() => {
     db.prepare(`
-      UPDATE clients SET societe=?, contact=?, tel=?, adresse=?, code_postal=?, ville=?, email=?, siret=?, tva_number=?, adresse_facturation=?, invoice_detail_level=? WHERE id=?
-    `).run(f.societe, f.contact, f.tel, f.adresse, f.codePostal, f.ville, f.email, f.siret, f.tvaNumber, f.adresseFacturation, f.invoiceDetailLevel, id);
+      UPDATE clients SET societe=?, contact=?, tel=?, adresse=?, code_postal=?, ville=?, email=?, siret=?, tva_number=?, adresse_facturation=?, invoice_detail_level=?, escompte=? WHERE id=?
+    `).run(f.societe, f.contact, f.tel, f.adresse, f.codePostal, f.ville, f.email, f.siret, f.tvaNumber, f.adresseFacturation, f.invoiceDetailLevel, f.escompte, id);
     if (changed.length) log('client_updated', { clientId: id, client: f.societe, fields: changed.map(k => CLIENT_FIELD_LABELS[k]) });
   })();
   return getClient(id);

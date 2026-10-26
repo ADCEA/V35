@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const db = require('../db');
 const engine = require('./engine');
 const queries = require('./queries');
+const escompte = require('./escompte');
 
 const { BillingError } = engine;
 
@@ -190,6 +191,21 @@ function matchLines(lines, today = engine.todayParis()) {
   for (const c of new Set(open.map(o => o.clientId))) tokensByClient.set(c, clientTokens(open.find(o => o.clientId === c).clientName));
   const regexByInvoice = new Map(open.map(o => [o.id, numberRegex(o.number)]));
   const fps = fingerprints(lines);
+  // Escompte pour règlement anticipé : pour chaque facture ouverte qui en propose un, le net à recevoir
+  // et la date limite. Un virement égal à ce net, arrivé à temps, solde la facture avec escompte.
+  const escById = new Map();
+  if (open.length) {
+    const rows = db.prepare(`SELECT id, terms_json, vat_breakdown_json, total_ttc_cents FROM native_invoices WHERE id IN (${open.map(() => '?').join(',')})`).all(...open.map(o => o.id));
+    const byId = new Map(open.map(o => [o.id, o]));
+    for (const r of rows) {
+      let terms = null; try { terms = JSON.parse(r.terms_json || 'null'); } catch { /* conditions illisibles : pas d'escompte */ }
+      const offer = terms && terms.earlyDiscount;
+      if (!offer) continue;
+      const bal = byId.get(r.id).balanceCents;
+      const a = escompte.amounts({ vatBreakdown: JSON.parse(r.vat_breakdown_json || '[]'), total_ttc_cents: r.total_ttc_cents }, bal, offer.ratePct);
+      if (a.ttcCents > 0 && a.ttcCents < bal) escById.set(r.id, { deadline: offer.deadline, ratePct: offer.ratePct, discountCents: a.ttcCents, netCents: bal - a.ttcCents });
+    }
+  }
 
   return lines.map((l, index) => {
     const out = { index, date: l.date, label: l.label, amountCents: l.amountCents, fingerprint: fps[index], method: detectMethod(l.label), alreadyImported: false, credit: l.amountCents > 0, candidates: [], multi: null, confidence: 'none' };
@@ -206,10 +222,13 @@ function matchLines(lines, today = engine.todayParis()) {
       const hit = toks.filter(t => label.includes(t));
       const clientMatch = toks.length > 0 && hit.length / toks.length >= 0.5 && hit.some(t => t.length >= 4);
       if (clientMatch) { score += 30; why.push('nom du client dans le libellé'); }
+      const esc = escById.get(inv.id);
+      const escMatch = !!esc && l.amountCents === esc.netCents && l.amountCents !== inv.balanceCents && !!l.date && l.date <= esc.deadline;
       if (l.amountCents === inv.balanceCents) { score += 50; why.push('montant égal au reste dû'); }
+      else if (escMatch) { score += 50; why.push(`montant égal au reste dû après escompte de ${escompte.pct(esc.ratePct).replace(/\u00A0/g, ' ')}`); }
       else if (l.amountCents < inv.balanceCents && (clientMatch || score >= 100)) { score += 10; why.push('règlement partiel possible'); }
       if (l.amountCents > inv.balanceCents) score = Math.min(score, 25); // dépasse le dû : applicable seulement en plusieurs factures
-      if (score >= 30) scored.push({ invoiceId: inv.id, number: inv.number, clientName: inv.clientName, balanceCents: inv.balanceCents, dueDate: inv.dueDate, score, why });
+      if (score >= 30) scored.push({ invoiceId: inv.id, number: inv.number, clientName: inv.clientName, balanceCents: inv.balanceCents, dueDate: inv.dueDate, score, why, ...(escMatch ? { withDiscount: true, discountCents: esc.discountCents } : {}) });
     }
     scored.sort((a, b) => b.score - a.score || (a.dueDate < b.dueDate ? -1 : 1));
     out.candidates = scored.slice(0, 4);
@@ -258,6 +277,7 @@ function apply(items) {
         engine.recordPayment(Number(a.invoiceId), {
           paidOn: it.date, amount: Number(a.amountCents) / 100, method,
           reference: String(it.label || '').slice(0, 120), bankFingerprint: `${it.fingerprint}:${Number(a.invoiceId)}`,
+          withDiscount: a.withDiscount === true, // le moteur vérifie date limite et montant exact
         });
         results.push({ fingerprint: it.fingerprint, invoiceId: Number(a.invoiceId), ok: true });
       } catch (e) {

@@ -16,6 +16,7 @@ const ACCOUNTS = {
   salesGoods: '707000',      // ventes de marchandises
   vatCollected: '445710',    // TVA collectée
   bank: '512000',
+  discountGranted: '665000', // escomptes accordés (charge financière)
 };
 
 const COLUMNS = [
@@ -67,7 +68,7 @@ function buildFec(year) {
   const payments = db.prepare(`
     SELECT p.*, i.number, i.client_id, c.societe FROM native_payments p
     JOIN native_invoices i ON i.id = p.invoice_id JOIN clients c ON c.id = i.client_id
-    WHERE p.paid_on BETWEEN ? AND ? ORDER BY p.paid_on, p.id
+    WHERE p.paid_on BETWEEN ? AND ? AND p.method <> 'escompte' ORDER BY p.paid_on, p.id
   `).all(from, to);
   for (const p of payments) {
     ecritureNum += 1;
@@ -82,6 +83,32 @@ function buildFec(year) {
     const side = (cents, debitSide) => (debitSide ? { Debit: amount(cents), Credit: '0,00' } : { Debit: '0,00', Credit: amount(cents) });
     rows.push({ ...common, CompteNum: ACCOUNTS.bank, CompteLib: 'Banque', CompAuxNum: '', CompAuxLib: '', ...side(abs, !reversal) });
     rows.push({ ...common, CompteNum: ACCOUNTS.customer, CompteLib: 'Clients', CompAuxNum: aux, CompAuxLib: p.societe, ...side(abs, reversal) });
+  }
+
+  // Escomptes pour règlement anticipé : opérations diverses. L'escompte réduit la base de TVA
+  // (art. 267-II-1° CGI) : débit 665 (HT) et TVA collectée, crédit du compte client (TTC).
+  // Une annulation d'escompte passe les mêmes écritures en sens inverse.
+  const discounts = db.prepare(`
+    SELECT p.*, i.number, i.client_id, c.societe FROM native_payments p
+    JOIN native_invoices i ON i.id = p.invoice_id JOIN clients c ON c.id = i.client_id
+    WHERE p.paid_on BETWEEN ? AND ? AND p.method = 'escompte' ORDER BY p.paid_on, p.id
+  `).all(from, to);
+  for (const p of discounts) {
+    ecritureNum += 1;
+    const reversal = p.amount_cents < 0;
+    const ht = Math.abs(p.discount_ht_cents ?? p.amount_cents);
+    const vat = Math.abs(p.discount_vat_cents ?? 0);
+    const ttc = Math.abs(p.amount_cents);
+    const common = {
+      JournalCode: 'OD', JournalLib: 'Opérations diverses', EcritureNum: ecritureNum,
+      EcritureDate: ymd(p.paid_on), PieceRef: p.number, PieceDate: ymd(p.paid_on),
+      EcritureLib: `${reversal ? 'Annulation escompte' : 'Escompte accordé'} ${p.number} ${p.societe}`, ValidDate: ymd(p.created_at),
+    };
+    const aux = `${ACCOUNTS.customer}${String(p.client_id).padStart(5, '0')}`;
+    const side = (cents, debitSide) => (debitSide ? { Debit: amount(cents), Credit: '0,00' } : { Debit: '0,00', Credit: amount(cents) });
+    rows.push({ ...common, CompteNum: ACCOUNTS.discountGranted, CompteLib: 'Escomptes accordés', CompAuxNum: '', CompAuxLib: '', ...side(ht, !reversal) });
+    if (vat !== 0) rows.push({ ...common, CompteNum: ACCOUNTS.vatCollected, CompteLib: 'TVA collectée (régularisation escompte)', CompAuxNum: '', CompAuxLib: '', ...side(vat, !reversal) });
+    rows.push({ ...common, CompteNum: ACCOUNTS.customer, CompteLib: 'Clients', CompAuxNum: aux, CompAuxLib: p.societe, ...side(ttc, reversal) });
   }
 
   const lines = [COLUMNS.join('\t')];

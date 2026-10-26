@@ -13,6 +13,7 @@ const lock = require('../billing/lock');
 const backup = require('../backup');
 const queries = require('../billing/queries');
 const mail = require('../billing/mail');
+const escompte = require('../billing/escompte');
 const docs = require('../billing/documents');
 const pennylane = require('../billing/pennylane');
 const { wrap, present } = require('../billing/http');
@@ -32,6 +33,7 @@ const SETTINGS_FIELDS = {
   address_line: 'text', postal_code: 'text', city: 'text', email: 'text', phone: 'text', iban: 'text', bic: 'text',
   late_penalty_text: 'text', footer_note: 'text', invoice_prefix: 'prefix', credit_prefix: 'prefix',
   default_vat_rate: 'vat', payment_terms_days: 'days', vat_on_debits: 'bool',
+  early_discount_rate: 'rate', early_discount_hours: 'hours', early_discount_all: 'bool',
 };
 
 router.get('/settings', wrap((req, res) => {
@@ -75,6 +77,15 @@ router.put('/settings', lock.requireStepUp('settings'), wrap((req, res) => {
       // Plafond légal : 60 jours à compter de la date d'émission (ou 45 jours fin de mois) — art. L441-10 C. com.
       if (!Number.isInteger(v) || v < 0 || v > 60) throw new engine.BillingError('Délai de paiement : 0 à 60 jours (plafond légal, art. L441-10 du Code de commerce).');
     }
+    if (type === 'rate') {
+      // Escompte pour règlement anticipé : 0 = désactivé.
+      v = escompte.parseRate(v);
+      if (v === null) throw new engine.BillingError(`Taux d'escompte invalide : 0 à ${escompte.MAX_RATE_PCT} % (0 = pas d'escompte).`);
+    }
+    if (type === 'hours') {
+      v = escompte.parseHours(v);
+      if (v === null) throw new engine.BillingError(`Délai de l'escompte invalide : 1 à ${escompte.MAX_HOURS} heures.`);
+    }
     if (type === 'bool') v = v ? 1 : 0;
     sets.push(`${field} = ?`); vals.push(v);
   }
@@ -117,6 +128,7 @@ router.get('/invoices/:id', wrap((req, res) => {
   if (inv.status === 'draft') out.preview = engine.previewDraft(inv.id);
   if (inv.status === 'issued' && inv.kind === 'invoice') {
     out.payments = db.prepare('SELECT id, paid_on AS paidOn, amount_cents AS amountCents, method, reference FROM native_payments WHERE invoice_id = ? ORDER BY paid_on, id').all(inv.id);
+    out.escompte = engine.escompteStatus(inv);
     out.creditNotes = db.prepare("SELECT id, number, issue_date AS issueDate, total_ttc_cents AS totalTtcCents FROM native_invoices WHERE credits_invoice_id = ? AND status='issued' ORDER BY chain_no").all(inv.id);
     out.overdueDays = inv.due_date && inv.due_date < engine.todayParis() && out.balanceCents > 0 ? queries.daysBetween(inv.due_date, engine.todayParis()) : 0;
   }
@@ -174,7 +186,11 @@ router.post('/invoices/:id/credit-note', lock.requireStepUp(req => `credit:${req
 // ---------- règlements ----------
 
 router.post('/invoices/:id/payments', wrap((req, res) => {
-  const inv = engine.recordPayment(Number(req.params.id), req.body || {});
+  const b = req.body || {};
+  const inv = engine.recordPayment(Number(req.params.id), {
+    paidOn: b.paidOn, amount: b.amount, method: b.method, reference: b.reference, bankFingerprint: b.bankFingerprint,
+    withDiscount: b.withDiscount === true, reverseDiscount: b.reverseDiscount === true,
+  });
   res.status(201).json({ invoice: present(inv) });
 }));
 

@@ -12,7 +12,12 @@ async function invoicePdf(invoiceId) {
   const preview = inv.status === 'draft' ? engine.previewDraft(inv.id) : null;
   const extra = {};
   if (inv.credits_invoice_id) extra.creditedInvoiceNumber = db.prepare('SELECT number FROM native_invoices WHERE id = ?').get(inv.credits_invoice_id)?.number;
-  if (inv.status === 'issued' && inv.kind === 'invoice') { extra.paidCents = engine.paidCents(inv.id); extra.balanceCents = engine.balanceCents(inv); }
+  if (inv.status === 'issued' && inv.kind === 'invoice') {
+    // « Déjà réglé » = argent reçu ; l'escompte accordé est présenté à part (il solde la facture sans être encaissé).
+    extra.paidCents = engine.cashCents(inv.id);
+    extra.discountCents = engine.discountSums(inv.id).ttcCents;
+    extra.balanceCents = engine.balanceCents(inv);
+  }
   const buffer = await buildInvoicePdf(inv, preview, extra);
   return { buffer, inv, filename: inv.number ? `${inv.number}.pdf` : `brouillon-${inv.id}.pdf` };
 }

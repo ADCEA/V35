@@ -328,6 +328,17 @@ module.exports = function applyBillingSchema(db) {
   const setCols = db.prepare('PRAGMA table_info(billing_settings)').all().map(c => c.name);
   if (!setCols.includes('pennylane_auto_since')) db.exec('ALTER TABLE billing_settings ADD COLUMN pennylane_auto_since TEXT');
 
+  // ---------- escompte pour règlement anticipé ----------
+  // Taux (en %, 0 = pas d'escompte) et délai (en heures, à compter de la date d'émission).
+  // early_discount_all : proposé à tous les hôtels par défaut (chaque fiche hôtel peut y déroger).
+  if (!setCols.includes('early_discount_rate')) db.exec('ALTER TABLE billing_settings ADD COLUMN early_discount_rate REAL NOT NULL DEFAULT 0');
+  if (!setCols.includes('early_discount_hours')) db.exec('ALTER TABLE billing_settings ADD COLUMN early_discount_hours INTEGER NOT NULL DEFAULT 48');
+  if (!setCols.includes('early_discount_all')) db.exec('ALTER TABLE billing_settings ADD COLUMN early_discount_all INTEGER NOT NULL DEFAULT 1');
+  // Un escompte accordé s'inscrit comme une ligne de règlement (méthode « escompte ») : le reste dû
+  // se calcule donc comme avant. Sa part de TVA est conservée pour la comptabilité (compte 665 / TVA).
+  if (!payCols.includes('discount_ht_cents')) db.exec('ALTER TABLE native_payments ADD COLUMN discount_ht_cents INTEGER');
+  if (!payCols.includes('discount_vat_cents')) db.exec('ALTER TABLE native_payments ADD COLUMN discount_vat_cents INTEGER');
+
   // ---------- prélèvements SEPA ----------
   // Identifiant créancier (ICS, délivré par la banque) et délai de préavis donné aux débiteurs.
   if (!setCols.includes('sdd_ics')) db.exec('ALTER TABLE billing_settings ADD COLUMN sdd_ics TEXT');

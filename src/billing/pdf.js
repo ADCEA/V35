@@ -118,7 +118,8 @@ async function buildInvoicePdf(inv, preview = null, extra = {}) {
 
   // ---------- totaux ----------
   const breakdown = inv.vatBreakdown && inv.vatBreakdown.length ? inv.vatBreakdown : JSON.parse(inv.vat_breakdown_json || '[]');
-  const totalsH = Math.max(breakdown.length * 14 + 34, 104) + (extra.paidCents > 0 && !isCredit && !isDraft ? 34 : 0);
+  const hasSettled = (extra.paidCents > 0 || extra.discountCents > 0) && !isCredit && !isDraft;
+  const totalsH = Math.max(breakdown.length * 14 + 34, 104) + (hasSettled ? 34 : 0) + (hasSettled && extra.discountCents > 0 ? 14 : 0);
   if (y + 18 + totalsH > K.BOTTOM) y = K.nextPage(doc, continued());
   y += 18;
   const top = y;
@@ -155,12 +156,20 @@ async function buildInvoicePdf(inv, preview = null, extra = {}) {
   doc.font(F.serif).fontSize(26).fillColor(C.ink)
     .text(eur(inv.total_ttc_cents * sign), rx + 60, top + 42, { width: rw - 60, align: 'right', lineBreak: false, features: K.TNUM });
   let ry = top + 80;
-  if (!isCredit && !isDraft && !isQuote && extra.paidCents > 0) {
-    doc.font(F.sans).fontSize(9).fillColor(C.soft)
-      .text(`Déjà réglé : ${eur(extra.paidCents)}`, rx, ry, { width: rw, align: 'right', lineBreak: false, features: K.TNUM });
+  if (!isCredit && !isDraft && !isQuote && hasSettled) {
+    if (extra.paidCents > 0) {
+      doc.font(F.sans).fontSize(9).fillColor(C.soft)
+        .text(`Déjà réglé : ${eur(extra.paidCents)}`, rx, ry, { width: rw, align: 'right', lineBreak: false, features: K.TNUM });
+      ry += 14;
+    }
+    if (extra.discountCents > 0) {
+      doc.font(F.sans).fontSize(9).fillColor(C.soft)
+        .text(`Escompte accordé : ${eur(extra.discountCents)}`, rx, ry, { width: rw, align: 'right', lineBreak: false, features: K.TNUM });
+      ry += 14;
+    }
     doc.font(F.semi).fontSize(9.5).fillColor(extra.balanceCents > 0 ? C.ink : C.ok)
-      .text(extra.balanceCents > 0 ? `Reste dû : ${eur(extra.balanceCents)}` : 'Facture soldée', rx, ry + 14, { width: rw, align: 'right', lineBreak: false, features: K.TNUM });
-    ry += 32;
+      .text(extra.balanceCents > 0 ? `Reste dû : ${eur(extra.balanceCents)}` : 'Facture soldée', rx, ry, { width: rw, align: 'right', lineBreak: false, features: K.TNUM });
+    ry += 18;
   }
   y = Math.max(ty, ry) + 18;
 
@@ -192,6 +201,17 @@ async function buildInvoicePdf(inv, preview = null, extra = {}) {
       doc.font(F.serif).fontSize(17).fillColor(C.ink).text(inv.due_date ? dateFr(inv.due_date) : `${terms.paymentTermsDays} jours`, px, y + 22, { width: W - 316, align: 'right', lineBreak: false });
       if (inv.number) doc.font(F.sans).fontSize(7.8).fillColor(C.soft).text(`Référence à indiquer : ${inv.number}`, px, y + 46, { width: W - 316, align: 'right', lineBreak: false });
       y += 76;
+    }
+    // Escompte pour règlement anticipé : l'offre est mise en évidence (le texte complet figure aussi dans les mentions).
+    const ed = terms.earlyDiscount;
+    if (ed) {
+      const msg = `Escompte de ${num(ed.ratePct, 2)}\u00A0% pour tout règlement reçu au plus tard le ${dateFr(ed.deadline)} : ${eur(inv.total_ttc_cents - ed.discountTtcCents)} TTC à payer au lieu de ${eur(inv.total_ttc_cents)}.`;
+      doc.font(F.semi).fontSize(9);
+      const h = doc.heightOfString(msg, { width: W - 24 });
+      if (y + h + 16 > K.BOTTOM) y = K.nextPage(doc, continued());
+      doc.save().rect(L, y, 3, h + 8).fill(C.brand).restore();
+      doc.font(F.semi).fontSize(9).fillColor(C.ink).text(msg, L + 12, y + 4, { width: W - 24 });
+      y += h + 18;
     }
     legal.push(inv.due_date ? `Échéance de règlement : ${dateFr(inv.due_date)} (${terms.paymentTermsDays} jours).` : `Délai de règlement : ${terms.paymentTermsDays} jours à compter de la date d'émission.`);
     legal.push(terms.earlyPaymentDiscount);

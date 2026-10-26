@@ -7,12 +7,12 @@
   async function loadPayments(main) {
     const box = main.querySelector('#pa-table');
     let r; try { r = await Bill.get(`/payments?q=${encodeURIComponent(P.q)}&from=${P.from}&to=${P.to}`); } catch (err) { return Bill.fail(err, box); }
-    main.querySelector('#pa-sum').textContent = r.count ? `${plural(r.count, 'règlement', 'règlements')} · ${eur(r.totalCents)}` : '';
+    main.querySelector('#pa-sum').textContent = r.count ? `${plural(r.count, 'règlement', 'règlements')} · ${eur(r.totalCents)}${r.discountCents ? ` · escomptes accordés ${eur(r.discountCents)}` : ''}` : '';
     if (!r.payments.length) { box.innerHTML = `<div class="bl-empty"><b>${P.q || P.from || P.to ? 'Aucun résultat' : 'Aucun règlement enregistré'}</b>Les règlements apparaissent ici dès que vous les saisissez sur une facture ou par le rapprochement bancaire.</div>`; return; }
     box.innerHTML = `<div class="bl-tablewrap"><table class="bl-table"><thead><tr><th>Date</th><th>Hôtel</th><th>Facture</th><th>Mode</th><th>Référence</th><th class="r">Montant</th></tr></thead><tbody>
       ${r.payments.map(p => `<tr class="bl-row" tabindex="0" data-inv="${p.invoiceId}"><td class="bl-num">${dFr(p.paidOn)}</td><td class="client">${e(p.clientName)}</td><td class="bl-num">${e(p.number)}</td>
-        <td>${e(Bill.METHODS[p.method] || p.method)}${p.fromBank ? ' <span class="bl-ind">relevé</span>' : ''}</td><td class="bl-muted">${e(p.reference || '')}</td>
-        <td class="r bl-num" style="${p.amountCents < 0 ? 'color:var(--bl-late)' : ''}">${eur(p.amountCents)}</td></tr>`).join('')}</tbody></table></div>`;
+        <td>${p.method === 'escompte' ? '<i>Escompte accordé</i>' : e(Bill.METHODS[p.method] || p.method)}${p.fromBank ? ' <span class="bl-ind">relevé</span>' : ''}</td><td class="bl-muted">${e(p.reference || '')}</td>
+        <td class="r bl-num" style="${p.amountCents < 0 ? 'color:var(--bl-late)' : p.method === 'escompte' ? 'color:var(--bl-faint,#888)' : ''}">${p.method === 'escompte' ? '<span title="Remise pour règlement anticipé : ce n\'est pas de l\'argent reçu">(' + eur(p.amountCents) + ')</span>' : eur(p.amountCents)}</td></tr>`).join('')}</tbody></table></div>`;
     box.querySelectorAll('tr.bl-row').forEach(tr => { const open = () => Bill.openInvoice(Number(tr.dataset.inv), () => loadPayments(main)); tr.onclick = open; tr.onkeydown = (ev) => { if (ev.key === 'Enter') open(); }; });
   }
   Bill.register('payments', {
@@ -97,7 +97,7 @@
     if (l.alreadyImported || !l.credit) return { type: 'none' };
     if (l.multi) return { type: 'multi', allocations: l.multi.allocations };
     const top = l.candidates[0];
-    if (top && (l.confidence === 'high')) return { type: 'one', invoiceId: top.invoiceId, number: top.number, balanceCents: top.balanceCents };
+    if (top && (l.confidence === 'high')) return { type: 'one', invoiceId: top.invoiceId, number: top.number, balanceCents: top.balanceCents, withDiscount: !!top.withDiscount };
     return { type: 'none' };
   }
 
@@ -105,7 +105,7 @@
     const cur = R.choice.get(idx) || { type: 'none' };
     const opts = ['<option value="none">Ne pas rapprocher</option>'];
     if (l.multi) opts.push(`<option value="multi" ${cur.type === 'multi' ? 'selected' : ''}>${l.multi.allocations.map(a => e(a.number)).join(' + ')} (${e(l.multi.clientName)})</option>`);
-    l.candidates.forEach(c => opts.push(`<option value="c:${c.invoiceId}" ${cur.type === 'one' && cur.invoiceId === c.invoiceId ? 'selected' : ''}>${e(c.number)} · ${e(c.clientName)} · reste ${e(eur(c.balanceCents))}</option>`));
+    l.candidates.forEach(c => opts.push(`<option value="c:${c.invoiceId}" ${cur.type === 'one' && cur.invoiceId === c.invoiceId ? 'selected' : ''}>${e(c.number)} · ${e(c.clientName)} · reste ${e(eur(c.balanceCents))}${c.withDiscount ? ` · avec escompte de ${e(eur(c.discountCents))}` : ''}</option>`));
     if (cur.type === 'one' && !l.candidates.some(c => c.invoiceId === cur.invoiceId)) opts.push(`<option value="c:${cur.invoiceId}" selected>${e(cur.number)} (choisie)</option>`);
     opts.push('<option value="other">Autre facture…</option>');
     return opts.join('');
@@ -152,7 +152,7 @@
       if (v === 'none') R.choice.set(i, { type: 'none' });
       else if (v === 'multi') R.choice.set(i, { type: 'multi', allocations: l.multi.allocations });
       else if (v === 'other') { const picked = await pickInvoice(); if (picked) R.choice.set(i, { type: 'one', invoiceId: picked.id, number: picked.number, balanceCents: picked.balanceCents }); }
-      else { const c = l.candidates.find(x => x.invoiceId === Number(v.slice(2))); R.choice.set(i, { type: 'one', invoiceId: c.invoiceId, number: c.number, balanceCents: c.balanceCents }); }
+      else { const c = l.candidates.find(x => x.invoiceId === Number(v.slice(2))); R.choice.set(i, { type: 'one', invoiceId: c.invoiceId, number: c.number, balanceCents: c.balanceCents, withDiscount: !!c.withDiscount }); }
       paintLines(host, main);
       const cb = host.querySelector(`.rc-c[data-i="${i}"]`); if (cb && R.choice.get(i).type !== 'none') { cb.checked = true; sum(); }
     });
@@ -161,7 +161,7 @@
     host.querySelector('#rc-apply').onclick = async (ev) => {
       const items = [...host.querySelectorAll('.rc-c:checked')].map(cb => {
         const i = Number(cb.dataset.i); const l = lineBy.get(i); const c = R.choice.get(i);
-        const allocations = c.type === 'multi' ? c.allocations.map(a => ({ invoiceId: a.invoiceId, amountCents: a.amountCents })) : [{ invoiceId: c.invoiceId, amountCents: Math.min(l.amountCents, c.balanceCents) }];
+        const allocations = c.type === 'multi' ? c.allocations.map(a => ({ invoiceId: a.invoiceId, amountCents: a.amountCents })) : [{ invoiceId: c.invoiceId, amountCents: Math.min(l.amountCents, c.balanceCents), ...(c.withDiscount ? { withDiscount: true } : {}) }];
         return { fingerprint: l.fingerprint, date: l.date, label: l.label, method: R.method.get(i) || l.method || 'virement', allocations };
       });
       const modes = [...new Set(items.map(x => Bill.METHODS[x.method] || x.method))];

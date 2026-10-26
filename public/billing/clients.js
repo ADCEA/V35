@@ -163,6 +163,7 @@
             <div class="bl-field"><label for="i-tva">N° de TVA intracommunautaire</label><input id="i-tva" value="${v('tvaNumber')}" placeholder="FR12345678901"></div></div>
           <div class="bl-field"><label for="i-af">Adresse de facturation</label><input id="i-af" value="${v('adresseFacturation')}" placeholder="Laisser vide pour utiliser l'adresse ci-dessus"></div>
           <div class="bl-field"><label for="i-lv">Détail des lignes sur la facture</label><select id="i-lv">${LEVELS.map(([k, l]) => `<option value="${k}" ${C.invoiceDetailLevel === k ? 'selected' : ''}>${e(l)}</option>`).join('')}</select></div>
+          <div class="bl-field"><label for="i-esc">Escompte pour règlement anticipé</label><select id="i-esc">${[['', 'Selon le réglage général'], ['on', 'Toujours proposé à cet hôtel'], ['off', 'Jamais proposé à cet hôtel']].map(([k, l]) => `<option value="${k}" ${(C.escompte || '') === k ? 'selected' : ''}>${e(l)}</option>`).join('')}</select><div class="bl-hint">Taux et délai se règlent dans « Coordonnées de l'émetteur ». S'applique aux prochaines factures émises, pas à celles déjà émises.</div></div>
         </div></div>
         <div class="bl-actions" style="margin:16px 0 6px"><button class="bl-btn primary" id="i-save">Enregistrer les informations</button></div><div class="bl-err" id="i-err" role="alert"></div>
         <div class="bl-panel"><div class="bl-panel-h"><h3>Activité</h3></div><div class="bl-panel-b"><p class="bl-note">${plural(stats.orders, 'commande', 'commandes')}${stats.lastOrderAt ? `, la dernière le ${dFr(stats.lastOrderAt)}` : ''} · ${plural(stats.invoices, 'facture émise', 'factures émises')}.</p>
@@ -176,7 +177,7 @@
         const q = (s) => box.querySelector(s).value;
         try {
           await Bill.put('/catalog/clients/' + id, { societe: q('#i-s'), contact: q('#i-c'), tel: q('#i-t'), email: q('#i-m'), adresse: q('#i-a'), codePostal: q('#i-p'), ville: q('#i-v'),
-            siret: q('#i-siret'), tvaNumber: q('#i-tva'), adresseFacturation: q('#i-af'), invoiceDetailLevel: q('#i-lv') });
+            siret: q('#i-siret'), tvaNumber: q('#i-tva'), adresseFacturation: q('#i-af'), invoiceDetailLevel: q('#i-lv'), escompte: q('#i-esc') });
           changed = true; Bill.toast('Informations enregistrées'); await refresh();
         } catch (err) { btn.disabled = false; Bill.fail(err, errEl); }
       };

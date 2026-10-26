@@ -121,7 +121,7 @@
     return [
       m ? tile('Livré (HT)', eur(m.deliveredHtCents), `${nf(m.deliveredCount)} bons de livraison`) : '',
       m ? tile('Facturé (HT)', eur(m.invoicedHtCents), `${nf(m.invoiceCount)} facture${m.invoiceCount > 1 ? 's' : ''}${m.creditCount ? ` · ${nf(m.creditCount)} avoir${m.creditCount > 1 ? 's' : ''}` : ''}`) : '',
-      m ? tile('Encaissé', eur(m.paidCents), by || `${nf(m.paymentCount)} règlement${m.paymentCount > 1 ? 's' : ''}`) : '',
+      m ? tile('Encaissé', eur(m.paidCents), `${by || `${nf(m.paymentCount)} règlement${m.paymentCount > 1 ? 's' : ''}`}${m.discountCents ? ` · escomptes accordés ${eur0(m.discountCents)}` : ''}`) : '',
       m ? tile('Reste dû à ce jour', eur(S.money.outstandingCents), 'toutes factures ouvertes') : '',
       tile('Commandes livrées', nf(t.ordersDelivered), `${nf(t.ordersReceived)} reçues sur la période`),
       tile('Pièces livrées', nf(t.piecesDelivered), t.piecesMissing || t.piecesExtra ? `${t.piecesMissing ? `−${nf(t.piecesMissing)} manquantes` : ''}${t.piecesMissing && t.piecesExtra ? ' · ' : ''}${t.piecesExtra ? `+${nf(t.piecesExtra)} en plus` : ''}` : `${nf(t.piecesOrdered)} commandées`),
@@ -160,6 +160,7 @@
       ${m ? list('Valeur livrée', m.deliveries, o => `<li><b>${esc(o.ticket)}</b> ${esc(o.clientName)} <span>${eur(o.htCents)} HT</span></li>`, 'Aucun bon de livraison.') : ''}
       ${m ? list('Factures et avoirs émis', m.invoices, o => `<li><b>${esc(o.number)}</b> ${esc(o.clientName)} <span>${o.kind === 'credit_note' ? '−' : ''}${eur(o.ttcCents)} TTC</span></li>`, 'Rien d\'émis ce jour-là.') : ''}
       ${m ? list('Règlements reçus', m.payments, o => `<li><b>${esc(o.number)}</b> ${esc(o.clientName)} <span>${esc(METHODS[o.method] || o.method)} · ${eur(o.amountCents)}${o.reference ? ` · ${esc(o.reference)}` : ''}</span></li>`, 'Aucun règlement ce jour-là.') : ''}
+      ${m && m.discounts && m.discounts.length ? list('Escomptes accordés', m.discounts, o => `<li><b>${esc(o.number)}</b> ${esc(o.clientName)} <span>${o.amountCents < 0 ? 'annulé · ' : ''}${eur(Math.abs(o.amountCents))} TTC</span></li>`, '') : ''}
     </div>${m ? '' : '<p class="dd-note">Les montants du jour sont protégés : déverrouillez la Facturation pour les voir ici.</p>'}`;
   }
 
