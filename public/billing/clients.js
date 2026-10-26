@@ -26,7 +26,7 @@
     if (!list.length) { box.innerHTML = '<div class="bl-empty"><b>Aucun résultat</b>Essayez un autre mot, ou changez de filtre.</div>'; return; }
     box.innerHTML = `<div class="bl-tablewrap"><table class="bl-table"><thead><tr><th>Hôtel</th><th>Facturation</th><th>Tarifs négociés</th><th>Catalogue</th><th>Dernière commande</th></tr></thead><tbody>
       ${list.map(c => `<tr class="bl-row" tabindex="0" data-id="${c.id}">
-        <td class="client">${e(c.societe)}<span class="sub">${e([c.contact, c.ville].filter(Boolean).join(' · ') || '—')}</span></td>
+        <td class="client">${e(c.societe)}${c.clientType === 'particulier' ? ' <span class="bl-tag draft">Particulier</span>' : ''}<span class="sub">${e([c.contact, c.ville].filter(Boolean).join(' · ') || '—')}</span></td>
         <td>${c.issues.length ? c.issues.map(i => `<span class="bl-tag bad">${e(i)}</span>`).join(' ') : '<span class="bl-tag ok">Prêt à facturer</span>'}</td>
         <td>${c.negotiatedCount ? `<span class="bl-tag info">${c.negotiatedCount} / ${LIST.articleCount} articles</span>` : '<span class="bl-faint">Prix catalogue</span>'}${c.upcomingCount ? ` <span class="bl-tag">${c.upcomingCount} programmé(s)</span>` : ''}</td>
         <td>${c.assignedCount ? `${c.assignedCount} / ${LIST.articleCount} articles` : '<span class="bl-muted">Complet</span>'}</td>
@@ -49,7 +49,7 @@
   Bill.register('clients', {
     async render(main, params = {}) {
       main.innerHTML = `<div class="bl-head"><div><h2>Hôtels</h2><p>Coordonnées, informations de facturation, tarifs négociés et catalogue accessible de chaque hôtel.</p></div>
-        <div class="bl-actions"><button class="bl-btn" id="cl-import">Importer un fichier</button><button class="bl-btn primary" id="cl-new">Nouvel hôtel</button></div></div>
+        <div class="bl-actions"><button class="bl-btn" id="cl-import">Importer un fichier</button><button class="bl-btn primary" id="cl-new">Nouveau client</button></div></div>
         <div class="bl-panel"><div class="bl-filters">
           <div class="bl-field grow"><label for="cl-q">Rechercher</label><input id="cl-q" type="search" value="${e(S.q)}" placeholder="Nom, contact, ville ou e-mail"></div>
           <div class="bl-field"><label for="cl-f">Afficher</label><select id="cl-f"><option value="all">Tous les hôtels</option><option value="incomplete">À compléter pour facturer</option><option value="negotiated">Avec des tarifs négociés</option></select></div>
@@ -69,19 +69,20 @@
 
   function newClient(main) {
     Bill.modal({
-      title: 'Nouvel hôtel',
+      title: 'Nouveau client',
       body: `<p class="bl-note">Seul le nom est obligatoire ; le reste peut être complété ensuite dans la fiche.</p>
-        <div class="bl-row2"><div class="bl-field"><label for="nc-s">Nom de l'hôtel</label><input id="nc-s" placeholder="Ex. Hôtel Verlaine"></div>
+        <div class="bl-field"><label for="nc-ty">Type de client</label><select id="nc-ty"><option value="pro">Professionnel (hôtel, entreprise, collectivité…)</option><option value="particulier">Particulier (sans SIRET)</option></select></div>
+        <div class="bl-row2"><div class="bl-field"><label for="nc-s">Nom du client</label><input id="nc-s" placeholder="Ex. Hôtel Verlaine"></div>
           <div class="bl-field"><label for="nc-c">Contact</label><input id="nc-c"></div></div>
         <div class="bl-row2"><div class="bl-field"><label for="nc-t">Téléphone</label><input id="nc-t" inputmode="tel"></div>
           <div class="bl-field"><label for="nc-m">E-mail</label><input id="nc-m" type="email" placeholder="contact@hotel.fr"></div></div>
         <div class="bl-field"><label for="nc-a">Adresse</label><input id="nc-a"></div>
         <div class="bl-row2"><div class="bl-field"><label for="nc-p">Code postal</label><input id="nc-p" inputmode="numeric"></div><div class="bl-field"><label for="nc-v">Ville</label><input id="nc-v"></div></div>
         <div class="bl-field"><label for="nc-k">Code d'accès à l'espace client (facultatif)</label><input id="nc-k" inputmode="numeric" maxlength="8" placeholder="4 à 8 chiffres"><div class="bl-hint">Sans code, l'hôtel n'a pas d'accès à son espace ; vous pourrez en définir un plus tard.</div></div>`,
-      buttons: [{ label: 'Annuler', onClick: async () => {} }, { label: 'Créer l\'hôtel', primary: true, onClick: async (m) => {
+      buttons: [{ label: 'Annuler', onClick: async () => {} }, { label: 'Créer le client', primary: true, onClick: async (m) => {
         const r = await Bill.post('/catalog/clients', { societe: m.$('#nc-s').value, contact: m.$('#nc-c').value, tel: m.$('#nc-t').value, email: m.$('#nc-m').value,
-          adresse: m.$('#nc-a').value, codePostal: m.$('#nc-p').value, ville: m.$('#nc-v').value, code: m.$('#nc-k').value || undefined });
-        Bill.toast('Hôtel créé'); await reload(main); openClient(r.client.id, {}, () => reload(main));
+          adresse: m.$('#nc-a').value, codePostal: m.$('#nc-p').value, ville: m.$('#nc-v').value, code: m.$('#nc-k').value || undefined, clientType: m.$('#nc-ty').value });
+        Bill.toast('Client créé'); await reload(main); openClient(r.client.id, {}, () => reload(main));
       } }],
     });
   }
@@ -89,7 +90,7 @@
   function importClients(main) {
     Bill.csvImport({
       title: 'Importer des hôtels', path: '/catalog/clients/import', scope: 'clients-import',
-      intro: 'Colonnes obligatoires : <b>societe</b>, <b>contact</b>, <b>tel</b>, <b>adresse</b>, <b>email</b>. Facultatives : code_postal, ville, code (4 à 8 chiffres). Un hôtel dont l\'e-mail existe déjà est mis à jour ; son code d\'accès ne change que si la colonne « code » est remplie.',
+      intro: 'Colonnes obligatoires : <b>societe</b>, <b>contact</b>, <b>tel</b>, <b>adresse</b>, <b>email</b>. Facultatives : code_postal, ville, code (4 à 8 chiffres), type (<b>professionnel</b> ou <b>particulier</b> ; professionnel si la cellule est vide). Un hôtel dont l\'e-mail existe déjà est mis à jour ; son code d\'accès ne change que si la colonne « code » est remplie.',
       template: { name: 'modele-hotels.csv', text: 'societe,contact,tel,adresse,code_postal,ville,email,code\nHotel Exemple,Jean Dupont,0490000000,12 rue de la Paix,84200,Carpentras,contact@hotel-exemple.fr,\n' },
       renderPreview: (r) => {
         const s = r.summary;
@@ -159,7 +160,8 @@
           <div class="bl-row2"><div class="bl-field"><label for="i-p">Code postal</label><input id="i-p" inputmode="numeric" value="${v('codePostal')}"><div class="bl-hint">Indispensable pour localiser l'hôtel dans les tournées.</div></div><div class="bl-field"><label for="i-v">Ville</label><input id="i-v" value="${v('ville')}"></div></div>
         </div></div>
         <div class="bl-panel"><div class="bl-panel-h"><h3>Facturation</h3></div><div class="bl-panel-b">
-          <div class="bl-row2"><div class="bl-field"><label for="i-siret">SIRET</label><input id="i-siret" inputmode="numeric" maxlength="17" value="${v('siret')}" placeholder="14 chiffres"><div class="bl-hint">Obligatoire sur les factures depuis le 1er septembre 2026.</div></div>
+          <div class="bl-field"><label for="i-ty">Type de client</label><select id="i-ty"><option value="pro" ${C.clientType !== 'particulier' ? 'selected' : ''}>Professionnel</option><option value="particulier" ${C.clientType === 'particulier' ? 'selected' : ''}>Particulier</option></select><div class="bl-hint" id="i-ty-hint"></div></div>
+          <div class="bl-row2" id="i-pro-ids"><div class="bl-field"><label for="i-siret">SIRET</label><input id="i-siret" inputmode="numeric" maxlength="17" value="${v('siret')}" placeholder="14 chiffres"><div class="bl-hint">Obligatoire sur les factures depuis le 1er septembre 2026.</div></div>
             <div class="bl-field"><label for="i-tva">N° de TVA intracommunautaire</label><input id="i-tva" value="${v('tvaNumber')}" placeholder="FR12345678901"></div></div>
           <div class="bl-field"><label for="i-af">Adresse de facturation</label><input id="i-af" value="${v('adresseFacturation')}" placeholder="Laisser vide pour utiliser l'adresse ci-dessus"></div>
           <div class="bl-field"><label for="i-lv">Détail des lignes sur la facture</label><select id="i-lv">${LEVELS.map(([k, l]) => `<option value="${k}" ${C.invoiceDetailLevel === k ? 'selected' : ''}>${e(l)}</option>`).join('')}</select></div>
@@ -172,12 +174,19 @@
           <p class="bl-note">Le code d'accès actuel n'est jamais visible (il est chiffré). Définissez-en un nouveau si l'hôtel l'a oublié.</p>
           <div class="bl-actions"><button class="bl-btn" id="i-code">Définir un nouveau code d'accès…</button><button class="bl-btn danger" id="i-del">Supprimer cet hôtel…</button></div></div></div>`;
 
+      // Un particulier n'a ni SIRET ni n° de TVA, et l'indemnité de recouvrement de 40 € (entre professionnels) ne figure pas sur ses documents.
+      const syncType = () => {
+        const part = box.querySelector('#i-ty').value === 'particulier';
+        box.querySelector('#i-pro-ids').style.display = part ? 'none' : '';
+        box.querySelector('#i-ty-hint').textContent = part ? 'Pas de SIRET ni de TVA sur ses factures, pas d\'indemnité de recouvrement de 40 €, escompte proposé seulement si vous le choisissez ci-dessous.' : '';
+      };
+      box.querySelector('#i-ty').onchange = syncType; syncType();
       box.querySelector('#i-save').onclick = async (ev) => {
         const btn = ev.currentTarget; const errEl = box.querySelector('#i-err'); errEl.textContent = ''; btn.disabled = true;
         const q = (s) => box.querySelector(s).value;
         try {
           await Bill.put('/catalog/clients/' + id, { societe: q('#i-s'), contact: q('#i-c'), tel: q('#i-t'), email: q('#i-m'), adresse: q('#i-a'), codePostal: q('#i-p'), ville: q('#i-v'),
-            siret: q('#i-siret'), tvaNumber: q('#i-tva'), adresseFacturation: q('#i-af'), invoiceDetailLevel: q('#i-lv'), escompte: q('#i-esc') });
+            siret: q('#i-siret'), tvaNumber: q('#i-tva'), adresseFacturation: q('#i-af'), invoiceDetailLevel: q('#i-lv'), escompte: q('#i-esc'), clientType: q('#i-ty') });
           changed = true; Bill.toast('Informations enregistrées'); await refresh();
         } catch (err) { btn.disabled = false; Bill.fail(err, errEl); }
       };

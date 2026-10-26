@@ -58,11 +58,13 @@ function parseDate(v, fallback, label = 'Date') {
 }
 
 // Anomalies qui empêcheraient d'émettre une facture à ce client.
-function billingIssues({ siret, adresse_facturation, adresse }) {
+function billingIssues({ siret, adresse_facturation, adresse, clientType }) {
   const issues = [];
-  const siren = engine.sirenFrom(siret);
-  if (siren.length !== 9) issues.push('SIREN/SIRET manquant');
-  else if (!engine.luhnOk(siren)) issues.push('SIREN/SIRET invalide');
+  if (clientType !== 'particulier') {   // un particulier n'a pas de SIREN/SIRET
+    const siren = engine.sirenFrom(siret);
+    if (siren.length !== 9) issues.push('SIREN/SIRET manquant');
+    else if (!engine.luhnOk(siren)) issues.push('SIREN/SIRET invalide');
+  }
   if (!(adresse_facturation || adresse)) issues.push('adresse de facturation manquante');
   return issues;
 }
@@ -327,7 +329,7 @@ function listClients() {
   const rows = db.prepare(`
     SELECT c.id, c.societe, c.contact, c.tel, c.email, c.adresse, c.code_postal AS codePostal, c.ville, c.siret,
            c.tva_number AS tvaNumber, c.adresse_facturation AS adresseFacturation, c.invoice_detail_level AS invoiceDetailLevel, c.escompte,
-           c.created_at AS createdAt,
+           c.client_type AS clientType, c.created_at AS createdAt,
            (SELECT COUNT(*) FROM client_prices cp WHERE cp.client_id = c.id AND cp.date_debut <= @t AND (cp.date_fin IS NULL OR cp.date_fin >= @t)) AS negotiatedCount,
            (SELECT COUNT(*) FROM client_prices cp WHERE cp.client_id = c.id AND cp.date_debut > @t) AS upcomingCount,
            (SELECT COUNT(*) FROM client_articles ca WHERE ca.client_id = c.id) AS assignedCount,
@@ -339,14 +341,14 @@ function listClients() {
   const total = db.prepare('SELECT COUNT(*) c FROM articles').get().c;
   return {
     articleCount: total,
-    clients: rows.map(r => ({ ...r, issues: billingIssues({ siret: r.siret, adresse_facturation: r.adresseFacturation, adresse: r.adresse }) })),
+    clients: rows.map(r => ({ ...r, issues: billingIssues({ siret: r.siret, adresse_facturation: r.adresseFacturation, adresse: r.adresse, clientType: r.clientType }) })),
   };
 }
 
 function getClient(id) {
   const c = db.prepare(`
     SELECT id, societe, contact, tel, email, adresse, code_postal AS codePostal, ville, siret, tva_number AS tvaNumber,
-           adresse_facturation AS adresseFacturation, invoice_detail_level AS invoiceDetailLevel, escompte, created_at AS createdAt,
+           adresse_facturation AS adresseFacturation, invoice_detail_level AS invoiceDetailLevel, escompte, client_type AS clientType, created_at AS createdAt,
            webhook_url AS webhookUrl, webhook_secret AS webhookSecret
     FROM clients WHERE id = ?
   `).get(id);
@@ -357,7 +359,7 @@ function getClient(id) {
            (SELECT COUNT(*) FROM native_invoices WHERE client_id = @id AND status = 'issued' AND kind = 'invoice') AS invoices
   `).get({ id });
   const tokens = db.prepare('SELECT id, token, label, created_at AS createdAt, last_used_at AS lastUsedAt FROM api_tokens WHERE client_id = ? ORDER BY created_at DESC').all(id);
-  return { client: { ...c, issues: billingIssues({ siret: c.siret, adresse_facturation: c.adresseFacturation, adresse: c.adresse }) }, stats, tokens };
+  return { client: { ...c, issues: billingIssues({ siret: c.siret, adresse_facturation: c.adresseFacturation, adresse: c.adresse, clientType: c.clientType }) }, stats, tokens };
 }
 
 function cleanClientFields(body, existing) {
@@ -372,21 +374,24 @@ function cleanClientFields(body, existing) {
     const taken = db.prepare('SELECT id FROM clients WHERE email = ? AND id != ?').get(email, existing?.id ?? 0);
     if (taken) throw new BillingError('Cet email est déjà utilisé par un autre compte.', 409);
   }
+  const clientType = has('clientType') ? b.clientType : (existing?.client_type || 'pro');
+  if (!['pro', 'particulier'].includes(clientType)) throw new BillingError('Type de client invalide (professionnel ou particulier).');
   let siret = has('siret') ? (String(b.siret || '').replace(/\s/g, '') || null) : (existing?.siret ?? null);
   if (siret && !/^\d{14}$/.test(siret)) throw new BillingError('Le SIRET doit comporter exactement 14 chiffres.');
+  if (clientType === 'particulier') siret = null;   // un particulier n'a ni SIRET ni n° de TVA
   const level = has('invoiceDetailLevel') ? b.invoiceDetailLevel : (existing?.invoice_detail_level || 'detail');
   if (!['detail', 'per_bl', 'aggregated'].includes(level)) throw new BillingError('Niveau de détail de facture invalide.');
   // Escompte pour règlement anticipé : '' (ou null) = suit le réglage général, 'on' = toujours, 'off' = jamais.
   const esc = has('escompte') ? (b.escompte === '' || b.escompte === null ? null : b.escompte) : (existing?.escompte ?? null);
   if (esc !== null && !['on', 'off'].includes(esc)) throw new BillingError("Option d'escompte invalide.");
   return {
-    societe, email, siret, escompte: esc,
+    societe, email, siret, escompte: esc, clientType,
     contact: str('contact', existing?.contact),
     tel: str('tel', existing?.tel),
     adresse: str('adresse', existing?.adresse),
     codePostal: has('codePostal') ? (String(b.codePostal || '').trim() || null) : (existing?.code_postal ?? null),
     ville: has('ville') ? (String(b.ville || '').trim() || null) : (existing?.ville ?? null),
-    tvaNumber: has('tvaNumber') ? (String(b.tvaNumber || '').trim() || null) : (existing?.tva_number ?? null),
+    tvaNumber: clientType === 'particulier' ? null : (has('tvaNumber') ? (String(b.tvaNumber || '').trim() || null) : (existing?.tva_number ?? null)),
     adresseFacturation: has('adresseFacturation') ? (String(b.adresseFacturation || '').trim() || null) : (existing?.adresse_facturation ?? null),
     invoiceDetailLevel: level,
   };
@@ -405,15 +410,15 @@ function createClient(body) {
   let id;
   db.transaction(() => {
     id = db.prepare(`
-      INSERT INTO clients (email, societe, contact, tel, adresse, code_postal, ville, code_hash, siret, tva_number, adresse_facturation, invoice_detail_level, escompte)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(f.email, f.societe, f.contact, f.tel, f.adresse, f.codePostal, f.ville, hash, f.siret, f.tvaNumber, f.adresseFacturation, f.invoiceDetailLevel, f.escompte).lastInsertRowid;
+      INSERT INTO clients (email, societe, contact, tel, adresse, code_postal, ville, code_hash, siret, tva_number, adresse_facturation, invoice_detail_level, escompte, client_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(f.email, f.societe, f.contact, f.tel, f.adresse, f.codePostal, f.ville, hash, f.siret, f.tvaNumber, f.adresseFacturation, f.invoiceDetailLevel, f.escompte, f.clientType).lastInsertRowid;
     log('client_created', { clientId: Number(id), client: f.societe });
   })();
   return getClient(Number(id));
 }
 
-const CLIENT_FIELD_LABELS = { societe: 'nom', contact: 'contact', tel: 'téléphone', email: 'e-mail', adresse: 'adresse', codePostal: 'code postal', ville: 'ville', siret: 'SIRET', tvaNumber: 'n° TVA', adresseFacturation: 'adresse de facturation', invoiceDetailLevel: 'détail des factures', escompte: 'escompte' };
+const CLIENT_FIELD_LABELS = { societe: 'nom', contact: 'contact', tel: 'téléphone', email: 'e-mail', adresse: 'adresse', codePostal: 'code postal', ville: 'ville', siret: 'SIRET', tvaNumber: 'n° TVA', adresseFacturation: 'adresse de facturation', invoiceDetailLevel: 'détail des factures', escompte: 'escompte', clientType: 'type de client' };
 
 function updateClient(id, body) {
   const existing = db.prepare('SELECT * FROM clients WHERE id = ?').get(id);
@@ -423,12 +428,13 @@ function updateClient(id, body) {
     societe: existing.societe, contact: existing.contact ?? '', tel: existing.tel ?? '', email: existing.email, adresse: existing.adresse ?? '',
     codePostal: existing.code_postal, ville: existing.ville, siret: existing.siret, tvaNumber: existing.tva_number,
     adresseFacturation: existing.adresse_facturation, invoiceDetailLevel: existing.invoice_detail_level || 'detail', escompte: existing.escompte ?? null,
+    clientType: existing.client_type || 'pro',
   };
   const changed = Object.keys(CLIENT_FIELD_LABELS).filter(k => (f[k] ?? null) !== (before[k] ?? null));
   db.transaction(() => {
     db.prepare(`
-      UPDATE clients SET societe=?, contact=?, tel=?, adresse=?, code_postal=?, ville=?, email=?, siret=?, tva_number=?, adresse_facturation=?, invoice_detail_level=?, escompte=? WHERE id=?
-    `).run(f.societe, f.contact, f.tel, f.adresse, f.codePostal, f.ville, f.email, f.siret, f.tvaNumber, f.adresseFacturation, f.invoiceDetailLevel, f.escompte, id);
+      UPDATE clients SET societe=?, contact=?, tel=?, adresse=?, code_postal=?, ville=?, email=?, siret=?, tva_number=?, adresse_facturation=?, invoice_detail_level=?, escompte=?, client_type=? WHERE id=?
+    `).run(f.societe, f.contact, f.tel, f.adresse, f.codePostal, f.ville, f.email, f.siret, f.tvaNumber, f.adresseFacturation, f.invoiceDetailLevel, f.escompte, f.clientType, id);
     if (changed.length) log('client_updated', { clientId: id, client: f.societe, fields: changed.map(k => CLIENT_FIELD_LABELS[k]) });
   })();
   return getClient(id);
@@ -501,8 +507,9 @@ function importClients(csvText, { apply = false } = {}) {
 
   const byEmail = db.prepare('SELECT id, code_hash FROM clients WHERE email = ?');
   const bySociete = db.prepare('SELECT email FROM clients WHERE LOWER(TRIM(societe)) = ?');
-  const insert = db.prepare('INSERT INTO clients (email, societe, contact, tel, adresse, code_postal, ville, code_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-  const update = db.prepare('UPDATE clients SET societe=?, contact=?, tel=?, adresse=?, code_postal=?, ville=?, code_hash=? WHERE email=?');
+  const insert = db.prepare('INSERT INTO clients (email, societe, contact, tel, adresse, code_postal, ville, code_hash, client_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  // Sans colonne « type » (ou cellule vide) : un client existant garde son type, un nouveau client est professionnel.
+  const update = db.prepare('UPDATE clients SET societe=?, contact=?, tel=?, adresse=?, code_postal=?, ville=?, code_hash=?, client_type=COALESCE(?, client_type) WHERE email=?');
   const out = { created: [], updated: [], duplicates: [], possibleDuplicates: [], errors: [] };
   const seen = new Map();
 
@@ -518,15 +525,18 @@ function importClients(csvText, { apply = false } = {}) {
       const codePostal = (row.code_postal || '').trim() || null; const ville = (row.ville || '').trim() || null;
       const provided = (row.code || '').trim();
       if (provided && !/^\d{4,8}$/.test(provided)) return out.errors.push({ line, error: `Colonne « code » invalide : « ${provided} » (4 à 8 chiffres attendus).` });
+      const typeRaw = norm(row.type || '');
+      const type = !typeRaw ? null : /^(pro|professionnel|entreprise|societe)$/.test(typeRaw) ? 'pro' : /^(particulier|particuliers|perso)$/.test(typeRaw) ? 'particulier' : undefined;
+      if (type === undefined) return out.errors.push({ line, error: `Colonne « type » invalide : « ${row.type} » (attendu : professionnel ou particulier).` });
       const existing = byEmail.get(email);
       if (existing) {
-        update.run(societe, contact, tel, adresse, codePostal, ville, provided ? bcrypt.hashSync(provided, 10) : existing.code_hash, email);
+        update.run(societe, contact, tel, adresse, codePostal, ville, provided ? bcrypt.hashSync(provided, 10) : existing.code_hash, type, email);
         return out.updated.push({ line, societe, email, codeChanged: !!provided });
       }
       const same = bySociete.get(norm(societe));
       if (same) out.possibleDuplicates.push({ line, societe, error: `Un hôtel nommé « ${societe} » existe déjà avec l'email « ${same.email} » (celui-ci : « ${email} ») — à vérifier, créé quand même.` });
       const finalCode = provided || String(100000 + crypto.randomInt(900000));
-      insert.run(email, societe, contact, tel, adresse, codePostal, ville, bcrypt.hashSync(finalCode, 10));
+      insert.run(email, societe, contact, tel, adresse, codePostal, ville, bcrypt.hashSync(finalCode, 10), type || 'pro');
       out.created.push({ line, societe, email, code: finalCode, codeWasGenerated: !provided });
     });
     if (out.created.length || out.updated.length) log('clients_imported', { created: out.created.length, updated: out.updated.length });

@@ -30,11 +30,42 @@ const amount = (cents) => (cents / 100).toFixed(2).replace('.', ',');
 // Les champs libres ne doivent pas casser le tableau : ni tabulation, ni retour ligne.
 const clean = (s) => String(s ?? '').replace(/[\t\r\n]+/g, ' ').trim();
 
-function buildFec(year) {
-  const from = `${year}-01-01`;
-  const to = `${year}-12-31`;
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
+function validIso(d) {
+  if (!ISO.test(String(d))) return false;
+  const t = new Date(`${d}T00:00:00Z`);
+  return !Number.isNaN(t.getTime()) && t.toISOString().slice(0, 10) === d;
+}
+
+/**
+ * Période d'un export : une année civile (nombre ou « 2026 »), ou { from, to } en AAAA-MM-JJ, bornes incluses.
+ * Renvoie { from, to } ou lève une erreur au message lisible.
+ */
+function resolvePeriod(arg) {
+  let from; let to;
+  if (arg && typeof arg === 'object') { from = String(arg.from || ''); to = String(arg.to || ''); }
+  else {
+    const year = Number(arg);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new Error('Année invalide.');
+    from = `${year}-01-01`; to = `${year}-12-31`;
+  }
+  if (!validIso(from) || !validIso(to)) throw new Error('Dates invalides : utilisez le format AAAA-MM-JJ.');
+  if (from < '2000-01-01' || to > '2100-12-31') throw new Error('Période hors limites (2000 à 2100).');
+  if (from > to) throw new Error('La date de début doit être antérieure ou égale à la date de fin.');
+  return { from, to };
+}
+
+/**
+ * Écritures de la période [from, to] (bornes incluses). Ne reprend que des documents VALIDÉS (émis) :
+ * un brouillon n'a ni numéro ni date d'émission, il n'entre jamais dans un FEC. Les règlements repris
+ * sont ceux dont la date tombe dans la période, rattachés à une facture émise.
+ * Argument : année (compatibilité) ou { from, to }.
+ */
+function buildFec(period) {
+  const { from, to } = resolvePeriod(period);
   const rows = [];
   let ecritureNum = 0;
+  let invoiceCount = 0; let creditCount = 0; let paymentCount = 0; let discountCount = 0;
 
   const docs = db.prepare(`
     SELECT i.*, c.societe FROM native_invoices i JOIN clients c ON c.id = i.client_id
@@ -45,6 +76,7 @@ function buildFec(year) {
   for (const inv of docs) {
     ecritureNum += 1;
     const isCredit = inv.kind === 'credit_note';
+    if (isCredit) creditCount += 1; else invoiceCount += 1;
     const breakdown = JSON.parse(inv.vat_breakdown_json || '[]');
     const aux = `${ACCOUNTS.customer}${String(inv.client_id).padStart(5, '0')}`;
     const lib = `${isCredit ? 'Avoir' : 'Facture'} ${inv.number} ${inv.societe}`;
@@ -68,10 +100,10 @@ function buildFec(year) {
   const payments = db.prepare(`
     SELECT p.*, i.number, i.client_id, c.societe FROM native_payments p
     JOIN native_invoices i ON i.id = p.invoice_id JOIN clients c ON c.id = i.client_id
-    WHERE p.paid_on BETWEEN ? AND ? AND p.method <> 'escompte' ORDER BY p.paid_on, p.id
+    WHERE i.status = 'issued' AND p.paid_on BETWEEN ? AND ? AND p.method <> 'escompte' ORDER BY p.paid_on, p.id
   `).all(from, to);
   for (const p of payments) {
-    ecritureNum += 1;
+    ecritureNum += 1; paymentCount += 1;
     const reversal = p.amount_cents < 0;
     const abs = Math.abs(p.amount_cents);
     const common = {
@@ -91,10 +123,10 @@ function buildFec(year) {
   const discounts = db.prepare(`
     SELECT p.*, i.number, i.client_id, c.societe FROM native_payments p
     JOIN native_invoices i ON i.id = p.invoice_id JOIN clients c ON c.id = i.client_id
-    WHERE p.paid_on BETWEEN ? AND ? AND p.method = 'escompte' ORDER BY p.paid_on, p.id
+    WHERE i.status = 'issued' AND p.paid_on BETWEEN ? AND ? AND p.method = 'escompte' ORDER BY p.paid_on, p.id
   `).all(from, to);
   for (const p of discounts) {
-    ecritureNum += 1;
+    ecritureNum += 1; discountCount += 1;
     const reversal = p.amount_cents < 0;
     const ht = Math.abs(p.discount_ht_cents ?? p.amount_cents);
     const vat = Math.abs(p.discount_vat_cents ?? 0);
@@ -121,7 +153,21 @@ function buildFec(year) {
     debit += Math.round(parseFloat(r.Debit.replace(',', '.')) * 100);
     credit += Math.round(parseFloat(r.Credit.replace(',', '.')) * 100);
   }
-  return { content: lines.join('\r\n') + '\r\n', rowCount: rows.length, balanced: debit === credit, debit, credit };
+  return {
+    content: lines.join('\r\n') + '\r\n', rowCount: rows.length, balanced: debit === credit, debit, credit,
+    from, to, invoiceCount, creditCount, paymentCount, discountCount,
+  };
 }
 
-module.exports = { buildFec, ACCOUNTS };
+/** Ce que contiendrait l'export, sans le produire : de quoi vérifier la période avant de télécharger. */
+function previewFec(period) {
+  const r = buildFec(period);
+  const drafts = db.prepare(`SELECT COUNT(*) AS n FROM native_invoices WHERE status = 'draft'`).get().n;
+  return {
+    from: r.from, to: r.to, rowCount: r.rowCount, balanced: r.balanced,
+    invoices: r.invoiceCount, creditNotes: r.creditCount, payments: r.paymentCount, discounts: r.discountCount,
+    draftsIgnored: drafts,
+  };
+}
+
+module.exports = { buildFec, previewFec, resolvePeriod, ACCOUNTS };

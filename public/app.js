@@ -632,6 +632,11 @@ function fillAccountForms() {
   document.getElementById('prof-code-field').style.display = 'none';
   const links = contactLinks((portalOptions && portalOptions.contact) || {});
   document.getElementById('prof-name-hint').innerHTML = `Le nom de votre établissement (${escapeHtml(currentClient.societe)}) figure sur vos factures : pour le modifier, contactez-nous${links ? ' : ' + links : ''}.`;
+  const part = currentClient.clientType === 'particulier';
+  document.getElementById('billing-ids').style.display = part ? 'none' : '';
+  document.getElementById('billing-intro').textContent = part
+    ? "Si votre adresse de facturation est différente de l'adresse de collecte, indiquez-la ici."
+    : "Ces informations nous permettent d'établir vos factures correctement. Elles ne sont pas obligatoires pour commander.";
   document.getElementById('billing-siret').value = currentClient.siret || '';
   document.getElementById('billing-tva').value = currentClient.tvaNumber || '';
   document.getElementById('billing-adresse').value = currentClient.adresseFacturation || '';
@@ -875,10 +880,12 @@ async function openOrderModal(orderId, context) {
     manageZone.style.display = 'block';
     manageZone.innerHTML = `
       <h4 class="card-subhead" style="margin-bottom:8px;">Gestion de la commande</h4>
+      <button class="btn-secondary" id="btn-duplicate-order" style="width:auto;margin-right:8px;">Dupliquer la commande</button>
       <button class="btn-secondary" id="btn-open-add-item" style="width:auto;margin-right:8px;">+ Ajouter un article</button>
       <button class="btn-secondary" id="btn-delete-order" style="width:auto;color:var(--rust);border-color:var(--rust);">Supprimer la commande</button>
       <div id="add-item-zone-${order.id}" style="margin-top:10px;"></div>
     `;
+    document.getElementById('btn-duplicate-order').addEventListener('click', () => duplicateOrder(order.id));
     document.getElementById('btn-open-add-item').addEventListener('click', () => openAddItemUI(order.id));
     document.getElementById('btn-delete-order').addEventListener('click', () => deleteOrder(order.id, order.ticket));
   } else {
@@ -930,6 +937,22 @@ async function openAddItemUI(orderId) {
       note.textContent = err.message;
     }
   });
+}
+
+// Duplication : le formulaire de création s'ouvre prérempli (client, articles, quantités) ; on choisit la
+// date de livraison, on ajuste si besoin, et la copie est créée avec les tarifs du jour.
+async function duplicateOrder(orderId) {
+  const btn = document.getElementById('btn-duplicate-order');
+  if (btn) btn.disabled = true;
+  try {
+    const template = await api('GET', `/api/admin/orders/${orderId}/copy`);
+    closeOrderModal();
+    await openManualOrderModal('kanban', template);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function deleteOrder(orderId, ticket) {
@@ -2477,9 +2500,10 @@ document.getElementById('manual-order-modal').addEventListener('click', e => {
   if (e.target.id === 'manual-order-modal') closeManualOrderModal();
 });
 
-async function openManualOrderModal(context) {
+async function openManualOrderModal(context, copyOf) {
   // context : 'kanban' (Préparation de commande, statut "Reçue" par défaut)
   //        ou 'production' (Production, statut "En traitement" direct)
+  // copyOf  : modèle renvoyé par GET /orders/:id/copy quand on duplique une commande
   if (manualOrderClientsCache.length === 0) {
     const { clients } = await api('GET', '/api/admin/clients');
     manualOrderClientsCache = clients;
@@ -2489,8 +2513,12 @@ async function openManualOrderModal(context) {
   const inner = document.getElementById('manual-order-modal-inner');
   inner.innerHTML = `
     <h3 style="font-family:'Fredoka',sans-serif;font-size:18px;margin-bottom:16px;">
-      ${isProduction ? 'Nouvel ordre de lavage' : 'Nouvelle commande'}
+      ${isProduction ? 'Nouvel ordre de lavage' : copyOf ? 'Dupliquer une commande' : 'Nouvelle commande'}
     </h3>
+    ${copyOf ? `<p class="mo-copy-note" id="mo-copy-note">Mêmes articles et mêmes quantités que la commande d'origine, aux tarifs du jour. Choisissez la date de livraison et ajustez les quantités si besoin.${
+      copyOf.skipped && copyOf.skipped.length
+        ? `<br><b>Non repris (plus au catalogue ou plus attribués à ce client) :</b> ${copyOf.skipped.map(s => `${escHtml(s.name)} × ${s.qty}`).join(', ')}.`
+        : ''}</p>` : ''}
 
     <div class="field">
       <label>Client *</label>
@@ -2534,9 +2562,10 @@ async function openManualOrderModal(context) {
     <button class="btn-primary" id="mo-submit" style="width:auto;margin-top:12px;">Créer</button>
     <div class="qty-save-note" id="mo-error"></div>
   `;
-  renderQtyGrid('mo-items-grid', []);
+  renderQtyGrid('mo-items-grid', copyOf ? copyOf.items : []);
 
-  fillManualOrderClientSelect();
+  fillManualOrderClientSelect(copyOf ? copyOf.clientId : undefined);
+  if (copyOf) document.getElementById('mo-notes').value = copyOf.notes || '';
   const newClientBox = document.getElementById('mo-new-client');
   const toggleNewClient = open => {
     newClientBox.hidden = !open;
@@ -2555,6 +2584,7 @@ async function openManualOrderModal(context) {
   document.getElementById('mo-submit').addEventListener('click', () => submitManualOrder(context));
 
   document.getElementById('manual-order-modal').classList.add('open');
+  if (copyOf) document.getElementById('mo-livraison').focus();
 }
 
 function fillManualOrderClientSelect(selectedId) {

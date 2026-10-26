@@ -17,7 +17,7 @@ function publicClient(row) {
   if (!row) return null;
   const { id, email, societe, contact, tel, adresse, siret, tva_number, adresse_facturation, created_at } = row;
   return {
-    id, email, societe, contact, tel, adresse,
+    id, email, societe, contact, tel, adresse, clientType: row.client_type || 'pro',
     siret, tvaNumber: tva_number, adresseFacturation: adresse_facturation,
     createdAt: created_at,
   };
@@ -97,11 +97,13 @@ router.get('/me', (req, res) => {
 // optionnels et peuvent être complétés progressivement.
 router.put('/me/billing', requireClient, (req, res) => {
   const { siret, tvaNumber, adresseFacturation } = req.body || {};
-  if (siret && !/^\d{14}$/.test(siret.replace(/\s/g, ''))) {
+  const cur = db.prepare('SELECT client_type FROM clients WHERE id = ?').get(req.session.clientId);
+  const particulier = cur && cur.client_type === 'particulier'; // un particulier n'a ni SIRET ni n° de TVA
+  if (!particulier && siret && !/^\d{14}$/.test(siret.replace(/\s/g, ''))) {
     return res.status(400).json({ error: 'Le SIRET doit comporter exactement 14 chiffres.' });
   }
   db.prepare('UPDATE clients SET siret = ?, tva_number = ?, adresse_facturation = ? WHERE id = ?')
-    .run(siret ? siret.replace(/\s/g, '') : null, tvaNumber || null, adresseFacturation || null, req.session.clientId);
+    .run(!particulier && siret ? siret.replace(/\s/g, '') : null, !particulier && tvaNumber ? tvaNumber : null, adresseFacturation || null, req.session.clientId);
   const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(req.session.clientId);
   res.json({ client: publicClient(client) });
 });

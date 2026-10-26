@@ -8,7 +8,7 @@ const db = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const engine = require('../billing/engine');
 const { buildInvoicePdf } = require('../billing/pdf');
-const { buildFec } = require('../billing/fec');
+const { buildFec, previewFec, resolvePeriod } = require('../billing/fec');
 const lock = require('../billing/lock');
 const backup = require('../backup');
 const queries = require('../billing/queries');
@@ -234,14 +234,31 @@ router.get('/integrity', wrap((req, res) => {
   res.json(engine.verifyIntegrity());
 }));
 
-router.get('/export/fec', lock.requireStepUp(req => `fec:${parseInt(req.query.year, 10) || new Date().getFullYear()}`), wrap((req, res) => {
-  const year = parseInt(req.query.year, 10) || new Date().getFullYear();
-  if (year < 2000 || year > 2100) throw new engine.BillingError('Année invalide.');
-  const { content, rowCount, balanced } = buildFec(year);
+// Période d'un export FEC : ?from=AAAA-MM-JJ&to=AAAA-MM-JJ (bornes incluses), ou ?year=AAAA (année civile, comme avant).
+// Sans rien : l'année en cours. Le code de confirmation vaut pour la période exacte demandée.
+function fecPeriodOf(q) {
+  if (q.from || q.to) return { ...resolvePeriod({ from: q.from, to: q.to }), byDates: true };
+  const year = q.year === undefined || q.year === '' ? new Date().getFullYear() : Number(q.year);
+  return { ...resolvePeriod(year), year, byDates: false };
+}
+const fecCheck = (req, res, next) => {
+  try { req.fecPeriod = fecPeriodOf(req.query); next(); } catch (e) { res.status(400).json({ error: e.message }); }
+};
+const fecScope = (req) => (req.fecPeriod.byDates ? `fec:${req.fecPeriod.from}_${req.fecPeriod.to}` : `fec:${req.fecPeriod.year}`);
+
+// Aperçu : ce que contiendra l'export (documents validés seulement), sans rien télécharger.
+router.get('/export/fec/preview', fecCheck, wrap((req, res) => {
+  res.json(previewFec(req.fecPeriod));
+}));
+
+router.get('/export/fec', fecCheck, lock.requireStepUp(fecScope), wrap((req, res) => {
+  const { from, to } = req.fecPeriod;
+  const { content, rowCount, balanced } = buildFec({ from, to });
+  if (!rowCount) throw new engine.BillingError(`Aucune écriture à exporter entre le ${from} et le ${to} : seuls les documents validés (émis) sont repris.`, 422);
   if (!balanced) throw new engine.BillingError('FEC déséquilibré : export refusé. Lancez le contrôle d\'intégrité.', 500);
   const siren = engine.sirenFrom(engine.getSettings().siren) || '000000000';
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="${siren}FEC${year}1231.txt"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${siren}FEC${to.replace(/-/g, '')}.txt"`);
   res.setHeader('X-Fec-Rows', String(rowCount));
   res.send(content);
 }));

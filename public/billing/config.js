@@ -197,14 +197,58 @@
   // ================= Contrôle et FEC =================
   Bill.register('controls', {
     async render(main) {
-      const y = new Date().getFullYear();
+      const pad = (v) => String(v).padStart(2, '0');
+      const iso = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
+      const lastDay = (y, m) => new Date(y, m, 0).getDate();
+      const now = new Date(); const y = now.getFullYear(); const mo = now.getMonth() + 1;
+      const prevMo = mo === 1 ? { y: y - 1, m: 12 } : { y, m: mo - 1 };
+      const PRESETS = {
+        'year': { label: `Année ${y}`, from: iso(y, 1, 1), to: iso(y, 12, 31) },
+        'prev-year': { label: `Année ${y - 1}`, from: iso(y - 1, 1, 1), to: iso(y - 1, 12, 31) },
+        'month': { label: 'Mois en cours', from: iso(y, mo, 1), to: iso(y, mo, lastDay(y, mo)) },
+        'prev-month': { label: 'Mois dernier', from: iso(prevMo.y, prevMo.m, 1), to: iso(prevMo.y, prevMo.m, lastDay(prevMo.y, prevMo.m)) },
+        'custom': { label: 'Dates au choix' },
+      };
       main.innerHTML = `<div class="bl-head"><div><h2>Contrôle et exports</h2><p>Vérifiez que rien n'a été altéré, et exportez le fichier des écritures comptables (FEC) pour votre comptable.</p></div></div>
         <div class="bl-panel"><div class="bl-panel-h"><h3>Contrôle d'intégrité</h3><button class="bl-btn" id="ct-run">Lancer le contrôle</button></div><div class="bl-panel-b" id="ct-res">
           <p class="bl-note" style="margin:0">Le contrôle revérifie chaque facture émise : empreinte, chaînage entre documents, totaux, continuité de la numérotation et journal des événements.</p></div></div>
         <div class="bl-panel"><div class="bl-panel-h"><h3>Fichier des écritures comptables (FEC)</h3></div><div class="bl-panel-b">
-          <div class="bl-row2"><div class="bl-field"><label for="ct-year">Exercice</label><select id="ct-year">${[y, y - 1, y - 2].map(v => `<option value="${v}">${v}</option>`).join('')}</select></div></div>
+          <div class="bl-field"><label for="ct-preset">Période</label><select id="ct-preset">${Object.entries(PRESETS).map(([k, v]) => `<option value="${k}">${e(v.label)}</option>`).join('')}</select></div>
+          <div class="bl-row2"><div class="bl-field"><label for="ct-from">Du</label><input type="date" id="ct-from" min="2000-01-01" max="2100-12-31"></div>
+            <div class="bl-field"><label for="ct-to">Au (inclus)</label><input type="date" id="ct-to" min="2000-01-01" max="2100-12-31"></div></div>
+          <div id="ct-prev" class="bl-note" style="margin:4px 0 12px" aria-live="polite"></div>
           <button class="bl-btn primary" id="ct-fec">Télécharger le FEC…</button>
-          <p class="bl-hint" style="margin-top:10px">Le FEC reprend les ventes émises (factures et avoirs) et leurs règlements. Il est refusé s'il est déséquilibré.</p></div></div>`;
+          <p class="bl-hint" style="margin-top:10px">Seuls les documents validés (factures et avoirs émis) sont repris, avec les règlements encaissés sur la période. Les brouillons n'y figurent jamais. Pour un contrôle fiscal, exportez l'exercice complet.</p></div></div>`;
+      const fromEl = main.querySelector('#ct-from'); const toEl = main.querySelector('#ct-to');
+      const presetEl = main.querySelector('#ct-preset'); const prevEl = main.querySelector('#ct-prev'); const fecBtn = main.querySelector('#ct-fec');
+      const frDay = (d) => d.split('-').reverse().join('/');
+      let seq = 0;
+      const refreshPreview = async () => {
+        const from = fromEl.value; const to = toEl.value; const mine = ++seq;
+        fecBtn.disabled = true;
+        if (!from || !to) { prevEl.textContent = 'Choisissez une date de début et une date de fin.'; return; }
+        if (from > to) { prevEl.textContent = 'La date de début doit précéder la date de fin.'; return; }
+        prevEl.textContent = 'Calcul…';
+        try {
+          const r = await Bill.get(`/export/fec/preview?from=${from}&to=${to}`);
+          if (mine !== seq) return;
+          const parts = [[r.invoices, 'facture', 'factures'], [r.creditNotes, 'avoir', 'avoirs'], [r.payments + r.discounts, 'règlement', 'règlements']].filter(x => x[0] > 0).map(x => plural(...x));
+          const drafts = r.draftsIgnored ? ` ${plural(r.draftsIgnored, 'brouillon non validé ignoré', 'brouillons non validés ignorés')}.` : '';
+          prevEl.innerHTML = r.rowCount
+            ? `Du ${frDay(from)} au ${frDay(to)} : <b>${parts.join(', ')}</b>, soit ${plural(r.rowCount, 'écriture', 'écritures')}.${drafts}`
+            : `Aucune écriture validée du ${frDay(from)} au ${frDay(to)}.${drafts}`;
+          fecBtn.disabled = !r.rowCount;
+        } catch (err) { if (mine === seq) prevEl.textContent = err.message || 'Aperçu indisponible.'; }
+      };
+      const applyPreset = () => {
+        const p = PRESETS[presetEl.value];
+        if (p.from) { fromEl.value = p.from; toEl.value = p.to; }
+        fromEl.disabled = toEl.disabled = presetEl.value !== 'custom';
+        refreshPreview();
+      };
+      presetEl.onchange = applyPreset;
+      fromEl.onchange = toEl.onchange = refreshPreview;
+      applyPreset();
       main.querySelector('#ct-run').onclick = async (ev) => {
         ev.target.disabled = true; const out = main.querySelector('#ct-res'); out.innerHTML = '<div class="bl-spin" style="padding:6px">Contrôle en cours…</div>';
         try {
@@ -214,9 +258,9 @@
         } catch (err) { out.innerHTML = ''; Bill.fail(err); }
         ev.target.disabled = false;
       };
-      main.querySelector('#ct-fec').onclick = () => {
-        const year = main.querySelector('#ct-year').value;
-        Bill.sensitive({ title: `Exporter le FEC ${year}`, scope: `fec:${year}`, okLabel: 'Télécharger', text: 'Cet export contient l\'ensemble de vos ventes de l\'exercice.', onSubmit: async () => { await Bill.download(`/export/fec?year=${year}`, `FEC${year}.txt`); Bill.toast('FEC téléchargé'); } });
+      fecBtn.onclick = () => {
+        const from = fromEl.value; const to = toEl.value;
+        Bill.sensitive({ title: `Exporter le FEC du ${frDay(from)} au ${frDay(to)}`, scope: `fec:${from}_${to}`, okLabel: 'Télécharger', text: 'Cet export contient les ventes validées et les règlements de la période.', onSubmit: async () => { await Bill.download(`/export/fec?from=${from}&to=${to}`, `FEC_${from}_${to}.txt`); Bill.toast('FEC téléchargé'); } });
       };
     },
   });
