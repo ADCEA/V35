@@ -610,3 +610,35 @@ details.acct[open] summary::after{content:'\2212';}
   .pay-box dl{grid-template-columns:1fr;gap:2px 0;}
   .pay-box dd{margin-bottom:8px;}
 }
+
+/* ---------- Onglets d'administration : même typographie que la Facturation ----------
+   Texte et boutons en IBM Plex Sans (graisse moyenne, minuscules) ; Fredoka reste réservé aux titres et aux chiffres ;
+   plus de capitales espacées. Ne touche ni l'espace client ni la Facturation (qui a ses propres styles .bl-*). */
+#admin-dashboard, #order-modal, #manual-order-modal{font-size:14px;}
+
+#admin-dashboard .admin-subnav button,
+#admin-dashboard .admin-subnav-more-menu button{font-family:inherit;font-size:14px;font-weight:500;letter-spacing:0;}
+
+#admin-dashboard :is(.btn-primary,.btn-secondary,.btn-logout,.mini-advance,.reorder-btn,.room-type-actions button),
+:is(#order-modal,#manual-order-modal) :is(.btn-primary,.btn-secondary,.btn-mail,.mini-advance,.reorder-btn){font-family:inherit;text-transform:none;letter-spacing:0;font-weight:500;}
+#admin-dashboard .btn-primary,:is(#order-modal,#manual-order-modal) .btn-primary{font-size:14px;}
+#admin-dashboard .btn-secondary,:is(#order-modal,#manual-order-modal) .btn-secondary{font-size:13.5px;}
+#admin-dashboard .btn-logout{font-size:12.5px;}
+#admin-dashboard .mini-advance,:is(#order-modal,#manual-order-modal) .mini-advance{font-size:11.5px;}
+#admin-dashboard .reorder-btn,#admin-dashboard .room-type-actions button{font-size:12.5px;}
+:is(#order-modal,#manual-order-modal) .btn-mail{font-size:13.5px;}
+
+/* étiquettes de champs, petits libellés et pastilles : minuscules, graisse moyenne */
+:is(#admin-dashboard,#order-modal,#manual-order-modal) .field label{font-size:13px;text-transform:none;letter-spacing:0;}
+:is(#admin-dashboard,#order-modal,#manual-order-modal) .eyebrow{font-family:inherit;font-size:12.5px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--steel);}
+:is(#admin-dashboard,#order-modal,#manual-order-modal) .ticket-eyebrow,
+:is(#admin-dashboard,#order-modal,#manual-order-modal) :is(.tag-status,.ticket-status,.own-badge,.adjusted-flag,.inv-pill){font-family:inherit;font-size:12px;font-weight:500;letter-spacing:0;text-transform:none;}
+:is(#admin-dashboard,#order-modal,#manual-order-modal) :is(.track li,.tl-label){font-family:inherit;font-size:12px;letter-spacing:0;text-transform:none;}
+:is(#admin-dashboard,#order-modal,#manual-order-modal) :is(.catalog-group-title,.service-group-title){font-family:inherit;font-size:13px;font-weight:600;letter-spacing:0;text-transform:none;}
+
+/* titres : Fredoka 600 en minuscules, comme les titres de la Facturation */
+:is(#admin-dashboard,#order-modal,#manual-order-modal) .card-subhead{font-size:16px;font-weight:600;letter-spacing:0;text-transform:none;}
+#admin-dashboard .kcol-head h4{font-size:14px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--ink);}
+#admin-dashboard :is(.stats-list-card h5,.room-type-card-head h5,.stats-card strong,.stat-card strong){font-weight:600;}
+
+@media (max-width:480px){ #admin-dashboard .admin-subnav button{font-size:13px;padding-left:6px;padding-right:6px;} }

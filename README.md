@@ -423,6 +423,14 @@ sous-menus. Ils sont repliés par défaut ; le choix est mémorisé dans le navi
 raccourci du tableau de bord) le déroule. Replié, « Encaissements » affiche le nombre de relances à faire. Sur mobile, le menu reste
 une rangée horizontale avec tous les liens.
 
+### Typographie de l'administration
+
+Tous les onglets d'administration (Production, Préparation de commande, Logistique, Statistiques, Historique, Chariots et camions, Garage,
+Réglages) et les fenêtres de commande reprennent la typographie de la Facturation : texte et boutons en IBM Plex Sans (graisse moyenne,
+minuscules), Fredoka réservé aux titres (600) et aux chiffres, plus de capitales espacées. Les règles sont regroupées à la fin de
+`public/styles.css` (« Onglets d'administration »), limitées à `#admin-dashboard` et aux fenêtres de commande : l'espace client et la
+Facturation (styles `.bl-*`) ne sont pas touchés.
+
 ### Clients particuliers (sans SIRET)
 
 Chaque fiche a un **type de client** : *Professionnel* (par défaut) ou *Particulier* (Facturation → Hôtels → Nouveau client, ou

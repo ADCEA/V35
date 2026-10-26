@@ -1020,7 +1020,7 @@ async function renderTeamZone(orderId, context) {
 
   teamZone.innerHTML = `
     ${showExtraClients ? `
-      <p style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:var(--steel);margin:0 0 8px;font-weight:500;">Hôtels supplémentaires associés</p>
+      <p style="font-size:13px;color:var(--steel);margin:0 0 8px;font-weight:500;">Hôtels supplémentaires associés</p>
       <p style="font-size:11.5px;color:var(--steel-light);margin:0 0 10px;">Utile si ce lot mélange le linge de plusieurs établissements.</p>
       <div id="extra-clients-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">
         ${manualOrderClientsCache.map(c => `
@@ -1034,7 +1034,7 @@ async function renderTeamZone(orderId, context) {
       <div class="qty-save-note" id="extra-clients-note"></div>
     ` : ''}
 
-    <p style="font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:var(--steel);margin:${showExtraClients ? '20px' : '0'} 0 8px;font-weight:500;">Discussion équipe${context === 'logistics' ? ' (inclut les messages des livreurs)' : ''}</p>
+    <p style="font-size:13px;color:var(--steel);margin:${showExtraClients ? '20px' : '0'} 0 8px;font-weight:500;">Discussion équipe${context === 'logistics' ? ' (inclut les messages des livreurs)' : ''}</p>
     <div id="comments-list" style="max-height:260px;overflow-y:auto;margin-bottom:10px;padding:4px 6px;">
       ${renderCommentsThread(comments)}
     </div>
@@ -2019,7 +2019,7 @@ async function renderStats() {
         <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:16px;">
           <div>
             <div style="font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:${nps.currentMonth.nps >= 0 ? 'var(--teal)' : 'var(--rust)'};line-height:1;">${nps.currentMonth.nps > 0 ? '+' : ''}${nps.currentMonth.nps}</div>
-            <div style="font-size:11px;color:var(--steel-light);text-transform:uppercase;letter-spacing:0.04em;margin-top:4px;">NPS — ${nps.currentMonth.month}</div>
+            <div style="font-size:12px;color:var(--steel-light);margin-top:4px;">NPS — ${nps.currentMonth.month}</div>
           </div>
           <div style="display:flex;gap:16px;font-size:12.5px;color:var(--steel);">
             <span>😍 Promoteurs : <b style="color:var(--ink);">${nps.currentMonth.promoters}</b></span>
@@ -2031,7 +2031,7 @@ async function renderStats() {
       ` : '<p class="empty-note">Aucune réponse pour le moment ce mois-ci.</p>'}
       ${nps.months.length > 1 ? `
         <div style="border-top:1px solid var(--line);padding-top:12px;">
-          <p style="font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:var(--steel);margin:0 0 8px;">Historique</p>
+          <p style="font-size:13px;font-weight:500;color:var(--steel);margin:0 0 8px;">Historique</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             ${nps.months.slice(1).map(m => `<span class="mini-badge">${m.month} : ${m.nps > 0 ? '+' : ''}${m.nps} (${m.responses})</span>`).join('')}
           </div>
@@ -2039,7 +2039,7 @@ async function renderStats() {
       ` : ''}
       ${nps.recentComments.length > 0 ? `
         <div style="border-top:1px solid var(--line);padding-top:12px;margin-top:14px;">
-          <p style="font-size:11px;text-transform:uppercase;letter-spacing:0.04em;color:var(--steel);margin:0 0 8px;">Derniers commentaires</p>
+          <p style="font-size:13px;font-weight:500;color:var(--steel);margin:0 0 8px;">Derniers commentaires</p>
           ${nps.recentComments.map(c => `
             <div style="padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px;">
               <span class="mini-badge" style="margin-right:6px;">${c.score}/10</span><b>${c.societe}</b> — ${c.comment}
@@ -2560,7 +2560,7 @@ async function openManualOrderModal(context, copyOf) {
       </div>` : ''}
     </div>
 
-    <label style="display:block;font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:var(--steel);margin:14px 0 4px;font-weight:500;">Articles</label>
+    <label style="display:block;font-size:13px;color:var(--steel);margin:14px 0 4px;font-weight:500;">Articles</label>
     <div class="qty-grid" id="mo-items-grid"></div>
 
     <div class="field"><label>Notes (optionnel)</label><input id="mo-notes"></div>
