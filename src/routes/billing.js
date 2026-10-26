@@ -11,6 +11,7 @@ const { buildInvoicePdf } = require('../billing/pdf');
 const { buildFec, previewFec, resolvePeriod } = require('../billing/fec');
 const lock = require('../billing/lock');
 const backup = require('../backup');
+const { buildScript: buildPullScript } = require('../backup/pullScript');
 const queries = require('../billing/queries');
 const mail = require('../billing/mail');
 const escompte = require('../billing/escompte');
@@ -288,6 +289,26 @@ router.get('/backup/:id/download', lock.requireStepUp(req => `backup:${req.param
   const f = backup.localFilePath(Number(req.params.id));
   if (!f) throw new engine.BillingError('Fichier de sauvegarde introuvable (purgé ?).', 404);
   res.download(f.path, f.name);
+}));
+
+// Copie chaque soir sur l'ordinateur : crée le jeton (remplace l'ancien) et renvoie le programme Windows qui le contient.
+// Le jeton n'existe qu'ici, dans le programme généré : seule son empreinte est conservée.
+router.post('/backup/pull/setup', lock.requireStepUp('backup-pull'), wrap((req, res) => {
+  if (!backup.config().passphrase) {
+    throw new engine.BillingError("Ajoutez d'abord la variable BACKUP_PASSPHRASE sur l'hébergeur : aucune base en clair ne quitte le serveur.", 409);
+  }
+  const base = process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || (req.body && req.body.origin) || `${req.protocol}://${req.get('host')}`;
+  let origin;
+  try { origin = new URL(base).origin; } catch (_) { throw new engine.BillingError('Adresse du site invalide.', 400); }
+  const token = backup.createPullToken();
+  let content;
+  try { content = buildPullScript({ origin, token }); } catch (e) { backup.revokePullToken(); throw new engine.BillingError(e.message, 400); }
+  res.json({ ok: true, filename: 'sauvegarde-cezanne.ps1', content, state: backup.pullState() });
+}));
+
+router.delete('/backup/pull', lock.requireStepUp('backup-pull'), wrap((req, res) => {
+  backup.revokePullToken();
+  res.json({ ok: true, state: backup.pullState() });
 }));
 
 // ---------- Pennylane ----------

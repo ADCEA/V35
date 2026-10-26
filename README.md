@@ -622,6 +622,34 @@ La page Sécurité et sauvegardes affiche l'état (ok / à vérifier / critique 
 hors serveur), l'historique, et permet de sauvegarder immédiatement ou de télécharger une copie.
 La rétention côté S3 n'est pas purgée par l'application : utilisez une règle de cycle de vie du bucket.
 
+#### Copie chaque soir sur l'ordinateur de l'utilisateur
+
+Le serveur (Render) ne peut pas écrire sur un ordinateur : c'est l'ordinateur qui **vient chercher** la copie.
+Facturation → Sécurité et sauvegardes → *Copie chaque soir sur mon ordinateur* → **Préparer le programme** (code de la
+Facturation demandé) télécharge `sauvegarde-cezanne.ps1`, propre à cette installation. Sur le PC (Windows) : clic droit →
+*Exécuter avec PowerShell*. Le programme :
+
+- s'installe (copie dans `%LOCALAPPDATA%\BlanchisserieCezanne`, tâche planifiée « Sauvegarde Blanchisserie Cezanne », **chaque jour à 22 h**,
+  rattrapée au rallumage si le PC était éteint) puis fait une première copie ;
+- demande au serveur une sauvegarde **fraîche** (`GET /api/backup-pull/latest?fresh=1`), vérifie l'empreinte SHA-256 reçue,
+  la range dans `Documents\Sauvegardes Cezanne` (90 dernières conservées) et tient un `journal.txt`.
+
+Sécurité : jeton dédié (`cz-` + 256 bits aléatoires) dont seule l'**empreinte** est stockée ; il n'ouvre que cette route (jamais
+l'administration) ; un nouveau programme remplace et révoque l'ancien jeton, « Arrêter cette copie » le révoque ; au-delà de 20 faux jetons
+en 15 minutes la route se ferme 15 minutes. **Sans `BACKUP_PASSPHRASE`, la route refuse** (aucune base en clair ne quitte le serveur) : les
+copies reçues sont chiffrées comme les autres (`scripts/restore-backup.js` pour les lire). Une copie envoyée à l'ordinateur compte comme
+copie hors serveur (l'état passe au vert, l'historique affiche « Ordinateur (soir) » ; sans nouvelle copie depuis 36 h, un avertissement apparaît).
+
+Mac ou Linux : même principe avec `curl` (à planifier avec `launchd` ou `cron` ; le jeton se récupère en ouvrant le `.ps1` dans un éditeur de texte) :
+
+```bash
+curl -fsS -D h.txt -H "Authorization: Bearer cz-…" -o copie.enc "https://votre-site/api/backup-pull/latest?fresh=1"
+# l'empreinte à comparer est dans l'en-tête X-Backup-Sha256, le nom du fichier dans X-Backup-Name
+```
+
+Le programme Windows n'a pas pu être exécuté sur un vrai Windows pendant le développement (serveur, jeton, empreinte et écran sont testés
+automatiquement) : à valider une fois sur le PC (lancer le programme, vérifier le dossier, puis `journal.txt`).
+
 **Restauration** (arrêter le serveur d'abord) :
 
 ```bash
@@ -679,7 +707,7 @@ facture de test.
 
 ### Tests
 
-`npm test` (221 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (229 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 
