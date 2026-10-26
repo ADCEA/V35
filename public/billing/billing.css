@@ -386,3 +386,15 @@ table.bl-table.inv{font-size:13px; line-height:1.25;}
 #admin-dashboard.billing-mode .espace-header{margin-bottom:10px;}
 #admin-dashboard.billing-mode .espace-header .eyebrow,#admin-dashboard.billing-mode .espace-header p{display:none;}
 #admin-dashboard.billing-mode .espace-header h3{font-size:20px; margin:0;}
+
+/* Sous-menus repliables du menu de la Facturation */
+.bl-rail button.bl-fold{display:flex; align-items:center; gap:6px; width:100%; margin:14px 0 4px; padding:2px 10px; text-align:left; background:none; border:none; border-radius:4px; font-size:12px; font-weight:500; color:#8C9DAE; cursor:pointer;}
+.bl-rail button.bl-fold:hover{color:var(--ink);}
+.bl-rail button.bl-fold:focus-visible{outline:2px solid var(--brand); outline-offset:2px;}
+.bl-chev{flex:none; width:6px; height:6px; margin-right:2px; border-right:1.5px solid currentColor; border-bottom:1.5px solid currentColor; transform:rotate(-45deg); transition:transform .15s;}
+.bl-fold[aria-expanded="true"] .bl-chev{transform:rotate(45deg);}
+.bl-rail .bl-fold .bl-count{margin-left:auto;}
+.bl-fold-body{display:flex; flex-direction:column; gap:2px;}
+.bl-fold-body.collapsed{display:none;}
+@media (prefers-reduced-motion: reduce){ .bl-chev{transition:none;} }
+@media (max-width: 900px){ .bl-rail button.bl-fold{display:none;} .bl-fold-body,.bl-fold-body.collapsed{display:contents;} }
