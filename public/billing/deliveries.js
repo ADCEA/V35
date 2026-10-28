@@ -3,7 +3,9 @@
   const { e, eur, dFr, today, plural } = Bill;
   const TABS = [['', 'Tous'], ['to_invoice', 'À facturer'], ['draft', 'Dans un brouillon'], ['invoiced', 'Facturés']];
   const MAX_PDF = 500;
-  const S = { status: '', q: '', clientId: '', from: '', to: '', sort: 'date', dir: 'desc' };
+  // Paiement de la facture d'un BL facturé : mêmes libellés et mêmes pastilles que la liste des factures.
+  const PAY = [['unpaid', 'À encaisser'], ['overdue', 'En retard'], ['partial', 'Partielles'], ['paid', 'Payés']];
+  const S = { status: '', pay: new Set(), q: '', clientId: '', from: '', to: '', sort: 'date', dir: 'desc' };
   let R = null;   // dernière réponse du serveur
 
   // ---------- périodes rapides ----------
@@ -21,6 +23,7 @@
   function qs(extra = {}) {
     const p = new URLSearchParams(extra);
     for (const k of ['status', 'q', 'clientId', 'from', 'to']) if (S[k]) p.set(k, S[k]);
+    if (S.pay.size) p.set('payment', [...S.pay].join(','));
     return p.toString();
   }
 
@@ -30,6 +33,8 @@
     if (b.status === 'draft') return '<span class="bl-tag info">Dans un brouillon</span>';
     return `<span class="bl-tag ok">Facturé</span>${b.invoiceNumber ? `<span class="sub bl-num">${e(b.invoiceNumber)}</span>` : (b.legacy ? '<span class="sub">ancien circuit</span>' : '')}`;
   }
+  // « Payée », « En retard »… la même pastille que dans la liste des factures ; rien pour l'ancien circuit (paiement non suivi).
+  const payTag = (b) => (b.payment ? Bill.pill(b.payment) : '');
 
   // ---------- liste ----------
   const SORTERS = {
@@ -50,7 +55,8 @@
       <td class="client">${e(d.clientName)}</td>
       <td class="bl-muted">${plural(d.refs, 'référence', 'références')} · ${plural(d.pieces, 'pièce', 'pièces')}</td>
       <td class="r bl-num">${eur(d.htCents)}</td>
-      <td>${billingTag(d.billing)}</td></tr>`;
+      <td>${billingTag(d.billing)}</td>
+      <td>${payTag(d.billing) || '<span class="bl-muted">—</span>'}</td></tr>`;
   }
 
   function summary() {
@@ -66,6 +72,11 @@
     main.querySelector('#dl-tabs').innerHTML = TABS.map(([k, label]) =>
       `<button class="bl-tab ${S.status === k ? 'active' : ''}" data-tab="${k}">${label}<small>${R.counts[k || 'all']}</small></button>`).join('');
     main.querySelectorAll('#dl-tabs [data-tab]').forEach(b => b.onclick = () => { S.status = b.dataset.tab; load(main); });
+    main.querySelector('#dl-pay').innerHTML = `<span class="bl-muted">Paiement</span>`
+      + PAY.map(([k, label]) => `<button type="button" class="bl-chipf ${S.pay.has(k) ? 'on' : ''} ${k === 'overdue' && R.counts.payments[k] ? 'late' : ''}" data-pay="${k}" aria-pressed="${S.pay.has(k)}"><i class="bl-dot ${k}"></i>${label} <b>${R.counts.payments[k]}</b></button>`).join('')
+      + (S.pay.size ? '<button type="button" class="bl-btn link small" id="dl-pay-clear">Tout afficher</button>' : '');
+    main.querySelectorAll('#dl-pay [data-pay]').forEach(b => b.onclick = () => { const k = b.dataset.pay; if (S.pay.has(k)) S.pay.delete(k); else S.pay.add(k); load(main); });
+    const clr = main.querySelector('#dl-pay-clear'); if (clr) clr.onclick = () => { S.pay.clear(); load(main); };
     main.querySelector('#dl-sum').innerHTML = summary();
     paintUnlinked(main);
 
@@ -75,12 +86,12 @@
     pdf.title = R.total > MAX_PDF ? `Un PDF contient ${MAX_PDF} BL au plus : resserrez la période ou choisissez un hôtel.` : 'Un seul PDF, un bon par page, du plus ancien au plus récent';
 
     if (!R.deliveries.length) {
-      const filtered = S.q || S.clientId || S.from || S.to || S.status;
-      box.innerHTML = `<div class="bl-empty"><b>${filtered ? 'Aucun bon de livraison' : 'Aucune livraison pour le moment'}</b>${filtered ? 'Aucun BL ne correspond à ces filtres : élargissez la période ou changez d\'hôtel.' : 'Un bon de livraison apparaît ici dès qu\'une commande est marquée « Livrée ».'}</div>`;
+      const filtered = S.q || S.clientId || S.from || S.to || S.status || S.pay.size;
+      box.innerHTML = `<div class="bl-empty"><b>${filtered ? 'Aucun bon de livraison' : 'Aucune livraison pour le moment'}</b>${filtered ? 'Aucun BL ne correspond à ces filtres : élargissez la période, changez d\'hôtel ou de statut.' : 'Un bon de livraison apparaît ici dès qu\'une commande est marquée « Livrée ».'}</div>`;
       return;
     }
     const rows = [...R.deliveries].sort(SORTERS[S.sort]); if (S.dir === 'desc') rows.reverse();
-    box.innerHTML = `<div class="bl-tablewrap"><table class="bl-table"><thead><tr>${sortTh('ticket', 'Bon')}${sortTh('date', 'Livré le')}${sortTh('client', 'Hôtel')}<th>Contenu</th>${sortTh('amount', 'Montant HT', 'r')}<th>Facturation</th></tr></thead>
+    box.innerHTML = `<div class="bl-tablewrap"><table class="bl-table"><thead><tr>${sortTh('ticket', 'Bon')}${sortTh('date', 'Livré le')}${sortTh('client', 'Hôtel')}<th>Contenu</th>${sortTh('amount', 'Montant HT', 'r')}<th>Facturation</th><th>Paiement</th></tr></thead>
       <tbody>${rows.map(rowHtml).join('')}</tbody></table></div>
       ${R.truncated ? `<p class="bl-hint" style="padding:10px 14px">Les ${R.deliveries.length} plus récents sont affichés sur ${R.total}. Resserrez la période pour voir les autres.</p>` : ''}`;
     box.querySelectorAll('[data-sort]').forEach(th => th.onclick = () => {
@@ -204,12 +215,13 @@
 
   Bill.register('deliveries', {
     async render(main, params = {}) {
-      if (params.clientId !== undefined) { S.clientId = String(params.clientId || ''); S.status = ''; S.q = ''; }
+      if (params.clientId !== undefined) { S.clientId = String(params.clientId || ''); S.status = ''; S.pay.clear(); S.q = ''; }
       const clients = await Bill.clients();
       main.innerHTML = `<div class="bl-head"><div><h2>Bons de livraison</h2><p>Les commandes livrées, par période et par hôtel, avec leur état de facturation. Cliquez sur un bon pour voir son détail ou télécharger son PDF.</p></div>
         <div class="bl-actions"><button class="bl-btn" id="dl-csv" disabled>Exporter (Excel)</button><button class="bl-btn primary" id="dl-pdf" disabled>Télécharger les BL (PDF)</button></div></div>
         <div id="dl-unlinked"></div>
         <div class="bl-panel"><div class="bl-tabs" id="dl-tabs" role="tablist"></div>
+        <div class="bl-statusbar" role="group" aria-label="Filtrer par paiement de la facture"><div class="bl-chipsrow" id="dl-pay"></div></div>
         <div class="bl-filters">
           <div class="bl-field grow"><label for="dl-q">Rechercher</label><input id="dl-q" type="search" value="${e(S.q)}" placeholder="N° de bon ou nom d'hôtel"></div>
           <div class="bl-field"><label for="dl-c">Hôtel</label><select id="dl-c"><option value="">Tous</option>${clients.map(c => `<option value="${c.id}" ${String(S.clientId) === String(c.id) ? 'selected' : ''}>${e(c.societe)}</option>`).join('')}</select></div>
@@ -250,6 +262,7 @@
     d.body.innerHTML = `
       <div class="bl-panel"><div class="bl-panel-b"><dl class="bl-kv">
         <dt>Facturation</dt><dd>${billingTag(b)}${b.invoiceDate ? ` <span class="bl-muted">émise le ${dFr(b.invoiceDate)}</span>` : ''}</dd>
+        ${b.payment ? `<dt>Paiement</dt><dd>${payTag(b)}${b.dueDate ? ` <span class="bl-muted">échéance le ${dFr(b.dueDate)}</span>` : ''}</dd>` : ''}
         <dt>Hôtel</dt><dd>${e(D.client.societe)}</dd>
         <dt>Adresse de livraison</dt><dd>${e(D.client.adresse || '—')}</dd>
         <dt>Contact</dt><dd>${e([D.client.contact, D.client.tel].filter(Boolean).join(' · ') || '—')}</dd>

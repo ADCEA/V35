@@ -407,6 +407,11 @@ et à choisir le tarif en vigueur).
   Facturés* affichent leur nombre ; le total HT de la sélection s'affiche au-dessus du tableau ;
 - **État de facturation**, calculé comme « Facturer le mois » : *à facturer*, *dans un brouillon*, *facturé* (avec le numéro
   de facture), *facturé (ancien circuit)* pour l'historique Odoo. Une facture annulée par un avoir total remet le BL à facturer ;
+- **Paiement de la facture** : pour un BL facturé, une pastille *À encaisser / En retard / Partielle / Payée* (mêmes règles que la liste
+  des factures : l'échéance passée prime sur un règlement partiel) et, sous les onglets, des puces *Paiement* cumulables avec leur nombre
+  (paramètre `payment=unpaid,overdue,partial,paid`). Chaque rangée de puces compte en tenant compte de l'autre (onglet de facturation ↔
+  puces de paiement). Un BL à facturer, en brouillon ou facturé dans l'ancien circuit n'a pas de paiement à suivre. Le CSV a une colonne
+  `paiement` et respecte le filtre ;
 - **Montants** : quantité livrée × prix figé sur la commande. Un bon dont la quantité livrée diffère de la commande est signalé ;
 - **Exports** : PDF d'un bon, **PDF groupé** de tous les bons filtrés (un bon par page, du plus ancien au plus récent,
   500 bons au plus) et CSV Excel (`;`, virgule décimale, BOM) ;
@@ -800,7 +805,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (263 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (269 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

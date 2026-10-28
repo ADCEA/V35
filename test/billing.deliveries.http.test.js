@@ -42,8 +42,11 @@ test('liste filtrée par date et par hôtel', async () => {
 
   let r = (await call('GET', `${B}/deliveries`)).data;
   assert.equal(r.total, 2);
-  assert.deepEqual(r.counts, { all: 2, to_invoice: 2, draft: 0, invoiced: 0 });
+  assert.deepEqual(r.counts, { all: 2, to_invoice: 2, draft: 0, invoiced: 0, payments: { unpaid: 0, overdue: 0, partial: 0, paid: 0 } });
   assert.equal(r.totals.htCents, 10 * 200 + 5 * 200);
+  assert.equal((await call('GET', `${B}/deliveries?payment=overdue,paid`)).data.total, 0, 'aucun BL facturé : rien à encaisser');
+  assert.equal((await call('GET', `${B}/deliveries?payment=impaye`)).status, 400);
+  assert.equal((await call('GET', `${B}/deliveries/export.csv?payment=paid`, null, true)).status, 200);
 
   r = (await call('GET', `${B}/deliveries?clientId=${hotelB}`)).data;
   assert.deepEqual(r.deliveries.map(d => d.ticket), [bl.b.ticket]);

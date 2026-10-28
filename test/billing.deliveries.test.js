@@ -101,7 +101,7 @@ test('état de facturation : à facturer, brouillon, facturé, ancien circuit, a
 
   // filtre et compteurs
   const all = deliveries.listDeliveries({});
-  assert.deepEqual(all.counts, { all: 5, to_invoice: 4, draft: 0, invoiced: 1 });
+  assert.deepEqual(all.counts, { all: 5, to_invoice: 4, draft: 0, invoiced: 1, payments: { unpaid: 0, overdue: 0, partial: 0, paid: 0 } });
   assert.deepEqual(tickets(deliveries.listDeliveries({ status: 'invoiced' })), ['BL-B1']);
   assert.equal(deliveries.listDeliveries({ status: 'to_invoice' }).total, 4);
   assert.equal(deliveries.listDeliveries({ status: 'invoiced', clientId: alpha }).total, 0);
@@ -123,9 +123,9 @@ test('détail d’un BL', () => {
 
 test('exports : CSV Excel et ensemble de BL pour le PDF groupé', () => {
   const csv = deliveries.deliveriesCsv({ clientId: beta });
-  assert.ok(csv.startsWith('﻿bl;date_livraison;hotel;references;pieces;montant_ht;facturation;facture\r\n'));
-  assert.match(csv, /BL-B1;2026-10-15;Beta Resort;1;10;13,50;Facturé \(ancien circuit\);\r\n/);
-  assert.match(csv, /BL-B2;2026-10-20;Beta Resort;1;5;10,00;À facturer;\r\n/);
+  assert.ok(csv.startsWith('﻿bl;date_livraison;hotel;references;pieces;montant_ht;facturation;facture;paiement\r\n'));
+  assert.match(csv, /BL-B1;2026-10-15;Beta Resort;1;10;13,50;Facturé \(ancien circuit\);;\r\n/);
+  assert.match(csv, /BL-B2;2026-10-20;Beta Resort;1;5;10,00;À facturer;;\r\n/);
   assert.ok(csv.indexOf('BL-B1') < csv.indexOf('BL-B2'), 'du plus ancien au plus récent');
 
   const set = deliveries.exportSet({ from: '2026-10-15', to: '2026-10-15' });
