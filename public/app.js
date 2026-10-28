@@ -609,6 +609,7 @@ async function reorderFrom(orderId) {
   const next = {};
   const missing = [];
   order.items.forEach(i => {
+    if (!(i.qty > 0)) return;   // une reprise (quantité négative, saisie par l'administration) ne se recommande pas
     if (SERVICES.some(s => s.id === i.id)) next[i.id] = i.qty; else missing.push(i.name);
   });
   document.getElementById('order-modal').classList.remove('open');

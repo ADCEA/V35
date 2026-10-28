@@ -257,3 +257,43 @@ test('facture émise avec une reprise : PDF complet, FEC équilibré sans montan
   assert.equal(after.creditedCents, inv.totalTtcCents); assert.equal(after.balanceCents, 0);
   assert.equal(after.paymentStatus, 'credited');
 });
+
+// ---------- réservé à l'administrateur ----------
+
+test('seul l\'administrateur saisit une quantité négative : invité, espace client, API, e-mails et planning la refusent', async () => {
+  const { assertPositiveQuantities } = require('../src/utils/orderQty');
+  assert.doesNotThrow(() => assertPositiveQuantities([{ id: 'drap', qty: 3 }]));
+  for (const qty of [-5, 0, 2.5, NaN, undefined]) assert.throws(() => assertPositiveQuantities([{ id: 'drap', name: 'Drap', qty }]), /quantités positives/, String(qty));
+
+  s.newClient();   // plus aucune session d'administrateur
+  const guest = { client: { societe: 'Hôtel', contact: 'Jean', tel: '06', adresse: '1 rue' }, livraisonPrevue: '2026-11-03' };
+  let r = await call('POST', '/api/orders', { ...guest, items: [{ id: 'drap', qty: -5 }] });
+  assert.equal(r.status, 400, JSON.stringify(r.data)); assert.match(r.data.error, /Quantité invalide/);
+  r = await call('POST', '/api/orders', { ...guest, items: [{ id: 'drap', qty: 0 }] });
+  assert.equal(r.status, 400);
+  r = await call('POST', '/api/orders', { ...guest, items: [{ id: 'drap', qty: 4 }] });
+  assert.equal(r.status, 201, 'la commande positive, elle, passe toujours');
+
+  db.prepare(`INSERT INTO api_tokens (client_id, token) VALUES (?, 'tok-negatif-test')`).run(hotel);
+  const api = (qty) => fetch(`${s.BASE}/api/v1/orders`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tok-negatif-test' }, body: JSON.stringify({ items: [{ sageCode: 'S-DP', qty }] }) });
+  const neg = await api(-5);
+  assert.equal(neg.status, 400, await neg.text());
+  assert.equal((await api(3)).status, 201, 'l\'API accepte toujours le positif');
+
+  // sans session : aucune route d'administration, de production ni de facturation n'accepte la saisie
+  const some = db.prepare('SELECT id FROM orders ORDER BY id LIMIT 1').get().id;
+  for (const [method, url, body] of [
+    ['POST', '/api/admin/orders/manual', { clientId: hotel, items: [{ serviceId: 'drap', qty: -5 }] }],
+    ['POST', `/api/admin/orders/${some}/items`, { serviceId: 'serv', qty: -5 }],
+    ['PATCH', `/api/admin/orders/${some}/items`, { items: [{ id: 'drap', deliveredQty: -1 }] }],
+    ['POST', `${B}/invoices/free`, { clientId: hotel, lines: [{ description: 'Reprise', quantity: -1, unitPrice: 1, vatRate: 20 }] }],
+  ]) assert.equal((await call(method, url, body)).status, 401, `${method} ${url}`);
+
+  // administrateur connecté mais Facturation verrouillée : pas de facture avec reprise sans le code
+  assert.equal((await call('POST', '/api/admin/login', { password: 'secret123' })).status, 200);
+  const locked = await call('POST', `${B}/invoices/free`, { clientId: hotel, lines: [{ description: 'Reprise', quantity: 5, unitPrice: 1, vatRate: 20 }, { description: 'Reprise', quantity: -1, unitPrice: 1, vatRate: 20 }] });
+  assert.ok([401, 403, 423].includes(locked.status), `facturation verrouillée : ${locked.status}`);
+  assert.equal((await call('POST', `${B}/lock/unlock`, { code: CODE })).status, 200);
+  assert.equal((await call('POST', `${B}/invoices/free`, { clientId: hotel, lines: [{ description: 'Reprise', quantity: 5, unitPrice: 1, vatRate: 20 }, { description: 'Reprise', quantity: -1, unitPrice: 1, vatRate: 20 }] })).status, 201, 'déverrouillée, l\'administrateur peut');
+
+});

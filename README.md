@@ -743,12 +743,14 @@ facture de test.
 
 ### Quantités négatives (reprises de linge)
 
-Une **quantité négative** se saisit à deux endroits, côté administration uniquement :
+Une **quantité négative** se saisit à deux endroits, **réservés à l'administrateur** (session administrateur ; la Facturation exige en plus son code) :
 
 - **Commande** (« Nouvelle commande », « + Ajouter un article », quantités livrées) : la ligne devient une *reprise* (ex. −20 taies).
   Zéro reste refusé. La quantité livrée d'une reprise reste négative ou nulle. Les reprises ne comptent pas dans la file
   Production ni dans « quantités à préparer » ; elles apparaissent sur la commande, le BL (PDF) et la facture. Les commandes
-  passées par l'hôtel (espace client), l'API et les webhooks restent strictement positives.
+  passées par l'hôtel (espace client, invité compris), l'API, les e-mails entrants et le planning des chambres restent strictement
+  positives (contrôle `src/utils/orderQty.js` en plus de la validation de chaque route, la base n'interdisant plus le négatif ;
+  « Recommander » ignore les reprises).
 - **Facture** (éditeur de lignes, facture libre, ou issue de BL) : la ligne se déduit du total ; le prix reste positif. Depuis
   des BL : détail et regroupé reprennent la quantité négative ; « par BL » donne une ligne de quantité −1 si le solde d'un BL est
   négatif. Les arrondis sont symétriques (−2,5 c → −3 c, comme +2,5 → +3) ; la TVA se calcule par taux, une base négative pour
@@ -762,7 +764,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (249 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (250 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

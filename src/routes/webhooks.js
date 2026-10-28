@@ -7,6 +7,7 @@ const { serializeOrder } = require('../utils/serializeOrder');
 const { sendWhatsAppNotification } = require('../utils/whatsapp');
 const { sendMail, isConfigured: smtpConfigured } = require('../utils/mailer');
 
+const { assertPositiveQuantities } = require('../utils/orderQty');
 const router = express.Router();
 const upload = multer(); // Mailgun envoie le mail en multipart/form-data
 
@@ -120,6 +121,7 @@ router.post('/inbound-email', upload.any(), async (req, res) => {
         createdAt: now.toISOString(),
       });
       const orderId = info.lastInsertRowid;
+      assertPositiveQuantities(building.items, 'commande par e-mail');   // jamais de reprise (négatif) hors administration
       for (const it of building.items) insertItem.run({ orderId, ...it });
       createdTickets.push({ ticket, label: building.label, itemCount: building.items.length });
     }

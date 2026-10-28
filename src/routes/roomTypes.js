@@ -5,6 +5,7 @@ const { computeStayLinen } = require('../utils/autoOrderRules');
 const { serializeOrder } = require('../utils/serializeOrder');
 const { getServicesByIdPricedForClient } = require('../services');
 
+const { assertPositiveQuantities } = require('../utils/orderQty');
 const router = express.Router();
 router.use(requireAdmin);
 
@@ -198,6 +199,7 @@ router.post('/generate-order', (req, res) => {
       createdAt: now.toISOString(),
     });
     const orderId = info.lastInsertRowid;
+    assertPositiveQuantities(items, 'commande issue du planning');   // jamais de reprise (négatif) hors saisie manuelle de l'administrateur
     items.forEach(it => insertItem.run({ orderId, ...it }));
     return orderId;
   });
