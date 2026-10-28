@@ -232,7 +232,7 @@ CREATE TABLE IF NOT EXISTS order_items (
   -- envoyé aux logiciels clients intégrés via API.
   sage_code         TEXT,
   price             REAL NOT NULL,
-  qty               INTEGER NOT NULL CHECK (qty > 0),
+  qty               INTEGER NOT NULL CHECK (qty <> 0),   -- négatif = reprise / retour (saisi par l'administration)
   delivered_qty     INTEGER,
   -- Étape de production PROPRE à cette ligne d'article (pas à la commande
   -- entière) — chaque article avance à son propre rythme dans l'atelier.

@@ -36,6 +36,7 @@
 
   const VAT = [20, 10, 5.5, 2.1, 8.5, 0];
   const num = (v) => { const n = Number(String(v).replace(',', '.')); return Number.isFinite(n) ? n : 0; };
+  const rnd = (x) => (Math.sign(x) * Math.round(Math.abs(x))) + 0;   // arrondi symétrique, comme le serveur (négatif = opposé du positif)
 
   // Éditeur de lignes. Les montants affichés ici sont indicatifs : le serveur recalcule tout à l'enregistrement.
   Bill.linesEditor = function (host, lines, { defaultVat = 20 } = {}) {
@@ -47,10 +48,10 @@
       const by = new Map(); let ht = 0;
       for (const l of state) {
         if (l.isSection) continue;
-        const c = Math.round(num(l.quantity) * num(l.unitPrice) * 100); ht += c;
+        const c = rnd(num(l.quantity) * num(l.unitPrice) * 100); ht += c;
         by.set(l.vatRate, (by.get(l.vatRate) || 0) + c);
       }
-      let vat = 0; for (const [r, base] of by) vat += Math.round(base * Number(r) / 100);
+      let vat = 0; for (const [r, base] of by) vat += rnd(base * Number(r) / 100);
       return { ht, vat, ttc: ht + vat };
     }
     function draw() {
@@ -58,22 +59,23 @@
         ${state.map((l, i) => l.isSection
           ? `<tr><td class="sec" colspan="5"><input data-i="${i}" data-f="description" value="${e(l.description)}" placeholder="Titre de section" aria-label="Titre de section"></td><td><button type="button" class="bl-btn link small" data-rm="${i}" aria-label="Supprimer la ligne">×</button></td></tr>`
           : `<tr><td><input data-i="${i}" data-f="description" value="${e(l.description)}" placeholder="Désignation" aria-label="Désignation"></td>
-            <td><input data-i="${i}" data-f="quantity" value="${e(l.quantity)}" inputmode="decimal" aria-label="Quantité"></td>
+            <td><input data-i="${i}" data-f="quantity" value="${e(l.quantity)}" aria-label="Quantité (négative pour une reprise)" title="Négatif pour une reprise de linge (déduite du total)"></td>
             <td><input data-i="${i}" data-f="unitPrice" value="${e(l.unitPrice)}" inputmode="decimal" aria-label="Prix unitaire HT"></td>
             <td><select data-i="${i}" data-f="vatRate" aria-label="TVA">${VAT.map(v => `<option value="${v}" ${Number(l.vatRate) === v ? 'selected' : ''}>${String(v).replace('.', ',')} %</option>`).join('')}</select></td>
-            <td class="r bl-num" data-total="${i}">${e(eur(Math.round(num(l.quantity) * num(l.unitPrice) * 100)))}</td>
+            <td class="r bl-num" data-total="${i}">${e(eur(rnd(num(l.quantity) * num(l.unitPrice) * 100)))}</td>
             <td><button type="button" class="bl-btn link small" data-rm="${i}" aria-label="Supprimer la ligne">×</button></td></tr>`).join('')}
       </tbody></table></div>
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-top:8px">
         <div><button type="button" class="bl-btn small" data-add="line">Ajouter une ligne</button> <button type="button" class="bl-btn small" data-add="section">Ajouter un titre</button></div>
-        <div class="bl-totals" data-sum></div></div>`;
+        <div class="bl-totals" data-sum></div></div>
+      <div data-hint style="margin-top:8px"></div>`;
       sum();
       host.querySelectorAll('input[data-f],select[data-f]').forEach(inp => {
         inp.oninput = inp.onchange = () => {
           const l = state[Number(inp.dataset.i)]; const f = inp.dataset.f;
           l[f] = f === 'vatRate' ? Number(inp.value) : inp.value;
           const cell = host.querySelector(`[data-total="${inp.dataset.i}"]`);
-          if (cell) cell.textContent = eur(Math.round(num(l.quantity) * num(l.unitPrice) * 100));
+          if (cell) cell.textContent = eur(rnd(num(l.quantity) * num(l.unitPrice) * 100));
           sum();
         };
       });
@@ -84,6 +86,13 @@
     function sum() {
       const t = totals();
       host.querySelector('[data-sum]').innerHTML = `<div><span>Total HT</span><span class="bl-num">${e(eur(t.ht))}</span></div><div><span>TVA</span><span class="bl-num">${e(eur(t.vat))}</span></div><div class="grand"><span>Total TTC</span><span class="bl-num">${e(eur(t.ttc))}</span></div>`;
+      // Une quantité négative déduit du total (reprise de linge). Une facture ne peut pas être émise avec un total négatif.
+      const hint = host.querySelector('[data-hint]');
+      if (hint) {
+        const neg = state.some(l => !l.isSection && num(l.quantity) < 0);
+        hint.innerHTML = t.ttc < 0 ? '<div class="bl-alert warn">Le total est négatif : une facture ne peut pas être émise ainsi (émettez plutôt un avoir).</div>'
+          : neg ? '<div class="bl-hint">Les lignes à quantité négative sont des reprises : elles se déduisent du total.</div>' : '';
+      }
     }
     draw();
     return {

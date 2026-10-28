@@ -31,7 +31,7 @@ router.get('/items', (req, res) => {
       o.ticket, o.societe, o.livraison_prevue as livraisonPrevue
     FROM order_items oi
     JOIN orders o ON o.id = oi.order_id
-    WHERE o.status = 'traitement'
+    WHERE o.status = 'traitement' AND oi.qty > 0   -- une reprise (quantité négative) n'est pas du travail d'atelier
     ORDER BY o.created_at ASC, oi.id ASC
   `).all();
   res.json({ items: rows });
@@ -62,7 +62,7 @@ router.get('/totals', (req, res) => {
     SELECT oi.code, oi.name, SUM(oi.qty) as totalQty, COUNT(DISTINCT oi.order_id) as orderCount
     FROM order_items oi
     JOIN orders o ON o.id = oi.order_id
-    WHERE o.status IN ('recue', 'traitement')
+    WHERE o.status IN ('recue', 'traitement') AND oi.qty > 0
     GROUP BY oi.code, oi.name
     ORDER BY totalQty DESC
   `).all();

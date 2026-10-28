@@ -741,9 +741,28 @@ télécharge le PDF à glisser dedans ; l'envoi est alors noté comme « prépar
 **Non vérifié sur un vrai compte Microsoft** (tests avec un faux serveur Microsoft) : à essayer une première fois avec une
 facture de test.
 
+### Quantités négatives (reprises de linge)
+
+Une **quantité négative** se saisit à deux endroits, côté administration uniquement :
+
+- **Commande** (« Nouvelle commande », « + Ajouter un article », quantités livrées) : la ligne devient une *reprise* (ex. −20 taies).
+  Zéro reste refusé. La quantité livrée d'une reprise reste négative ou nulle. Les reprises ne comptent pas dans la file
+  Production ni dans « quantités à préparer » ; elles apparaissent sur la commande, le BL (PDF) et la facture. Les commandes
+  passées par l'hôtel (espace client), l'API et les webhooks restent strictement positives.
+- **Facture** (éditeur de lignes, facture libre, ou issue de BL) : la ligne se déduit du total ; le prix reste positif. Depuis
+  des BL : détail et regroupé reprennent la quantité négative ; « par BL » donne une ligne de quantité −1 si le solde d'un BL est
+  négatif. Les arrondis sont symétriques (−2,5 c → −3 c, comme +2,5 → +3) ; la TVA se calcule par taux, une base négative pour
+  un taux donne une TVA négative. Une facture au **total négatif** se garde en brouillon mais **ne s'émet pas** (message :
+  émettre un avoir). L'avoir crédite une ligne négative avec une quantité négative (même sens, jamais plus que la ligne) :
+  l'avoir total vaut exactement la facture. Dans le FEC, un montant négatif (ex. TVA d'un taux ne contenant que des reprises)
+  passe du côté opposé du journal : jamais de signe moins.
+
+Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une base existante est recréée avec `CHECK (qty <> 0)`
+(copie intégrale, clés étrangères contrôlées, index refaits ; annulée proprement si un contrôle échoue) ; sans effet ensuite.
+
 ### Tests
 
-`npm test` (240 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (249 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

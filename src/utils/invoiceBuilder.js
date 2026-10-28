@@ -13,13 +13,13 @@ function aggregateByArticle(orders) {
   for (const order of orders) {
     for (const it of order.items) {
       const qty = it.deliveredQty ?? it.qty;
-      if (qty <= 0) continue;
+      if (qty === 0) continue;   // une quantité négative (reprise) vient en déduction
       const key = `${it.sageCode}::${it.price}`;
       if (!groups.has(key)) groups.set(key, { name: it.name, sageCode: it.sageCode, price: it.price, productId: it.odooProductId, qty: 0 });
       groups.get(key).qty += qty;
     }
   }
-  return [...groups.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return [...groups.values()].filter(g => g.qty !== 0).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Construit les lignes de facture à partir d'un ensemble de commandes
@@ -69,7 +69,7 @@ function buildInvoiceLines(orders, detailLevel, genericProductId) {
     lines.push({ isSection: true, name: `BL ${order.ticket} — livré le ${formatDateFr(order.livraisonPrevue)}` });
     for (const it of order.items) {
       const qty = it.deliveredQty ?? it.qty;
-      if (qty <= 0) continue;
+      if (qty === 0) continue;
       lines.push({ isSection: false, productId: it.odooProductId, name: it.name, quantity: qty, priceUnit: it.price });
     }
   }

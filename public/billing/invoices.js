@@ -421,7 +421,7 @@
       for (const c of inv.creditNotes || []) {
         try { for (const l of (await Bill.get('/invoices/' + c.id)).invoice.lines) if (l.creditOfLineId) done.set(l.creditOfLineId, (done.get(l.creditOfLineId) || 0) + l.quantity); } catch (_) { /* borne approximative : le serveur contrôle */ }
       }
-      const real = inv.lines.filter(l => !l.isSection).map(l => ({ ...l, rest: Math.round((l.quantity - (done.get(l.id) || 0)) * 1e6) / 1e6 })).filter(l => l.rest > 0);
+      const real = inv.lines.filter(l => !l.isSection).map(l => ({ ...l, rest: Math.round((l.quantity - (done.get(l.id) || 0)) * 1e6) / 1e6 })).filter(l => l.rest !== 0);   // une ligne en quantité négative (reprise) se crédite en négatif
       if (!real.length) return Bill.toast('Cette facture est déjà intégralement créditée.', true);
       Bill.sensitive({
         title: 'Créer un avoir', scope: `credit:${id}`, okLabel: 'Créer le brouillon d\'avoir', wide: true,
@@ -430,12 +430,12 @@
           <div class="bl-field"><label class="bl-check"><input type="radio" name="cn-m" value="full" checked> Avoir total (${eur(inv.totalTtcCents - inv.creditedCents)} TTC restant)</label>
           <label class="bl-check" style="margin-top:6px"><input type="radio" name="cn-m" value="part"> Avoir partiel : choisir les quantités à créditer</label></div>
           <div id="cn-lines" style="display:none"><div class="bl-tablewrap"><table class="bl-table bl-lines"><thead><tr><th>Désignation</th><th class="r">Restant</th><th style="width:100px">À créditer</th></tr></thead><tbody>
-            ${real.map(l => `<tr><td>${e(l.description)}</td><td class="r bl-num">${e(String(l.rest).replace('.', ','))}</td><td><input data-line="${l.id}" data-max="${l.rest}" inputmode="decimal" placeholder="0" aria-label="Quantité à créditer : ${e(l.description)}"></td></tr>`).join('')}</tbody></table></div></div>`,
+            ${real.map(l => `<tr><td>${e(l.description)}</td><td class="r bl-num">${e(String(l.rest).replace('.', ','))}</td><td><input data-line="${l.id}" data-max="${l.rest}" placeholder="${l.rest < 0 ? '-0' : '0'}" title="${l.rest < 0 ? 'Ligne de reprise : saisissez une quantité négative' : ''}" aria-label="Quantité à créditer : ${e(l.description)}"></td></tr>`).join('')}</tbody></table></div></div>`,
         onOpen: (m) => m.el.querySelectorAll('input[name="cn-m"]').forEach(r => r.onchange = () => { m.$('#cn-lines').style.display = m.el.querySelector('input[name="cn-m"]:checked').value === 'part' ? '' : 'none'; }),
         onSubmit: async (m) => {
           const reason = m.$('#cn-reason').value.trim(); if (!reason) throw new Error("Indiquez le motif de l'avoir.");
           const full = m.el.querySelector('input[name="cn-m"]:checked').value === 'full';
-          const lines = full ? undefined : [...m.el.querySelectorAll('[data-line]')].map(i => ({ lineId: Number(i.dataset.line), quantity: Number(String(i.value).replace(',', '.')) })).filter(x => x.quantity > 0);
+          const lines = full ? undefined : [...m.el.querySelectorAll('[data-line]')].map(i => ({ lineId: Number(i.dataset.line), quantity: Number(String(i.value).replace(',', '.')) })).filter(x => Number.isFinite(x.quantity) && x.quantity !== 0);
           if (!full && !lines.length) throw new Error('Indiquez au moins une quantité à créditer.');
           const r = await Bill.post(`/invoices/${id}/credit-note`, { reason, full, lines });
           mark(); Bill.toast("Brouillon d'avoir créé");

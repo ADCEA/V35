@@ -515,8 +515,9 @@ router.post('/orders/manual', (req, res) => {
     const svc = servicesById[itemId];
     const qty = parseInt(it.qty, 10);
     if (!svc) return res.status(400).json({ error: `Article inconnu : ${itemId}` });
-    if (!Number.isInteger(qty) || qty <= 0) {
-      return res.status(400).json({ error: `Quantité invalide pour ${svc.name}.` });
+    // Quantité négative autorisée (reprise de linge, retour) ; zéro et non-entiers refusés.
+    if (!Number.isInteger(qty) || qty === 0) {
+      return res.status(400).json({ error: `Quantité invalide pour ${svc.name} (entier non nul, négatif possible pour une reprise).` });
     }
     resolved.push({ ...svc, qty });
   }
@@ -730,7 +731,9 @@ router.patch('/orders/:id/items', (req, res) => {
       const found = items.find(i => i.id === row.service_id);
       if (!found) return; // article non transmis : on laisse sa valeur actuelle
       const raw = parseInt(found.deliveredQty, 10);
-      const deliveredQty = Number.isInteger(raw) && raw >= 0 ? raw : row.delivered_qty;
+      // Ligne négative (reprise) : la quantité livrée reste négative ou nulle ; ligne normale : positive ou nulle.
+      const okSign = Number.isInteger(raw) && (row.qty < 0 ? raw <= 0 : raw >= 0);
+      const deliveredQty = okSign ? raw : row.delivered_qty;
       update.run(deliveredQty, order.id, row.service_id);
     });
   })();
@@ -765,15 +768,18 @@ router.post('/orders/:id/items', (req, res) => {
   const svc = servicesById[serviceId];
   if (!svc) return res.status(400).json({ error: 'Article inconnu.' });
   const qtyNum = parseInt(qty, 10);
-  if (!Number.isInteger(qtyNum) || qtyNum <= 0) {
-    return res.status(400).json({ error: 'Quantité invalide.' });
+  if (!Number.isInteger(qtyNum) || qtyNum === 0) {
+    return res.status(400).json({ error: 'Quantité invalide (entier non nul, négatif possible pour une reprise).' });
   }
 
   const existing = db.prepare('SELECT id, qty FROM order_items WHERE order_id = ? AND service_id = ?').get(orderId, serviceId);
   if (existing) {
-    // Déjà présent sur cette commande : on augmente la ligne existante
+    // Déjà présent sur cette commande : on ajuste la ligne existante
     // plutôt que d'en créer une seconde pour le même article.
     const newQty = existing.qty + qtyNum;
+    if (newQty === 0) return res.status(409).json({ error: 'Cet article est déjà sur la commande : la quantité tomberait à zéro. Mettez plutôt la quantité livrée à 0.' });
+    // Une ligne ne change pas de sens (normale ↔ reprise) en passant par ce raccourci.
+    if ((existing.qty > 0) !== (newQty > 0)) return res.status(409).json({ error: "Cet article est déjà sur la commande avec le signe opposé : modifiez la ligne existante ou ajoutez la quantité avec le même signe." });
     db.prepare('UPDATE order_items SET qty = ?, delivered_qty = ? WHERE id = ?').run(newQty, newQty, existing.id);
   } else {
     db.prepare(`

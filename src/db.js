@@ -91,6 +91,36 @@ if (orderItemsColumnsForSageCode.length > 0 && !orderItemsColumnsForSageCode.inc
 }
 
 
+// Quantité négative autorisée sur une ligne de commande (reprise de linge, retour, correction saisie par l'administration) :
+// la contrainte « qty > 0 » devient « qty <> 0 » (une ligne à zéro n'a aucun sens). SQLite ne permet pas de modifier un
+// CHECK : on recrée la table à l'identique (définition relue dans sqlite_master, donc mêmes colonnes dans le même ordre),
+// on copie les lignes, on bascule. Clés étrangères coupées pendant l'opération (rien ne référence order_items, mais la
+// copie ne doit rien déclencher), puis contrôlées avant de valider. Sans effet sur une base déjà migrée.
+const orderItemsQtySql = db.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='order_items'`).get()?.sql || '';
+if (/CHECK\s*\(\s*qty\s*>\s*0\s*\)/i.test(orderItemsQtySql)) {
+  const newSql = orderItemsQtySql
+    .replace(/^CREATE TABLE\s+(IF NOT EXISTS\s+)?["`]?order_items["`]?/i, 'CREATE TABLE order_items_new')
+    .replace(/CHECK\s*\(\s*qty\s*>\s*0\s*\)/i, 'CHECK (qty <> 0)');
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.transaction(() => {
+      db.exec(newSql);
+      db.exec('INSERT INTO order_items_new SELECT * FROM order_items;');
+      db.exec('DROP TABLE order_items;');
+      db.exec('ALTER TABLE order_items_new RENAME TO order_items;');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_items_order ON order_items(order_id);');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_items_production ON order_items(production_stage);');
+      const problems = db.pragma('foreign_key_check');
+      if (problems.length > 0) throw new Error(`${problems.length} incohérence(s) de clés étrangères`);
+    })();
+    console.log('Migration order_items.qty : quantités négatives autorisées.');
+  } catch (err) {
+    console.error('Migration order_items.qty annulée :', err.message);
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
+}
+
 const roomTypesColumns = db.prepare(`PRAGMA table_info(room_types)`).all().map(c => c.name);
 if (roomTypesColumns.length > 0 && !roomTypesColumns.includes('client_id')) {
   db.exec(`ALTER TABLE room_types ADD COLUMN client_id INTEGER REFERENCES clients(id) ON DELETE CASCADE;`);

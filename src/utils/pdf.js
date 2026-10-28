@@ -197,7 +197,7 @@ async function buildInvoiceAnnexPdf(invoiceRef, societe, orders) {
   y = K.tableHeader(doc, cols, y) + 10;
   let grand = 0;
   for (const order of orders) {
-    const lines = order.items.filter((it) => billedQty(it) > 0);
+    const lines = order.items.filter((it) => billedQty(it) !== 0);   // reprises (quantité négative) comprises
     const sub = lines.reduce((s, it) => s + Math.round(billedQty(it) * it.price * 100), 0);
     grand += sub;
     if (y + 26 + Math.min(lines.length, 2) * 21 + 24 > K.BOTTOM) { y = K.nextPage(doc, continued()); y = K.tableHeader(doc, cols, y) + 10; }

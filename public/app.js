@@ -750,10 +750,10 @@ async function openOrderModal(orderId, context) {
         <div class="modal-qty-row">
           <div>
             <div>${i.name}</div>
-            <div class="modal-qty-ordered-hint">Commandé : ${i.qty}</div>
+            <div class="modal-qty-ordered-hint">Commandé : ${i.qty}${i.qty < 0 ? ' (reprise)' : ''}</div>
           </div>
           <div class="modal-qty-control">
-            <input type="number" class="modal-qty-input" id="modal-qty-${i.id}" min="0" value="${i.deliveredQty ?? i.qty}">
+            <input type="number" class="modal-qty-input" id="modal-qty-${i.id}" ${i.qty < 0 ? 'max="0"' : 'min="0"'} value="${i.deliveredQty ?? i.qty}">
             <span class="modal-qty-hint">livré</span>
           </div>
         </div>
@@ -761,7 +761,7 @@ async function openOrderModal(orderId, context) {
     : order.items.map(i => {
         const delivered = i.deliveredQty ?? i.qty;
         if (delivered === i.qty) {
-          return `<div class="ticket-item"><span>${i.name} × ${i.qty}</span></div>`;
+          return `<div class="ticket-item"><span>${i.name} × ${i.qty}${i.qty < 0 ? ' (reprise)' : ''}</span></div>`;
         }
         return `
           <div class="ticket-item-adjusted">
@@ -912,9 +912,9 @@ async function openAddItemUI(orderId) {
             ${articles.map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
           </select>
         </div>
-        <div class="field" style="max-width:100px;">
-          <label>Quantité</label>
-          <input type="number" min="1" value="1" id="add-item-qty-${orderId}">
+        <div class="field" style="max-width:150px;">
+          <label>Quantité <span style="font-weight:400;color:var(--steel);">(négatif = reprise)</span></label>
+          <input type="number" step="1" value="1" id="add-item-qty-${orderId}">
         </div>
         <button class="btn-primary" id="btn-confirm-add-item-${orderId}" style="width:auto;">Ajouter</button>
       </div>
@@ -1080,7 +1080,8 @@ async function saveModalQuantities(orderId) {
   const items = order.items.map(i => {
     const input = document.getElementById('modal-qty-' + i.id);
     const raw = input ? parseInt(input.value, 10) : i.deliveredQty;
-    return { id: i.id, deliveredQty: Number.isInteger(raw) && raw >= 0 ? raw : i.deliveredQty };
+    // ligne négative (reprise) : quantité livrée négative ou nulle ; ligne normale : positive ou nulle
+    return { id: i.id, deliveredQty: Number.isInteger(raw) && (i.qty < 0 ? raw <= 0 : raw >= 0) ? raw : i.deliveredQty };
   });
 
   const refreshByContext = {
@@ -2593,6 +2594,7 @@ async function openManualOrderModal(context, copyOf) {
     </div>
 
     <label style="display:block;font-size:13px;color:var(--steel);margin:14px 0 4px;font-weight:500;">Articles</label>
+    <div style="font-size:12px;color:var(--steel);margin:0 0 2px;">Une quantité négative (ex. −20) est une reprise de linge : elle se déduit sur la facture.</div>
     <div class="qty-grid" id="mo-items-grid"></div>
 
     <div class="field"><label>Notes (optionnel)</label><input id="mo-notes"></div>
@@ -2763,7 +2765,7 @@ function renderQtyGrid(containerId, existingItems) {
   el.innerHTML = SERVICES.map(s => `
     <div class="qty-grid-item">
       <label>${s.code}</label>
-      <input type="number" min="0" data-service="${s.id}" value="${map[s.id] || 0}">
+      <input type="number" step="1" data-service="${s.id}" value="${map[s.id] || 0}">
     </div>
   `).join('');
 }
@@ -2771,7 +2773,7 @@ function collectQtyGrid(containerId) {
   const el = document.getElementById(containerId);
   return [...el.querySelectorAll('input')]
     .map(input => ({ serviceId: input.dataset.service, qty: parseInt(input.value, 10) || 0 }))
-    .filter(i => i.qty > 0);
+    .filter(i => i.qty !== 0);   // négatif = reprise de linge
 }
 
 // Filtre client multiple de l'historique : ensemble vide = tous les clients.

@@ -256,7 +256,7 @@ section.block{padding:48px 0;}
 .qty-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin:10px 0;}
 .qty-grid-item{display:flex;align-items:center;gap:6px;background:var(--paper);border:1px solid var(--line);border-radius:5px;padding:6px 8px;}
 .qty-grid-item label{flex:1;font-size:11.5px;color:var(--ink);}
-.qty-grid-item input{width:44px;border:1px solid var(--line);border-radius:4px;padding:4px;font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:center;}
+.qty-grid-item input{width:54px;border:1px solid var(--line);border-radius:4px;padding:4px;font-family:'IBM Plex Mono',monospace;font-size:12px;text-align:center;}
 
 .month-override-row{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:12px;margin-top:10px;position:relative;}
 .month-override-row .remove-override{position:absolute;top:8px;right:8px;background:transparent;border:none;color:var(--rust);font-size:16px;line-height:1;}

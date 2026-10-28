@@ -43,9 +43,13 @@ function isIsoDate(s) {
 }
 
 // Prix unitaire (jusqu'à 4 décimales) × quantité → centimes entiers.
+// Arrondi « demi vers l'extérieur » : une quantité négative donne exactement l'opposé de la même quantité positive
+// (Math.round(-2.5) vaudrait -2, pas -3). Sans effet sur les valeurs positives.
+const roundAway = (x) => (Math.sign(x) * Math.round(Math.abs(x))) + 0;
+
 function lineCents(quantity, unitPrice) {
   const unit4 = Math.round(Number(unitPrice) * 10000); // prix en 1/10000 €
-  return Math.round((Number(quantity) * unit4) / 100);
+  return roundAway((Number(quantity) * unit4) / 100);
 }
 
 function sha256(text) {
@@ -93,7 +97,7 @@ function computeTotals(lines) {
     .map(([rate, baseCents]) => ({
       rate,
       baseCents,
-      vatCents: Math.round((baseCents * rate) / 100),
+      vatCents: roundAway((baseCents * rate) / 100),
     }));
   const totalHtCents = breakdown.reduce((s, b) => s + b.baseCents, 0);
   const totalVatCents = breakdown.reduce((s, b) => s + b.vatCents, 0);
@@ -150,7 +154,8 @@ function buildNativeLines(orders, detailLevel, vatRate) {
       out.push({
         isSection: false, sageCode: null,
         description: `Prestation de blanchisserie — BL ${o.ticket} livré le ${fmt(o.livraisonPrevue)}`,
-        quantity: 1, unitPrice: total / 100, vatRate,
+        // BL à solde négatif (reprises) : quantité −1 à prix positif, pour garder un prix unitaire valide.
+        quantity: total < 0 ? -1 : 1, unitPrice: Math.abs(total) / 100, vatRate,
       });
     }
     return out;
@@ -164,7 +169,7 @@ function buildNativeLines(orders, detailLevel, vatRate) {
   }
 
   for (const o of orders) {
-    const rows = o.items.filter(it => (it.deliveredQty ?? it.qty) > 0);
+    const rows = o.items.filter(it => (it.deliveredQty ?? it.qty) !== 0);   // les quantités négatives (reprises) se facturent en moins
     if (rows.length === 0) continue;
     out.push({ isSection: true, description: `BL ${o.ticket} — livré le ${fmt(o.livraisonPrevue)}` });
     for (const it of rows) {
@@ -302,7 +307,8 @@ function sanitizeLines(rawLines) {
     const quantity = Number(l.quantity);
     const unitPrice = Number(l.unitPrice);
     const vatRate = Number(l.vatRate);
-    if (!Number.isFinite(quantity) || quantity <= 0) throw new BillingError(`Ligne ${i + 1} : quantité invalide.`);
+    // Quantité négative autorisée (reprise, remise en nature) ; zéro refusé. Le prix, lui, reste positif.
+    if (!Number.isFinite(quantity) || quantity === 0) throw new BillingError(`Ligne ${i + 1} : quantité invalide (nombre non nul ; négatif possible pour une reprise).`);
     if (!Number.isFinite(unitPrice) || unitPrice < 0) throw new BillingError(`Ligne ${i + 1} : prix unitaire invalide.`);
     if (![0, 2.1, 5.5, 8.5, 10, 20].includes(vatRate)) throw new BillingError(`Ligne ${i + 1} : taux de TVA inattendu (${l.vatRate}).`);
     return { isSection: false, description, sageCode: l.sageCode || null, quantity, unitPrice, vatRate, creditOfLineId: l.creditOfLineId || null };
@@ -386,7 +392,8 @@ function createCreditNoteDraft(originalInvoiceId, opts = {}) {
 
   let wanted;
   if (opts.full) {
-    wanted = [...creditable.entries()].filter(([, q]) => q > 0).map(([lineId, quantity]) => ({ lineId, quantity }));
+    // Une ligne négative de la facture (reprise) se crédite en négatif : l'avoir total annule bien le total de la facture.
+    wanted = [...creditable.entries()].filter(([, q]) => q !== 0).map(([lineId, quantity]) => ({ lineId, quantity }));
   } else {
     if (!Array.isArray(opts.lines) || opts.lines.length === 0) throw new BillingError('Indiquez les lignes à créditer.');
     wanted = opts.lines.map(x => ({ lineId: Number(x.lineId), quantity: Number(x.quantity) }));
@@ -395,9 +402,11 @@ function createCreditNoteDraft(originalInvoiceId, opts = {}) {
       if (seen.has(w.lineId)) throw new BillingError('Une même ligne est indiquée plusieurs fois.');
       seen.add(w.lineId);
       if (!creditable.has(w.lineId)) throw new BillingError(`Ligne ${w.lineId} : introuvable sur cette facture.`);
-      if (!Number.isFinite(w.quantity) || w.quantity <= 0) throw new BillingError(`Ligne ${w.lineId} : quantité invalide.`);
-      if (w.quantity > creditable.get(w.lineId) + 1e-9) {
-        throw new BillingError(`Ligne ${w.lineId} : on ne peut créditer que ${creditable.get(w.lineId)} (déjà crédité ou saisie trop élevée).`);
+      if (!Number.isFinite(w.quantity) || w.quantity === 0) throw new BillingError(`Ligne ${w.lineId} : quantité invalide.`);
+      const rest = creditable.get(w.lineId);
+      // Même sens que la ligne d'origine (positive ou négative), et pas plus que ce qui reste à créditer.
+      if (rest === 0 || Math.sign(w.quantity) !== Math.sign(rest) || Math.abs(w.quantity) > Math.abs(rest) + 1e-9) {
+        throw new BillingError(`Ligne ${w.lineId} : on ne peut créditer que ${rest} (déjà crédité, sens opposé ou saisie trop élevée).`);
       }
     }
   }
@@ -519,7 +528,10 @@ function missingMentions(seller, buyer, inv, issueDate) {
 
   need(isIsoDate(issueDate), "Date d'émission invalide.");
   need(inv.lines.some(l => !l.is_section), 'Aucune ligne facturable.');
-  need(inv.total_ttc_cents > 0, 'Montant total nul : rien à facturer.');
+  if (inv.total_ttc_cents < 0) need(false, inv.kind === 'invoice'
+    ? 'Le total de la facture est négatif (les lignes en quantité négative dépassent les autres) : une facture ne peut pas être négative, émettez plutôt un avoir.'
+    : "Le total de l'avoir est négatif (seules des lignes de reprise sont créditées) : ajoutez les lignes à créditer.");
+  else need(inv.total_ttc_cents > 0, 'Montant total nul : rien à facturer.');
   return problems;
 }
 
@@ -564,7 +576,8 @@ function issueInvoice(invoiceId, opts = {}) {
         if (l.is_section) continue;
         const origLine = orig.lines.find(x => x.id === l.credit_of_line_id);
         if (!origLine) throw new BillingError('Ligne d\'avoir sans ligne d\'origine.');
-        if (l.quantity + (issuedMap.get(origLine.id) || 0) > origLine.quantity + 1e-9) {
+        const creditedSoFar = l.quantity + (issuedMap.get(origLine.id) || 0);
+        if (Math.sign(l.quantity) !== Math.sign(origLine.quantity) || Math.abs(creditedSoFar) > Math.abs(origLine.quantity) + 1e-9) {
           throw new BillingError(`Ligne « ${l.description} » : crédit supérieur à la quantité facturée.`);
         }
       }

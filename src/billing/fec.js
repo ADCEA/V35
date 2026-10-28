@@ -88,7 +88,9 @@ function buildFec(period) {
       EcritureLib: lib, ValidDate: ymd(inv.issued_at),
     };
     // Facture : débit client / crédit ventes et TVA. Avoir : l'inverse.
-    const side = (cents, debitSide) => (debitSide ? { Debit: amount(cents), Credit: '0,00' } : { Debit: '0,00', Credit: amount(cents) });
+    // Un montant négatif (ex. TVA d'un taux dont les lignes sont des reprises) passe du côté opposé, jamais en négatif.
+    const side = (cents, debitSide) => ((cents < 0) === !debitSide
+      ? { Debit: amount(Math.abs(cents)), Credit: '0,00' } : { Debit: '0,00', Credit: amount(Math.abs(cents)) });
     rows.push({ ...common, CompteNum: ACCOUNTS.customer, CompteLib: 'Clients', CompAuxNum: aux, CompAuxLib: inv.societe, ...side(inv.total_ttc_cents, !isCredit) });
     rows.push({ ...common, CompteNum: salesAccount, CompteLib: salesLabel, CompAuxNum: '', CompAuxLib: '', ...side(inv.total_ht_cents, isCredit) });
     for (const b of breakdown) {
