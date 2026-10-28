@@ -123,7 +123,7 @@
     let changed = false; let C = null; let stats = null; let tokens = []; let G = null; let tab = opts.tab || 'info';
     const d = Bill.drawer({ onClose: () => { if (changed && onChange) onChange(); } });
     d.body.innerHTML = '<div class="bl-spin">Chargement…</div>';
-    const TABS = [['info', 'Informations'], ['prices', 'Tarifs'], ['catalog', 'Catalogue accessible'], ['integration', 'Intégration']];
+    const TABS = [['info', 'Informations'], ['prices', 'Tarifs'], ['contract', 'Contrat'], ['catalog', 'Catalogue accessible'], ['integration', 'Intégration']];
 
     async function loadClient() {
       const r = await Bill.get('/catalog/clients/' + id); C = r.client; stats = r.stats; tokens = r.tokens;
@@ -144,7 +144,7 @@
         paint();
       });
       const box = d.body.querySelector('#cl-tab');
-      ({ info: paintInfo, prices: paintPrices, catalog: paintCatalog, integration: paintIntegration })[tab](box);
+      ({ info: paintInfo, prices: paintPrices, contract: paintContract, catalog: paintCatalog, integration: paintIntegration })[tab](box);
     }
 
     // ----- informations -----
@@ -362,6 +362,20 @@
         try { await Bill.put(`/catalog/clients/${id}/assignment`, { articleIds: ids }); changed = true; Bill.toast('Catalogue enregistré'); await loadClient(); await loadGrid(); paint(); }
         catch (err) { btn.disabled = false; Bill.fail(err, errEl); }
       };
+    }
+
+    // ----- contrat : ce que l'hôtel retrouve dans l'onglet « Contrat » de son espace client -----
+    function paintContract(box) {
+      box.innerHTML = `<div class="bl-alert ok">L'onglet « Contrat » de l'espace client de cet hôtel présente déjà ses conditions de règlement, son tarif, ses devis et son mandat de prélèvement (repris de sa fiche). Déposez ici le contrat signé et ses avenants : ils s'y ajoutent.</div>
+        <div id="ct-own"></div><div id="ct-common" style="margin-top:18px"></div>`;
+      Bill.documentsPanel(box.querySelector('#ct-own'), {
+        clientId: id, title: 'Documents de cet hôtel',
+        intro: 'Visibles uniquement par cet hôtel, dans son espace client (PDF, 8 Mo au plus). Le contrat signé s\'affiche en premier.',
+      });
+      Bill.documentsPanel(box.querySelector('#ct-common'), {
+        title: 'Documents communs à tous les hôtels',
+        intro: 'Conditions générales de vente et autres documents que chaque hôtel retrouve dans son espace. Ajoutés ou retirés ici, ils changent pour tous les hôtels à la fois.',
+      });
     }
 
     // ----- intégration -----

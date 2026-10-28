@@ -5,6 +5,7 @@
 const express = require('express');
 const engine = require('../billing/engine');
 const catalog = require('../billing/catalog');
+const clientDocs = require('../billing/clientDocuments');
 const lock = require('../billing/lock');
 const { wrap } = require('../billing/http');
 
@@ -89,6 +90,31 @@ router.get('/catalog/clients/:id/unbilled', wrap((req, res) => res.json(catalog.
 router.post('/catalog/clients/:id/reprice', stepUpWhen(applying, req => `reprice:${req.params.id}`), wrap((req, res) => {
   const b = req.body || {};
   res.json(catalog.repriceUnbilled(clientId(req), { from: iso(b.from), articleIds: b.articleIds }, { apply: applying(req) }));
+}));
+
+// ---------- documents du contrat (visibles par l'hôtel dans l'onglet « Contrat » de son espace) ----------
+// Le PDF arrive tel quel dans le corps de la requête (Content-Type: application/pdf) ; titre, nom du fichier, type et
+// date de signature voyagent dans l'adresse. Les documents d'un hôtel ne sont visibles que de lui ; ceux sans hôtel (CGV) de tous.
+
+const pdfBody = express.raw({ type: 'application/pdf', limit: clientDocs.MAX_BYTES + 4096 });
+const docMeta = (req) => ({ kind: req.query.kind, title: req.query.title, filename: req.query.filename, signedOn: req.query.signedOn });
+
+router.get('/catalog/clients/:id/documents', wrap((req, res) => res.json({ documents: clientDocs.listForClient(clientId(req)) })));
+router.post('/catalog/clients/:id/documents', pdfBody,
+  wrap((req, res) => res.status(201).json({ document: clientDocs.add({ clientId: clientId(req), ...docMeta(req), data: req.body }) })));
+router.get('/catalog/documents/common', wrap((req, res) => res.json({ documents: clientDocs.listCommon() })));
+router.post('/catalog/documents/common', pdfBody,
+  wrap((req, res) => res.status(201).json({ document: clientDocs.add({ clientId: null, ...docMeta(req), data: req.body }) })));
+router.put('/catalog/documents/:docId', wrap((req, res) => {
+  const b = req.body || {};
+  res.json({ document: clientDocs.update(parseInt(req.params.docId, 10), { title: b.title, signedOn: b.signedOn }) });
+}));
+router.delete('/catalog/documents/:docId', wrap((req, res) => res.json(clientDocs.remove(parseInt(req.params.docId, 10)))));
+router.get('/catalog/documents/:docId/file', wrap((req, res) => {
+  const d = clientDocs.getFile(parseInt(req.params.docId, 10));
+  if (!d) throw new engine.BillingError('Document introuvable.', 404);
+  res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${d.filename.replace(/"/g, '')}"`, 'X-Content-Type-Options': 'nosniff' });
+  res.send(d.data);
 }));
 
 module.exports = router;

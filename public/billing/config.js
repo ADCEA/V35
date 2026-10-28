@@ -51,7 +51,12 @@
           <div class="bl-field"><label for="is-late_penalty_text">Mention des pénalités de retard</label><textarea id="is-late_penalty_text" name="late_penalty_text" style="min-height:70px">${e(s.late_penalty_text || '')}</textarea></div>
           <div class="bl-field"><label for="is-footer_note">Note de bas de page (facultatif)</label><input id="is-footer_note" name="footer_note" value="${e(s.footer_note || '')}"></div>
           <div class="bl-err" id="is-err" role="alert"></div>
-          <button class="bl-btn primary" type="submit">Enregistrer…</button></div></form>`;
+          <button class="bl-btn primary" type="submit">Enregistrer…</button></div></form>
+        <div id="is-docs" style="margin-top:18px"></div>`;
+      Bill.documentsPanel(main.querySelector('#is-docs'), {
+        title: 'Conditions générales et documents communs',
+        intro: 'Les PDF déposés ici apparaissent dans l\'onglet « Contrat » de l\'espace client de chaque hôtel (conditions générales de vente, par exemple). Le contrat signé propre à un hôtel se dépose dans sa fiche, onglet « Contrat ».',
+      });
       main.querySelector('#is-form').onsubmit = (ev) => {
         ev.preventDefault();
         const f = ev.target; const body = {};

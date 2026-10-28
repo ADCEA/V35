@@ -335,6 +335,133 @@ router.get('/invoices/:id/pdf', requireClient, (req, res) => {
   fs.createReadStream(invoice.pdf_path).pipe(res);
 });
 
+// ---------- livraisons : l'historique des bons de livraison de l'hôtel ----------
+
+// GET /api/clients/deliveries — commandes livrées (une par bon de livraison), avec ce qui a été commandé et livré,
+// les reprises, et l'état de facturation. Aucun prix ici : les montants sont sur les factures.
+router.get('/deliveries', requireClient, (req, res) => {
+  const deliveries = require('../billing/deliveries');
+  const clientId = req.session.clientId;
+  const list = deliveries.listDeliveries({ clientId });
+  const itemsBy = new Map();
+  for (const r of db.prepare(`
+    SELECT oi.order_id AS orderId, oi.name, oi.code, oi.qty, oi.delivered_qty AS deliveredQty
+    FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE o.client_id = ? AND o.status = 'livree' ORDER BY oi.id`).all(clientId)) {
+    if (!itemsBy.has(r.orderId)) itemsBy.set(r.orderId, []);
+    itemsBy.get(r.orderId).push({ name: r.name, code: r.code, qty: r.qty, delivered: r.deliveredQty ?? r.qty });
+  }
+  const dates = new Map(db.prepare("SELECT id, collecte_date AS collecteDate FROM orders WHERE client_id = ? AND status = 'livree'").all(clientId).map(r => [r.id, r.collecteDate]));
+  const out = list.deliveries.map(d => {
+    const items = itemsBy.get(d.id) || [];
+    return {
+      id: d.id, ticket: d.ticket, date: d.date, collecteDate: dates.get(d.id) || null,
+      pieces: items.reduce((n, i) => n + (i.delivered > 0 ? i.delivered : 0), 0),
+      reprises: items.reduce((n, i) => n + (i.delivered < 0 ? -i.delivered : 0), 0),
+      adjusted: items.some(i => i.delivered !== i.qty),
+      items,
+      billing: d.billing.status === 'invoiced' ? { status: 'invoiced', invoiceNumber: d.billing.invoiceNumber || null } : { status: 'to_invoice', invoiceNumber: null },
+    };
+  });
+  res.json({ deliveries: out, truncated: list.truncated });
+});
+
+// GET /api/clients/deliveries/:id/pdf — le bon de livraison, après vérification qu'il est bien celui de l'hôtel connecté.
+router.get('/deliveries/:id/pdf', requireClient, async (req, res) => {
+  const row = db.prepare("SELECT id FROM orders WHERE id = ? AND client_id = ? AND status = 'livree'").get(Number(req.params.id), req.session.clientId);
+  if (!row) return res.status(404).json({ error: 'Bon de livraison introuvable.' });
+  try {
+    const order = require('../billing/mail').loadDeliveryNote(row.id);
+    const pdf = await require('../utils/pdf').buildDeliveryNotePdf(order);
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="bon-livraison-${String(order.ticket).replace(/[^\w.-]+/g, '-')}.pdf"`, 'X-Content-Type-Options': 'nosniff' });
+    res.send(pdf);
+  } catch (err) {
+    console.error('[clients] PDF bon de livraison', err);
+    res.status(500).json({ error: 'Erreur lors de la génération du bon de livraison.' });
+  }
+});
+
+// ---------- contrat : conditions, tarifs, devis et documents déposés par la blanchisserie ----------
+
+const DocUrl = (d) => ({ id: d.id, kind: d.kind, title: d.title, signedOn: d.signedOn, size: d.size, common: d.common, url: `/api/clients/documents/${d.id}` });
+
+// GET /api/clients/documents — la liste seule (l'accueil y puise le contrat signé).
+router.get('/documents', requireClient, (req, res) => {
+  res.json({ documents: require('../billing/clientDocuments').listVisibleTo(req.session.clientId).map(DocUrl) });
+});
+
+// GET /api/clients/documents/:id — un document, s'il est à l'hôtel connecté ou commun à tous.
+router.get('/documents/:id', requireClient, (req, res) => {
+  const d = require('../billing/clientDocuments').getFile(Number(req.params.id));
+  if (!d || (d.client_id != null && d.client_id !== req.session.clientId)) return res.status(404).json({ error: 'Document introuvable.' });
+  res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${String(d.filename).replace(/"/g, '')}"`, 'X-Content-Type-Options': 'nosniff' });
+  res.send(d.data);
+});
+
+// GET /api/clients/quotes/:id/pdf — un devis finalisé de l'hôtel (jamais un brouillon).
+router.get('/quotes/:id/pdf', requireClient, async (req, res) => {
+  const q = db.prepare('SELECT id, client_id, status FROM native_quotes WHERE id = ?').get(Number(req.params.id));
+  if (!q || q.client_id !== req.session.clientId || q.status === 'draft') return res.status(404).json({ error: 'Devis introuvable.' });
+  try {
+    const { buffer, filename } = await require('../billing/documents').quotePdf(q.id);
+    res.set({ 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${String(filename).replace(/"/g, '')}"`, 'X-Content-Type-Options': 'nosniff' });
+    res.send(buffer);
+  } catch (err) {
+    console.error('[clients] PDF devis', err);
+    res.status(500).json({ error: 'Erreur lors de la génération du devis.' });
+  }
+});
+
+// GET /api/clients/contract — tout ce que l'onglet « Contrat » affiche.
+router.get('/contract', requireClient, (req, res) => {
+  const engine = require('../billing/engine');
+  const escompte = require('../billing/escompte');
+  const catalog = require('../billing/catalog');
+  const { CATEGORIES } = require('../services');
+  const clientId = req.session.clientId;
+  const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(clientId);
+  const s = engine.getSettings();
+
+  let mandate = null;
+  try { mandate = db.prepare("SELECT umr, signed_on AS signedOn FROM sdd_mandates WHERE client_id = ? AND status = 'active'").get(clientId) || null; } catch { /* prélèvements non initialisés */ }
+  const offered = escompte.offeredTo(s, client);
+
+  // Tarifs : les articles de l'hôtel (catalogue réservé), à défaut ceux qu'il commande ou qui ont un tarif négocié.
+  const grid = catalog.priceGrid(clientId);
+  let list = grid.articles.filter(a => (grid.hasRestriction ? a.attributed : (a.negotiatedPrice != null || a.pieces12m > 0)));
+  if (!list.length && !grid.hasRestriction) list = grid.articles;
+  const catLabel = new Map(CATEGORIES.map(c => [c.id, c.label]));
+  const prices = list.map(a => ({
+    id: a.id, name: a.name, code: a.code, category: a.category, categoryLabel: catLabel.get(a.category) || 'Autres',
+    price: a.price, since: a.negotiatedSince || null,
+    previous: a.history.length ? a.history[0].price : null,
+    upcoming: a.upcoming || null,
+  }));
+
+  const quotes = require('../billing/quotes').listQuotes({ clientId }).quotes
+    .filter(q => q.status !== 'draft').slice(0, 20)
+    .map(q => ({ id: q.id, number: q.number, reference: q.reference, status: q.status, expired: q.expired, issueDate: q.issueDate, validUntil: q.validUntil, totalHtCents: q.totalHtCents, pdfUrl: `/api/clients/quotes/${q.id}/pdf` }));
+
+  res.json({
+    today: engine.todayParis(),
+    conditions: {
+      paymentTermsDays: s.payment_terms_days,
+      paymentMethod: mandate ? { type: 'sdd', umr: mandate.umr, signedOn: mandate.signedOn } : { type: 'transfer' },
+      escompte: offered ? { ratePct: Number(s.early_discount_rate), hours: Number(s.early_discount_hours) } : null,
+      detailLevel: client.invoice_detail_level,
+      latePenalty: s.late_penalty_text || null,
+    },
+    establishment: {
+      societe: client.societe, clientType: client.client_type || 'pro', siret: client.siret || null, tvaNumber: client.tva_number || null,
+      adresse: [client.adresse, [client.code_postal, client.ville].filter(Boolean).join(' ')].filter(Boolean).join(', '),
+      adresseFacturation: client.adresse_facturation || null,
+    },
+    prices,
+    pricesRestricted: grid.hasRestriction,
+    quotes,
+    documents: require('../billing/clientDocuments').listVisibleTo(clientId).map(DocUrl),
+  });
+});
+
 // ---------- questionnaire de satisfaction (NPS) ----------
 
 // GET /api/clients/nps/status — indique si le client connecté a déjà

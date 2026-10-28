@@ -26,6 +26,81 @@
     });
   };
 
+  // Documents PDF visibles par l'hôtel dans l'onglet « Contrat » de son espace : contrat signé, avenants (par hôtel),
+  // conditions générales (communs à tous). Un seul composant pour les deux usages.
+  const DOC_KINDS = { contract: 'Contrat', terms: 'Conditions générales', other: 'Autre document' };
+  const docSize = (b) => (b > 1048576 ? (b / 1048576).toFixed(1).replace('.', ',') + ' Mo' : Math.max(1, Math.round(b / 1024)) + ' Ko');
+  Bill.documentsPanel = function (host, { clientId = null, title, intro, onChange }) {
+    const common = clientId == null;
+    const base = common ? '/catalog/documents/common' : `/catalog/clients/${clientId}/documents`;
+    const kinds = common ? [['terms', 'Conditions générales'], ['other', 'Autre document']] : [['contract', 'Contrat signé'], ['other', 'Avenant, annexe ou autre document']];
+    host.innerHTML = '<div class="bl-spin">Chargement…</div>';
+
+    async function paint() {
+      let docs;
+      try { docs = (await Bill.get(base)).documents; } catch (err) { host.innerHTML = '<div class="bl-err" role="alert"></div>'; return Bill.fail(err, host.firstChild); }
+      host.innerHTML = `<div class="bl-panel"><div class="bl-panel-h"><h3>${e(title)}</h3><button class="bl-btn small" data-add>Ajouter un PDF…</button></div><div class="bl-panel-b">
+        <p class="bl-note">${e(intro)}</p>
+        ${docs.length ? docs.map(d => `<div class="bl-token"><div><b>${e(d.title)}</b>
+            <div><small class="bl-muted">${e(DOC_KINDS[d.kind] || d.kind)}${d.signedOn ? ` · signé le ${Bill.dFr(d.signedOn)}` : ''} · ${docSize(d.size)} · déposé le ${Bill.dFr(d.uploadedAt)}</small></div></div>
+          <div class="bl-actions"><button class="bl-btn small" data-view="${d.id}">Voir</button><button class="bl-btn small" data-edit="${d.id}">Modifier</button><button class="bl-btn small danger" data-del="${d.id}">Supprimer</button></div></div>`).join('')
+          : `<p class="bl-muted">${common ? 'Aucun document commun pour le moment.' : 'Aucun document pour cet hôtel : il ne verra que les documents communs.'}</p>`}
+        </div></div>`;
+      host.querySelector('[data-add]').onclick = () => addModal();
+      host.querySelectorAll('[data-view]').forEach(b => b.onclick = () => Bill.openPdf(`/catalog/documents/${b.dataset.view}/file`));
+      host.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => editModal(docs.find(x => String(x.id) === b.dataset.edit)));
+      host.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
+        const d = docs.find(x => String(x.id) === b.dataset.del);
+        if (!(await Bill.confirm('Supprimer ce document ?', `« ${d.title} » ne sera plus visible ${common ? 'par aucun hôtel' : 'par cet hôtel'}. Le fichier est définitivement effacé.`, 'Supprimer', true))) return;
+        try { await Bill.del(`/catalog/documents/${d.id}`); Bill.toast('Document supprimé'); if (onChange) onChange(); await paint(); } catch (err) { Bill.fail(err); }
+      });
+    }
+
+    function addModal() {
+      Bill.modal({
+        title: common ? 'Ajouter un document commun' : 'Ajouter un document à cet hôtel',
+        body: `<div class="bl-field"><label for="dc-f">Fichier PDF (8 Mo au plus)</label><input id="dc-f" type="file" accept="application/pdf,.pdf"></div>
+          <div class="bl-field"><label for="dc-k">Type de document</label><select id="dc-k">${kinds.map(([k, l]) => `<option value="${k}">${e(l)}</option>`).join('')}</select></div>
+          <div class="bl-field"><label for="dc-t">Titre affiché à l'hôtel</label><input id="dc-t" maxlength="120" placeholder="${e(common ? 'Conditions générales de vente' : 'Contrat de prestation')}"></div>
+          ${common ? '' : '<div class="bl-field"><label for="dc-d">Date de signature (facultatif)</label><input id="dc-d" type="date"></div>'}`,
+        buttons: [
+          { label: 'Annuler', onClick: async () => {} },
+          { label: 'Déposer le document', primary: true, onClick: async (m) => {
+            const file = m.$('#dc-f').files[0];
+            if (!file) throw new Error('Choisissez un fichier PDF.');
+            if (file.size > 8 * 1024 * 1024) throw new Error('Fichier trop volumineux (8 Mo au plus).');
+            await Bill.uploadPdf(base, file, { kind: m.$('#dc-k').value, title: m.$('#dc-t').value, filename: file.name, signedOn: common ? '' : m.$('#dc-d').value });
+            Bill.toast('Document déposé'); if (onChange) onChange(); await paint();
+          } },
+        ],
+        onOpen: (m) => {
+          // Le titre se pré-remplit avec le type choisi tant que personne n'y a touché.
+          const t = m.$('#dc-t'); const k = m.$('#dc-k');
+          k.onchange = () => { if (!t.dataset.touched) t.placeholder = k.value === 'other' ? 'Document' : (common ? 'Conditions générales de vente' : 'Contrat de prestation'); };
+          t.oninput = () => { t.dataset.touched = '1'; };
+        },
+      });
+    }
+
+    function editModal(d) {
+      Bill.modal({
+        title: 'Modifier le document',
+        body: `<div class="bl-field"><label for="de-t">Titre affiché à l'hôtel</label><input id="de-t" maxlength="120" value="${e(d.title)}"></div>
+          ${common ? '' : `<div class="bl-field"><label for="de-d">Date de signature</label><input id="de-d" type="date" value="${e(d.signedOn || '')}"></div>`}
+          <p class="bl-hint">Pour remplacer le fichier lui-même, déposez le nouveau PDF puis supprimez l'ancien.</p>`,
+        buttons: [
+          { label: 'Annuler', onClick: async () => {} },
+          { label: 'Enregistrer', primary: true, onClick: async (m) => {
+            await Bill.put(`/catalog/documents/${d.id}`, { title: m.$('#de-t').value, ...(common ? {} : { signedOn: m.$('#de-d').value || null }) });
+            Bill.toast('Document modifié'); if (onChange) onChange(); await paint();
+          } },
+        ],
+      });
+    }
+
+    return paint();
+  };
+
   // Liste des hôtels (comptes clients), mise en cache le temps de la session.
   let clientsCache = null;
   Bill.clients = async (force) => {

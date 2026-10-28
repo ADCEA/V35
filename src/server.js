@@ -98,6 +98,7 @@ app.get(/^(?!\/api\/).*/, (req, res) => {
 });
 
 app.use((err, req, res, next) => {
+  if (err && (err.status === 413 || err.type === 'entity.too.large')) return res.status(413).json({ error: 'Fichier trop volumineux (8 Mo au plus).' });
   console.error(err);
   res.status(500).json({ error: 'Erreur serveur.' });
 });

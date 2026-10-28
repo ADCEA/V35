@@ -37,6 +37,13 @@ async function startServer({ dataDir, env = {} } = {}) {
     let data = null; try { data = await res.json(); } catch {}
     return { status: res.status, data };
   }
+  // Envoi d'un fichier tel quel dans le corps de la requête (PDF des documents de contrat).
+  async function upload(url, buffer, contentType = 'application/pdf') {
+    const res = await fetch(BASE + url, { method: 'POST', headers: { 'Content-Type': contentType, cookie }, body: buffer });
+    const sc = res.headers.get('set-cookie'); if (sc) cookie = sc.split(';')[0];
+    let data = null; try { data = await res.json(); } catch {}
+    return { status: res.status, data };
+  }
   let exited = false;
   const stop = () => new Promise(r => {
     if (exited || child.exitCode !== null) return r();
@@ -44,7 +51,7 @@ async function startServer({ dataDir, env = {} } = {}) {
     child.on('exit', () => { exited = true; r(); });
     child.kill();
   });
-  return { DATA_DIR, BASE, call, stop, newClient: () => { cookie = ''; } };
+  return { DATA_DIR, BASE, call, upload, stop, newClient: () => { cookie = ''; } };
 }
 
 module.exports = { startServer };

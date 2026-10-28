@@ -611,6 +611,169 @@ details.acct[open] summary::after{content:'\2212';}
   .pay-box dd{margin-bottom:8px;}
 }
 
+/* ---------- espace client à onglets : Accueil, Factures, Contrat, Livraisons, Mon compte ---------- */
+#espace-dashboard .espace-header{align-items:flex-end;gap:12px 24px;}
+#espace-dashboard .espace-actions{align-items:center;gap:14px 22px;}
+#espace-dashboard .espace-actions .btn-primary{width:auto;margin-top:0;padding:12px 22px;text-transform:none;letter-spacing:0;font-size:14.5px;}
+#espace-dashboard .btn-logout{border:none;background:transparent;text-decoration:underline;text-transform:none;letter-spacing:0;font-family:'IBM Plex Sans',sans-serif;font-size:14px;padding:8px 0;color:#546A7E;}
+#espace-dashboard .btn-logout:hover{color:var(--rust);}
+#espace-dashboard .card-subhead{font-size:18px;font-weight:500;letter-spacing:0;text-transform:none;}
+#espace-dashboard .empty-note{font-size:14px;color:#546A7E;font-style:normal;}
+
+.esp-tabs{display:flex;gap:28px;border-bottom:1px solid var(--line);margin:20px 0 28px;overflow-x:auto;scrollbar-width:none;}
+.esp-tabs::-webkit-scrollbar{display:none;}
+.esp-tab{flex:none;background:none;border:none;border-bottom:3px solid transparent;margin-bottom:-1px;padding:12px 2px 11px;font-family:'Fredoka',sans-serif;font-size:15.5px;font-weight:500;color:#546A7E;white-space:nowrap;}
+.esp-tab:hover{color:var(--ink);}
+.esp-tab.active{color:var(--ink);border-bottom-color:var(--brand);}
+.esp-tab:focus-visible{outline:2px solid var(--brand-deep);outline-offset:-2px;border-radius:4px;}
+.esp-badge{display:inline-block;margin-left:7px;min-width:20px;padding:0 6px;border-radius:10px;background:#EAF4FF;color:var(--brand-deep);font-family:'IBM Plex Sans',sans-serif;font-size:11.5px;font-weight:600;line-height:20px;text-align:center;}
+.esp-badge.late{background:#FBEAE7;color:#B3362A;}
+.esp-badge[hidden],.esp-panel[hidden]{display:none;}
+.esp-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
+.esp-muted{color:#546A7E;}
+.esp-small{font-size:13px;}
+
+.esp-cols{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start;}
+.esp-main{flex:999 1 520px;min-width:0;}
+.esp-side{flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:20px;}
+.esp-sechead{display:flex;justify-content:space-between;align-items:baseline;gap:8px 16px;flex-wrap:wrap;margin-bottom:12px;}
+.esp-sechead .card-subhead,.esp-sechead .esp-card-h{margin-bottom:0;}
+.esp-grid{display:flex;flex-wrap:wrap;gap:20px;margin-bottom:20px;align-items:stretch;}
+.esp-grid>.esp-card{flex:1 1 440px;min-width:0;}
+.esp-card{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:20px 22px;}
+.esp-card.wide{margin-bottom:20px;}
+.esp-card-title{font-family:'Fredoka',sans-serif;font-size:16px;font-weight:500;margin:0 0 8px;}
+.esp-card-h{font-family:'Fredoka',sans-serif;font-size:18px;font-weight:500;margin:0 0 10px;}
+.esp-balance .esp-card-title{color:#546A7E;margin-bottom:2px;}
+.esp-balance.late{background:#FFF5F3;border-color:#F1C7C1;}
+.esp-balance.ok{background:#F1FAF5;border-color:#BFE5D2;}
+.esp-balance.ok .esp-balance-sub{color:#1B7A52;font-size:14px;}
+.esp-balance-fig{font-family:'Fredoka',sans-serif;font-weight:600;font-size:32px;line-height:1.2;}
+.esp-balance-fig span{font-size:14px;font-weight:400;color:#546A7E;}
+.esp-balance-sub{font-size:13.5px;color:#3E546A;margin-top:4px;}
+.esp-balance-sub strong{color:#B3362A;}
+.esp-doc{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--line);color:var(--ink);text-decoration:none;font-size:14px;}
+.esp-doc:first-of-type{border-top:none;padding-top:2px;}
+.esp-doc small{display:block;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#546A7E;}
+.esp-doc-pdf{color:var(--brand-deep);font-size:13px;text-decoration:underline;}
+.esp-doc:hover .esp-doc-pdf{color:var(--ink);}
+.esp-doc:focus-visible{outline:2px solid var(--brand-deep);outline-offset:2px;border-radius:4px;}
+.esp-contact{font-size:14px;color:#3E546A;}
+
+.esp-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 14px;border:1px solid #BFD3E6;border-radius:5px;background:var(--paper);color:var(--brand-deep);font:inherit;font-size:13.5px;text-decoration:none;cursor:pointer;}
+.esp-btn:hover{border-color:var(--brand);}
+.esp-btn:focus-visible,.esp-chip:focus-visible,.esp-more:focus-visible,details.bon>summary:focus-visible{outline:2px solid var(--brand-deep);outline-offset:2px;}
+.esp-btn.solid{width:100%;margin-top:16px;padding:11px 16px;background:var(--brand-deep);border-color:var(--brand-deep);color:#fff;font-family:'Fredoka',sans-serif;font-weight:500;font-size:14.5px;}
+.esp-btn.solid:hover{background:var(--ink);border-color:var(--ink);}
+.esp-more{margin-top:10px;border:1px solid #BFD3E6;background:var(--paper);color:var(--brand-deep);border-radius:5px;padding:9px 16px;font-family:'Fredoka',sans-serif;font-size:13.5px;font-weight:500;}
+.esp-more:hover{border-color:var(--brand);}
+
+.esp-chips{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 4px;}
+.esp-chip{border:1px solid #BFD3E6;background:var(--paper);color:var(--ink);border-radius:20px;padding:7px 16px;font-family:'Fredoka',sans-serif;font-size:13.5px;font-weight:500;}
+.esp-chip:hover{border-color:var(--ink);}
+.esp-chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff;}
+.esp-toolbar{display:flex;justify-content:space-between;align-items:flex-end;gap:14px 20px;flex-wrap:wrap;}
+.esp-toolbar .esp-chips{margin:0;}
+.esp-toolbar-fields{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;}
+.esp-toolbar .field{margin-bottom:0;}
+.esp-toolbar .field label{font-size:13px;color:#3E546A;text-transform:none;letter-spacing:0;font-weight:400;margin-bottom:6px;}
+.esp-toolbar .field select{width:100%;min-width:180px;border:1px solid var(--line);border-radius:4px;padding:10px 12px;font-family:inherit;font-size:16px;background:var(--bg);color:var(--ink);}
+.esp-toolbar .field input{min-width:240px;}
+.esp-strip{display:flex;flex-wrap:wrap;gap:6px 32px;align-items:baseline;margin:18px 0 6px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:14px 22px;font-size:14px;color:#3E546A;}
+.esp-strip strong{font-family:'Fredoka',sans-serif;font-size:20px;font-weight:600;color:var(--ink);}
+.esp-strip .muted,.esp-strip .esp-muted{margin-left:auto;}
+
+.esp-list{background:var(--paper);border:1px solid var(--line);border-radius:8px;}
+.esp-list-row{display:flex;justify-content:space-between;align-items:center;gap:6px 16px;flex-wrap:wrap;padding:14px 22px;border-bottom:1px solid var(--line);}
+.esp-list-row:last-child{border-bottom:none;}
+.esp-list-main{display:flex;flex-direction:column;min-width:0;}
+.esp-list-side{display:flex;align-items:center;gap:10px;margin-left:auto;}
+.bon-num{font-family:'IBM Plex Mono',monospace;font-size:13.5px;font-weight:600;}
+.bon-date{font-size:13px;color:#546A7E;}
+.bon-inv{font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#546A7E;}
+.esp-list-side .inv-pdf{margin-top:0;}
+
+.bon-list{display:flex;flex-direction:column;gap:10px;}
+.bon-list>*,.esp-main,.esp-side{min-width:0;}
+details.bon{background:var(--paper);border:1px solid var(--line);border-radius:8px;}
+details.bon[open]{border-color:#BFD3E6;}
+details.bon>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px 20px;flex-wrap:wrap;padding:16px 20px;}
+details.bon>summary::-webkit-details-marker{display:none;}
+.bon-side{display:flex;align-items:center;gap:8px 16px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end;}
+.bon-state{display:inline-flex;align-items:center;gap:8px;}
+.bon-pieces{font-size:14px;display:inline-flex;flex-direction:column;align-items:flex-end;line-height:1.25;}
+.bon-pieces small{font-size:12px;color:#546A7E;}
+.esp-chev{color:#546A7E;flex:none;transition:transform .15s ease;}
+details.bon[open] .esp-chev{transform:rotate(180deg);}
+.bon-body{padding:4px 20px 20px;border-top:1px solid var(--line);}
+.bon-meta{font-size:13px;color:#546A7E;margin:12px 0 8px;}
+.bon-actions{display:flex;gap:12px 20px;flex-wrap:wrap;align-items:center;margin-top:16px;}
+
+.esp-tablewrap{overflow-x:auto;}
+.esp-table{width:100%;border-collapse:collapse;font-size:14.5px;}
+.esp-table.prices{min-width:440px;}
+.esp-table th{text-align:left;font-weight:500;font-size:13px;color:#546A7E;padding:8px 0;border-bottom:1px solid var(--line);}
+.esp-table td{padding:9px 0;border-bottom:1px solid #EEF2F7;vertical-align:top;}
+.esp-table th.num,.esp-table td.num{text-align:right;padding-left:12px;padding-right:12px;}
+.esp-table td.num{font-family:'IBM Plex Mono',monospace;}
+.esp-table td.diff{font-weight:600;}
+.esp-table td:last-child,.esp-table th:last-child{padding-left:16px;}
+.esp-table tr.reprise td{background:var(--bg);}
+.esp-table tr.reprise td:first-child{padding-left:8px;}
+.esp-table tr.grp th,.esp-table tr.grp th:last-child{font-family:'Fredoka',sans-serif;font-weight:500;font-size:14px;color:var(--brand-deep);padding:16px 0 6px;border-bottom:none;}
+.esp-table.prices td.num small{display:block;font-family:'IBM Plex Sans',sans-serif;font-size:12px;color:#546A7E;}
+.esp-table.prices td.since{color:#546A7E;padding-left:24px;white-space:nowrap;}
+.esp-table.prices th:last-child{padding-left:24px;}
+.esp-flag{display:inline-block;padding:2px 9px;border-radius:12px;font-size:12.5px;white-space:nowrap;}
+.esp-flag.warn{background:#FFF4DB;color:#7A4E00;}
+.esp-flag.neutral{background:#EEF2F7;color:#3E546A;}
+
+.esp-dl{margin:0;display:grid;grid-template-columns:minmax(120px,170px) minmax(0,1fr);}
+.esp-dl dt,.esp-dl dd{margin:0;padding:10px 0;border-top:1px solid var(--line);font-size:14.5px;overflow-wrap:anywhere;}
+.esp-dl dt{color:#546A7E;font-size:14px;}
+.esp-dl small{color:#546A7E;font-size:12.5px;}
+.esp-dl .ct-legal{display:block;line-height:1.45;}
+.esp-line{display:flex;justify-content:space-between;align-items:center;gap:8px 16px;flex-wrap:wrap;padding:12px 0;border-top:1px solid var(--line);}
+.esp-line:first-of-type{margin-top:6px;}
+.esp-line-main{display:flex;flex-direction:column;min-width:0;}
+.esp-line-title{font-size:14.5px;font-weight:500;}
+.esp-line-side{display:flex;align-items:center;gap:12px;margin-left:auto;}
+.esp-line-side .inv-pdf{margin-top:0;}
+
+/* factures : l'état se lit dans la pastille, pas dans la couleur d'un liseré */
+.inv-pill{font-size:12px;text-transform:none;letter-spacing:0;font-weight:500;padding:4px 11px;}
+.inv-pill.neutral{background:#EEF2F7;color:#3E546A;}
+.inv-row,.inv-row.due,.inv-row.partial,.inv-row.late,.inv-row.paid{border-left:1px solid var(--line);}
+.inv-summary,.inv-summary.late,.inv-summary.ok{border-left:1px solid var(--line);}
+.inv-summary.late{background:#FFF5F3;border-color:#F1C7C1;}
+.inv-summary.ok{background:#F1FAF5;border-color:#BFE5D2;}
+#esp-panel-factures .inv-group{margin-top:22px;}
+
+@media(max-width:480px){
+  #espace-dashboard .espace-header{align-items:stretch;}
+  #espace-dashboard .espace-actions{width:100%;flex-direction:column-reverse;align-items:stretch;}
+  #espace-dashboard .espace-actions .btn-primary{width:100%;}
+  #espace-dashboard .btn-logout{text-align:left;}
+  .esp-tabs{gap:22px;margin-bottom:22px;}
+  .esp-tab{font-size:15px;}
+  .esp-card{padding:18px 16px;}
+  .esp-toolbar-fields,.esp-toolbar .field,.esp-toolbar .field input{width:100%;min-width:0;}
+  .esp-toolbar .field select{min-width:0;}
+  .esp-strip{padding:12px 16px;gap:4px 20px;}
+  .esp-strip .esp-muted{margin-left:0;flex-basis:100%;}
+  .esp-list-row{padding:12px 16px;}
+  details.bon>summary{padding:14px 16px;}
+  .bon-body{padding:2px 16px 16px;}
+  .bon-side{width:100%;justify-content:space-between;}
+  .esp-table.prices{min-width:0;font-size:14px;}
+  .esp-table.prices td.since,.esp-table.prices th:last-child{padding-left:10px;font-size:13px;}
+  .esp-table.prices td.num,.esp-table.prices th.num{padding-left:6px;padding-right:6px;}
+  .esp-dl{grid-template-columns:1fr;}
+  .esp-dl dt{padding-bottom:0;}
+  .esp-dl dd{border-top:none;padding-top:2px;}
+  .esp-grid>.esp-card{flex-basis:100%;}
+}
+
 /* ---------- Onglets d'administration : même typographie que la Facturation ----------
    Texte et boutons en IBM Plex Sans (graisse moyenne, minuscules) ; Fredoka reste réservé aux titres et aux chiffres ;
    plus de capitales espacées. Ne touche ni l'espace client ni la Facturation (qui a ses propres styles .bl-*). */

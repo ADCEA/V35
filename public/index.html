@@ -170,37 +170,74 @@
             <span id="dash-email"></span>
           </div>
           <div class="espace-actions">
-            <button class="btn-logout" id="btn-open-account">Mon compte</button>
             <button class="btn-logout" id="btn-logout">Se déconnecter</button>
+            <button class="btn-primary" id="btn-espace-new-order">Nouvelle commande</button>
           </div>
         </div>
 
-        <div class="home-action">
-          <button class="btn-primary" id="btn-espace-new-order">Nouvelle commande</button>
-          <span class="home-action-note" id="home-action-note"></span>
+        <nav class="esp-tabs" id="esp-tabs" role="tablist" aria-label="Sections de mon espace">
+          <button type="button" class="esp-tab active" role="tab" id="esp-tab-accueil" aria-controls="esp-panel-accueil" aria-selected="true" data-esp-tab="accueil">Accueil</button>
+          <button type="button" class="esp-tab" role="tab" id="esp-tab-factures" aria-controls="esp-panel-factures" aria-selected="false" tabindex="-1" data-esp-tab="factures">Factures<span class="esp-badge" id="esp-badge-factures" hidden></span></button>
+          <button type="button" class="esp-tab" role="tab" id="esp-tab-contrat" aria-controls="esp-panel-contrat" aria-selected="false" tabindex="-1" data-esp-tab="contrat">Contrat</button>
+          <button type="button" class="esp-tab" role="tab" id="esp-tab-livraisons" aria-controls="esp-panel-livraisons" aria-selected="false" tabindex="-1" data-esp-tab="livraisons">Livraisons</button>
+          <button type="button" class="esp-tab" role="tab" id="esp-tab-compte" aria-controls="esp-panel-compte" aria-selected="false" tabindex="-1" data-esp-tab="compte">Mon compte</button>
+        </nav>
+
+        <!-- Accueil : le suivi du moment -->
+        <div class="esp-panel" role="tabpanel" id="esp-panel-accueil" aria-labelledby="esp-tab-accueil">
+          <div class="esp-cols">
+            <div class="esp-main">
+              <section class="dash-section" id="inprogress-section">
+                <h4 class="card-subhead">Commandes en cours</h4>
+                <div class="own-orders" id="own-inprogress"></div>
+              </section>
+              <section class="dash-section">
+                <div class="esp-sechead">
+                  <h4 class="card-subhead">Dernières livraisons</h4>
+                  <button type="button" class="link-btn" id="btn-home-deliveries">Voir toutes mes livraisons</button>
+                </div>
+                <div id="home-deliveries"></div>
+              </section>
+            </div>
+            <aside class="esp-side">
+              <div id="home-balance"></div>
+              <div id="home-docs"></div>
+              <div id="home-contact"></div>
+              <div id="nps-card"></div>
+            </aside>
+          </div>
         </div>
 
-        <section class="dash-section" id="inprogress-section" style="display:none;">
-          <h4 class="card-subhead">Commandes en cours</h4>
-          <div class="own-orders" id="own-inprogress"></div>
-        </section>
-
-        <section class="dash-section" id="own-invoices-section" style="display:none;">
-          <h4 class="card-subhead">Vos factures</h4>
+        <!-- Factures -->
+        <div class="esp-panel" role="tabpanel" id="esp-panel-factures" aria-labelledby="esp-tab-factures" hidden>
           <div id="invoice-summary"></div>
           <div id="invoice-payment"></div>
+          <div class="esp-chips" id="invoice-filters" role="group" aria-label="Filtrer les factures"></div>
           <div id="own-invoices"></div>
-        </section>
+        </div>
 
-        <section class="dash-section">
-          <h4 class="card-subhead">Historique des commandes</h4>
-          <div class="own-orders" id="own-orders"></div>
-        </section>
+        <!-- Contrat -->
+        <div class="esp-panel" role="tabpanel" id="esp-panel-contrat" aria-labelledby="esp-tab-contrat" hidden>
+          <div id="contract-body"><p class="empty-note">Chargement…</p></div>
+        </div>
 
-        <div id="nps-card"></div>
+        <!-- Livraisons : l'historique des bons de livraison -->
+        <div class="esp-panel" role="tabpanel" id="esp-panel-livraisons" aria-labelledby="esp-tab-livraisons" hidden>
+          <div class="esp-toolbar">
+            <div class="esp-toolbar-fields">
+              <div class="field"><label for="deliv-month">Période</label><select id="deliv-month"></select></div>
+              <div class="field"><label for="deliv-q">Rechercher un bon de livraison</label><input id="deliv-q" type="search" placeholder="Numéro du bon" autocomplete="off"></div>
+            </div>
+            <div class="esp-chips" id="deliv-chips" role="group" aria-label="Filtrer par état de facturation"></div>
+          </div>
+          <div id="deliv-summary"></div>
+          <div id="deliv-list"></div>
+        </div>
 
+        <!-- Mon compte -->
+        <div class="esp-panel" role="tabpanel" id="esp-panel-compte" aria-labelledby="esp-tab-compte" hidden>
         <section class="dash-section" id="account-section">
-          <h4 class="card-subhead">Mon compte</h4>
+          <h4 class="card-subhead">Mes informations</h4>
 
           <details class="acct" id="acct-profile">
             <summary>Mes coordonnées</summary>
@@ -247,6 +284,7 @@
             </div>
           </details>
         </section>
+        </div>
       </div>
 
     </section>
@@ -581,6 +619,7 @@
   <button id="footer-admin-link" class="footer-link" type="button">Accès équipe</button>
 </footer>
 
+<script src="/espace.js"></script>
 <script src="/app.js"></script>
 <script src="/stats-daily.js"></script>
 <script src="/billing/core.js"></script>

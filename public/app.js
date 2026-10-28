@@ -343,6 +343,7 @@ document.getElementById('btn-logout').addEventListener('click', async () => {
   await api('POST', '/api/clients/logout');
   currentClient = null;
   document.getElementById('reorder-note').style.display = 'none';
+  espaceReset();
   setAuthMode('connexion');
   renderEspace();
 });
@@ -350,10 +351,6 @@ document.getElementById('btn-logout').addEventListener('click', async () => {
 document.getElementById('btn-espace-new-order').addEventListener('click', () => {
   document.getElementById('reorder-note').style.display = 'none';
   switchView('commander');
-});
-document.getElementById('btn-open-account').addEventListener('click', () => {
-  document.getElementById('acct-profile').open = true;
-  document.getElementById('account-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
 // Pré-remplit le formulaire de commande avec les coordonnées du compte
@@ -427,7 +424,6 @@ const INVOICE_PILLS = {
   unpaid: ['À régler', 'due'], partial: ['Réglée en partie', 'partial'], paid: ['Réglée', 'paid'],
   overdue: ['En retard', 'late'], credit_note: ['Avoir', 'credit'],
 };
-let invoiceShowAll = false;
 
 function legacyInvoiceHtml(inv) {
   const period = inv.periodStart && inv.periodEnd
@@ -509,30 +505,6 @@ function renderPaymentBox(payment, invoices) {
   }));
 }
 
-async function renderOwnInvoices() {
-  const section = document.getElementById('own-invoices-section');
-  const box = document.getElementById('own-invoices');
-  const { invoices, summary, payment } = await api('GET', '/api/clients/invoices');
-  if (invoices.length === 0) { section.style.display = 'none'; return; }
-  section.style.display = 'block';
-  renderInvoiceSummary(invoices, summary);
-  renderPaymentBox(payment, invoices);
-
-  // À régler : d'abord ce qui est en retard, puis par échéance.
-  const open = invoices.filter(i => !i.legacy && i.balanceCents > 0)
-    .sort((a, b) => (b.overdueDays > 0) - (a.overdueDays > 0) || String(a.dueDate).localeCompare(String(b.dueDate)));
-  const others = invoices.filter(i => i.legacy || i.balanceCents <= 0);
-  const LIMIT = 4;
-  const shown = invoiceShowAll ? others : others.slice(0, LIMIT);
-  const head = (t) => (open.length && others.length ? `<h5 class="inv-group">${t}</h5>` : '');
-  box.innerHTML = `
-    ${open.length ? head('À régler') + open.map(invoiceHtml).join('') : ''}
-    ${others.length ? head('Déjà réglées et anciennes') + shown.map(invoiceHtml).join('') : ''}
-    ${others.length > LIMIT ? `<button type="button" class="link-btn" id="btn-invoices-more">${invoiceShowAll ? 'Réduire la liste' : `Afficher les ${others.length - LIMIT} autres factures`}</button>` : ''}`;
-  const more = document.getElementById('btn-invoices-more');
-  if (more) more.addEventListener('click', () => { invoiceShowAll = !invoiceShowAll; renderOwnInvoices().catch(console.error); });
-}
-
 // ---------- commandes ----------
 function trackHtml(status) {
   const idx = STATUSES.findIndex(s => s.id === status);
@@ -561,44 +533,20 @@ function bindOrderTickets(container) {
   });
 }
 
-let orderHistoryShowAll = false;
 async function renderOwnOrders() {
   const { orders } = await api('GET', '/api/clients/orders');
   ownOrdersCache = orders;
   const active = orders.filter(o => o.status !== 'livree');
-  const done = orders.filter(o => o.status === 'livree');
 
-  document.getElementById('home-action-note').textContent = active.length ? `${plural(active.length, 'commande en cours', 'commandes en cours')}` : '';
-
-  // En cours : le suivi d'un coup d'œil.
+  // En cours : le suivi d'un coup d'œil. (L'historique des livraisons est dans l'onglet « Livraisons ».)
   const inprogress = document.getElementById('own-inprogress');
-  document.getElementById('inprogress-section').style.display = active.length ? 'block' : 'none';
-  inprogress.innerHTML = active.map(o => `
+  inprogress.innerHTML = active.length ? active.map(o => `
     <div class="live-order">
       ${ownTicketHtml(o)}
       ${trackHtml(o.status)}
       ${o.livraisonPrevue ? `<div class="live-eta">Livraison prévue le ${portalDay(o.livraisonPrevue)}</div>` : ''}
-    </div>`).join('');
+    </div>`).join('') : '<p class="empty-note">Aucune commande en cours. Passez une nouvelle commande quand vous en avez besoin.</p>';
   bindOrderTickets(inprogress);
-
-  // Historique : les commandes livrées, avec « Recommander ».
-  const box = document.getElementById('own-orders');
-  if (done.length === 0) {
-    box.innerHTML = `<p class="empty-note">${orders.length === 0 ? 'Aucune commande pour le moment.' : 'Aucune commande livrée pour le moment.'}</p>`;
-    return;
-  }
-  const LIMIT = 5;
-  const shown = orderHistoryShowAll ? done : done.slice(0, LIMIT);
-  box.innerHTML = shown.map(o => `
-    <div class="own-row">
-      ${ownTicketHtml(o, { badge: false })}
-      <button type="button" class="reorder-btn" data-reorder="${o.id}" aria-label="Recommander la commande ${escapeHtml(o.ticket)}">Recommander</button>
-    </div>`).join('') + (done.length > LIMIT
-      ? `<button type="button" class="link-btn" id="btn-orders-more">${orderHistoryShowAll ? 'Réduire la liste' : `Afficher les ${done.length - LIMIT} commandes précédentes`}</button>` : '');
-  bindOrderTickets(box);
-  box.querySelectorAll('[data-reorder]').forEach(b => b.addEventListener('click', () => reorderFrom(b.dataset.reorder)));
-  const more = document.getElementById('btn-orders-more');
-  if (more) more.addEventListener('click', () => { orderHistoryShowAll = !orderHistoryShowAll; renderOwnOrders().catch(console.error); });
 }
 
 // « Recommander » : reprend les quantités d'une commande passée dans le formulaire, sans rien envoyer.
@@ -657,10 +605,17 @@ async function renderEspace() {
   document.getElementById('dash-societe').textContent = currentClient.societe;
   document.getElementById('dash-email').textContent = currentClient.email;
   fillAccountForms();
+  espaceSetTab(espaceTab);   // on garde l'onglet en cours quand on revient sur « Mon espace »
+  renderHome();
 
   renderNpsCard().catch(console.error);
-  renderOwnInvoices().catch(err => { console.error(err); document.getElementById('own-invoices-section').style.display = 'none'; });
-  try { await renderOwnOrders(); } catch (err) { console.error(err); }
+  // Chaque morceau se charge et s'affiche de son côté : une panne sur l'un n'empêche pas les autres.
+  await Promise.all([
+    renderOwnInvoices().catch(err => { console.error(err); document.getElementById('own-invoices').innerHTML = '<p class="empty-note">Impossible de charger vos factures pour le moment.</p>'; }),
+    renderOwnOrders().catch(err => { console.error(err); }),
+    renderDeliveries().catch(err => { console.error(err); document.getElementById('deliv-list').innerHTML = '<p class="empty-note">Impossible de charger vos livraisons pour le moment.</p>'; }),
+    renderHomeDocuments().catch(err => { console.error(err); }),
+  ]);
 }
 
 document.getElementById('btn-save-billing').addEventListener('click', async () => {

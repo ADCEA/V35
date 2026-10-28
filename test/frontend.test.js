@@ -39,3 +39,21 @@ test('le tableau de bord journalier des Statistiques est chargé et valide', () 
   assert.doesNotThrow(() => new vm.Script(fs.readFileSync(file, 'utf8'), { filename: 'stats-daily.js' }));
   assert.ok(html.indexOf('/app.js') < html.indexOf('/stats-daily.js'), 'chargé après app.js (il utilise api() et escHtml())');
 });
+
+test("l'espace client à onglets : espace.js est chargé avant app.js, valide, et les identifiants qu'il manipule existent", () => {
+  assert.ok(html.includes('<script src="/espace.js"></script>'));
+  assert.ok(html.indexOf('/espace.js') < html.indexOf('/app.js'), 'espace.js d\'abord : app.js l\'appelle en fin d\'initialisation');
+  const src = fs.readFileSync(path.join(PUBLIC, 'espace.js'), 'utf8');
+  assert.doesNotThrow(() => new vm.Script(src, { filename: 'espace.js' }));
+  // chaque onglet a son bouton et son panneau
+  for (const t of ['accueil', 'factures', 'contrat', 'livraisons', 'compte']) {
+    assert.ok(html.includes(`id="esp-tab-${t}"`), `bouton de l'onglet ${t}`);
+    assert.ok(html.includes(`id="esp-panel-${t}"`), `panneau de l'onglet ${t}`);
+  }
+  // tous les éléments que le script va chercher par identifiant sont dans la page
+  const ids = new Set([...src.matchAll(/getElementById\('([\w-]+)'\)/g)].map(m => m[1]));
+  const app = fs.readFileSync(path.join(PUBLIC, 'app.js'), 'utf8');
+  for (const m of app.matchAll(/getElementById\('((?:esp|own|invoice|inprogress|nps|account)[\w-]*)'\)/g)) ids.add(m[1]);
+  // (les éléments que les scripts fabriquent eux-mêmes, comme la carte NPS, n'ont pas à figurer dans la page)
+  for (const id of ids) assert.ok(html.includes(`id="${id}"`) || src.includes(`id="${id}"`) || app.includes(`id="${id}"`), `#${id} absent de index.html`);
+});

@@ -62,6 +62,7 @@ complète (accueil, commande, suivi, espace personnel, administration).
 ### Tables
 
 - **clients** — comptes de l'espace personnel (email, coordonnées, code d'accès haché).
+- **client_documents** — PDF du contrat et documents communs visibles de l'hôtel (contenu en base, donc sauvegardé).
 - **orders** — une ligne par commande (ticket, client associé ou invité, statut, dates, notes).
 - **order_items** — les articles d'une commande (catégorie de linge, quantité), liés à `orders` par `order_id`.
 - **admin** — une seule ligne (mot de passe haché + email de réception des bons de livraison).
@@ -240,18 +241,34 @@ En production, quel que soit l'hébergeur, pensez à :
 
 ## Espace client
 
-Ce que voit un hôtel quand il se connecte (page d'accueil du site) :
+Ce que voit un hôtel quand il se connecte (page d'accueil du site). Le bouton « Nouvelle commande » reste en tête ; dessous, cinq onglets
+(`public/espace.js`, balisage dans `public/index.html`, styles `esp-*` dans `public/styles.css`) :
 
-- **Accueil** : bouton « Nouvelle commande » en tête, puis les commandes en cours avec leur avancement (reçue → en traitement →
-  prête → livrée) et la date de livraison prévue, les factures, l'historique des commandes livrées et, tout en bas, le compte.
-- **Factures** : pour chaque facture de la facturation intégrée, le statut (à régler, réglée en partie, en retard, réglée, avoir),
+- **Accueil** : le « Reste à payer » (dont le retard) avec un lien vers les factures, les commandes en cours avec leur avancement (reçue →
+  en traitement → prête → livrée) et la date de livraison prévue, les trois dernières livraisons, les documents utiles (dernière facture,
+  dernier bon de livraison, contrat signé), les coordonnées de la blanchisserie et le questionnaire de satisfaction.
+- **Factures** : voir ci-dessous. Le nombre de factures à régler s'affiche en pastille sur l'onglet (rouge s'il y a du retard).
+- **Contrat** : ce qui lie l'hôtel à la blanchisserie, en lecture seule — conditions de règlement (délai de paiement, mode de règlement :
+  virement ou prélèvement SEPA avec la référence de son mandat, escompte s'il lui est proposé, détail des lignes de facture, pénalités de
+  retard), son établissement (raison sociale, SIRET, TVA, adresses ; les corrections se font dans « Mon compte »), **ses tarifs** (prix
+  hors taxes en vigueur et depuis quand ; l'ancien prix et le prochain tarif programmé s'y lisent s'il y en a), ses **devis** finalisés
+  (jamais les brouillons) avec leur PDF, et les **documents** déposés par la blanchisserie (voir « Documents du contrat »). L'IBAN du
+  mandat n'est jamais renvoyé.
+- **Livraisons** : l'historique des bons de livraison (commandes livrées), du plus récent au plus ancien, groupés par mois, avec filtre par
+  mois, recherche par numéro et filtre « à facturer / facturées ». Chaque bon se déplie : date de collecte et de livraison, pour chaque
+  article la quantité commandée et la quantité livrée (écarts signalés), les reprises de linge, le PDF du bon et « Commander à nouveau ».
+  Aucun montant n'y figure (ils sont sur les factures) ; une livraison facturée indique le numéro de la facture. Le PDF d'un bon n'est servi
+  qu'à l'hôtel concerné.
+- **Mon compte** : voir plus bas.
+
+- **Factures (détail)** : pour chaque facture de la facturation intégrée, le statut (à régler, réglée en partie, en retard, réglée, avoir),
   l'échéance, le montant TTC, le reste dû et le PDF. Un résumé « Reste à régler » (dont le retard) surmonte la liste, avec les
   coordonnées bancaires et un bouton « Copier ». Tant que l'offre d'**escompte** est ouverte, un encadré indique le montant à payer
   et la date limite ; une fois la facture réglée avec escompte, l'escompte accordé est rappelé. Les anciennes factures du circuit
-  Odoo restent listées (sans statut).
+  Odoo restent listées (sans statut). Filtres « Toutes / À régler / Payées ».
 - **Recommander** : sur une commande livrée, reprend ses quantités dans le formulaire de commande (rien n'est envoyé : l'hôtel vérifie
   puis valide). Les articles qui ne sont plus au catalogue de l'hôtel sont signalés et ignorés.
-- **Mon compte** : coordonnées (contact, téléphone, adresse), informations de facturation (SIRET, TVA, adresse de facturation) et
+- **Mon compte (détail)** : coordonnées (contact, téléphone, adresse), informations de facturation (SIRET, TVA, adresse de facturation) et
   changement du code d'accès. Le nom de l'établissement reste géré par Blanchisserie Cézanne (il figure sur les factures) ; changer
   l'adresse e-mail (l'identifiant) exige le code actuel. Chaque modification de coordonnées ou de code est tracée au journal de la
   facturation (`client_self_updated`, `client_code_changed`).
@@ -263,6 +280,25 @@ Ce que voit un hôtel quand il se connecte (page d'accueil du site) :
 - **Essais limités** : 5 mauvais codes pour une même adresse e-mail bloquent la connexion 15 minutes (même avec le bon code), de même
   pour les changements de code et les demandes de lien. Ces compteurs sont en mémoire : un redémarrage du serveur les remet à zéro.
   Ils sont suivis par adresse et non par IP, car le serveur n'est pas configuré derrière un proxy de confiance.
+
+### Documents du contrat (contrat signé, CGV)
+
+La blanchisserie dépose des PDF que l'hôtel retrouve dans l'onglet « Contrat » de son espace :
+
+- **Par hôtel** : Facturation → Hôtels → fiche de l'hôtel → onglet **Contrat** (« Ajouter un PDF… » : type *Contrat signé* ou *Avenant, annexe ou
+  autre document*, titre affiché à l'hôtel, date de signature facultative). Visibles uniquement par cet hôtel ; le contrat signé s'affiche en premier.
+- **Communs à tous les hôtels** (conditions générales de vente…) : Facturation → Émetteur, bloc « Conditions générales et documents communs »
+  (également sous l'onglet Contrat de chaque fiche hôtel). Ajoutés ou retirés une fois, ils changent pour tous.
+- Règles : PDF uniquement (le contenu est vérifié, pas seulement l'extension), 8 Mo au plus, 30 documents au plus par hôtel. Le fichier est
+  stocké dans la base (table `client_documents`) : il est donc inclus dans chaque sauvegarde et supprimé avec l'hôtel. Dépôt, modification et
+  suppression exigent la Facturation déverrouillée ; chaque dépôt et suppression est tracé au journal (`client_document_added` / `_removed`).
+- Pour remplacer un fichier : déposer le nouveau puis supprimer l'ancien.
+- Routes (administration, sous `/api/admin/billing/catalog`) : `GET/POST clients/:id/documents`, `GET/POST documents/common`,
+  `PUT/DELETE documents/:docId`, `GET documents/:docId/file`. Le PDF voyage tel quel dans le corps de la requête
+  (`Content-Type: application/pdf`) ; titre, type, nom de fichier et date dans l'adresse (`?kind=&title=&filename=&signedOn=`).
+- Routes (hôtel connecté, sous `/api/clients`) : `GET deliveries`, `GET deliveries/:id/pdf`, `GET contract`, `GET documents`,
+  `GET documents/:id`, `GET quotes/:id/pdf`. Un document, un bon ou un devis qui n'est pas celui de l'hôtel connecté répond 404 ; un devis
+  brouillon aussi.
 
 ## Facturation intégrée
 
@@ -764,7 +800,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (250 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (263 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

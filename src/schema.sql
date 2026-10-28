@@ -424,3 +424,20 @@ CREATE TABLE IF NOT EXISTS client_reset_tokens (
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_client_reset_client ON client_reset_tokens(client_id);
+
+-- Documents contractuels déposés par l'administration et visibles dans l'espace client (onglet « Contrat ») :
+-- contrat de prestation signé de l'hôtel, conditions générales de vente (client_id NULL = commun à tous les hôtels).
+-- Le PDF est gardé dans la base elle-même : il part avec chaque sauvegarde, rien à copier à côté.
+CREATE TABLE IF NOT EXISTS client_documents (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id   INTEGER REFERENCES clients(id) ON DELETE CASCADE,
+  kind        TEXT NOT NULL CHECK (kind IN ('contract','terms','other')),
+  title       TEXT NOT NULL,
+  filename    TEXT NOT NULL,
+  signed_on   TEXT,
+  size        INTEGER NOT NULL,
+  sha256      TEXT NOT NULL,
+  data        BLOB NOT NULL,
+  uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_client_documents_client ON client_documents(client_id);

@@ -42,6 +42,22 @@
   Bill.get = (p) => call('GET', p); Bill.post = (p, b) => call('POST', p, b || {});
   Bill.put = (p, b) => call('PUT', p, b || {}); Bill.del = (p) => call('DELETE', p);
   Bill.base = BASE;
+  // Envoi d'un fichier PDF : le fichier voyage tel quel dans le corps, ses informations dans l'adresse.
+  Bill.uploadPdf = async (path, file, params) => {
+    const qs = new URLSearchParams(Object.entries(params || {}).filter(([, v]) => v != null && v !== '')).toString();
+    let res;
+    try {
+      res = await fetch(BASE + path + (qs ? '?' + qs : ''), { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/pdf' }, body: file });
+    } catch (_) { throw new Error('Envoi impossible : vérifiez la connexion et réessayez.'); }
+    let data = null; try { data = await res.json(); } catch (_) { /* pas de corps JSON */ }
+    if (!res.ok) {
+      const err = new Error((data && data.error) || `Erreur ${res.status}`); err.status = res.status; err.data = data;
+      const code = data && data.code;
+      if (res.status === 423 || code === 'LOCKED' || code === 'LOCK_SETUP_REQUIRED') { err.locked = true; Bill.showLock(); }
+      throw err;
+    }
+    return data;
+  };
   // Évite le bruit quand l'erreur est « verrouillé » (l'écran de verrouillage est déjà affiché).
   Bill.fail = (err, el) => { if (err.locked) return; if (el) { el.textContent = err.message; } else Bill.toast(err.message, true); };
 
