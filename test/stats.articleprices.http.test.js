@@ -38,6 +38,9 @@ test('les prix sont des montants : verrouillés avec la Facturation, jamais dans
   assert.equal(st.status, 200);
   assert.ok(!JSON.stringify(st.data).match(/avgPrice|price/i), 'aucun prix dans les statistiques d\'exploitation');
   assert.equal(st.data.totalOrders, 2);
+  assert.equal(st.data.articlesTotalQty, 210, 'volume total des articles de la période : 200 taies + 10 draps (la reprise et la commande de 2020 ne comptent pas)');
+  const taie = st.data.topArticles.find(a => a.name === 'Taie');
+  assert.equal(Math.round((taie.totalQty / st.data.articlesTotalQty) * 1000) / 10, 95.2, 'part des taies dans le volume total');
   await call('POST', '/api/admin/billing/lock/lock');
   assert.equal((await call('GET', `/api/admin/billing/stats/articles?from=${today}&to=${today}`)).status, 423);
 });

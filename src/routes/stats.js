@@ -37,6 +37,13 @@ function overview(p) {
     WHERE ${received}
     GROUP BY oi.name, oi.code ORDER BY totalQty DESC, oi.name LIMIT 10
   `).all(...rArgs);
+  // Volume total des articles (pièces) = somme des quantités nettes des articles dont le net est positif : les parts du
+  // top 10 se lisent donc par rapport à l'ensemble des articles de la période (les reprises ne gonflent pas le total).
+  const articlesTotalQty = db.prepare(`
+    SELECT SUM(t) AS n FROM (
+      SELECT SUM(oi.qty) AS t FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE ${received} GROUP BY oi.name, oi.code
+    ) WHERE t > 0
+  `).get(...rArgs).n || 0;
   const totalItems = db.prepare(`SELECT SUM(oi.qty) AS n FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE ${received}`).get(...rArgs).n || 0;
 
   const deliveredOrders = db.prepare(`SELECT COUNT(*) AS n FROM orders o WHERE ${delivered}`).get(...dArgs).n;
@@ -52,7 +59,7 @@ function overview(p) {
 
   return {
     period: p ? { from: p.from, to: p.to, days: p.days } : null,
-    totalOrders, totalItems, deliveredOrders, activeHotels, last30Days, byStatus, topHotels, topArticles,
+    totalOrders, totalItems, articlesTotalQty, deliveredOrders, activeHotels, last30Days, byStatus, topHotels, topArticles,
     deliveredWeightKg: Math.round(deliveredWeightKg * 10) / 10,
     totalDistanceKm: Math.round(totalDistanceKm * 10) / 10,
   };

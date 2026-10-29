@@ -2026,6 +2026,12 @@ function statsBodyHtml(stats, nps, from, to, priceInfo = {}) {
   const np = nps.period;
   // Prix unitaire moyen par article (montants : seulement si la Facturation est déverrouillée).
   const priceOf = new Map((priceInfo.articles || []).map(x => [`${x.name}\u0000${x.code}`, x]));
+  // Part de chaque article dans le volume total (pièces) des articles commandés sur la période.
+  const pctOf = (qty) => {
+    if (!stats.articlesTotalQty || qty <= 0) return '—';
+    const p = (qty / stats.articlesTotalQty) * 100;
+    return p < 0.1 ? '< 0,1 %' : p.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' %';
+  };
   const eur3 = (n) => n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) + ' €';
   const priceCell = (a) => {
     if (!priceInfo.articles) return '';
@@ -2099,13 +2105,14 @@ function statsBodyHtml(stats, nps, from, to, priceInfo = {}) {
         `).join('')}
       </div>
       <div class="stats-list-card">
-        <h5>Articles les plus commandés${priceInfo.articles ? ' <span style="font-weight:400;color:var(--steel);font-size:12px;">— quantité et prix unitaire HT moyen</span>' : ''}</h5>
+        <h5>Articles les plus commandés${priceInfo.articles ? ' <span style="font-weight:400;color:var(--steel);font-size:12px;">— quantité, part du volume et prix unitaire HT moyen</span>' : ' <span style="font-weight:400;color:var(--steel);font-size:12px;">— quantité et part du volume</span>'}</h5>
         ${priceInfo.locked ? '<div class="dd-lock" style="margin-bottom:10px;"><span><b>Prix moyens protégés.</b> Déverrouillez la Facturation pour voir le prix unitaire moyen de chaque article.</span><button class="btn-secondary" id="stats-prices-unlock" type="button">Ouvrir la Facturation</button></div>' : ''}
         ${stats.topArticles.length === 0 ? '<p class="empty-note">Aucune commande sur cette période.</p>' : stats.topArticles.map(a => `
           <div class="stats-row">
             <span>${escHtml(a.name)}</span>
             <span class="stats-row-bar"><span class="stats-row-bar-fill" style="width:${(a.totalQty / maxArticle) * 100}%;"></span></span>
             <span class="mono">${a.totalQty}</span>
+            <span class="mono stats-row-pct" title="Part du volume total des articles commandés sur la période (${stats.articlesTotalQty} pièces)">${pctOf(a.totalQty)}</span>
             ${priceCell(a)}
           </div>
         `).join('')}
