@@ -111,4 +111,28 @@ function dayDetail(date) {
   return { date, deliveries, invoices, payments, discounts };
 }
 
-module.exports = { daily, dayDetail };
+/**
+ * Prix unitaire MOYEN par article sur les commandes reçues dans la période : prix figé sur chaque ligne pondéré par la
+ * quantité commandée (somme quantité × prix ÷ somme quantité). Les reprises (quantités négatives) n'entrent pas dans la moyenne.
+ * `varies` : le prix n'a pas été le même sur toute la période (changement de tarif, tarifs différents selon l'hôtel).
+ * Derrière le verrou de la Facturation, comme tous les montants.
+ */
+function articlePrices(from, to) {
+  const p = stats.period(from, to);
+  const rows = db.prepare(`
+    SELECT oi.name AS name, oi.code AS code, SUM(oi.qty) AS qty, SUM(oi.qty * oi.price) AS value, MIN(oi.price) AS minPrice, MAX(oi.price) AS maxPrice
+    FROM order_items oi JOIN orders o ON o.id = oi.order_id
+    WHERE oi.qty > 0 AND o.id IN (SELECT value FROM json_each(?))
+    GROUP BY oi.name, oi.code
+  `).all(JSON.stringify(stats.receivedIds(p)));
+  return {
+    period: { from: p.from, to: p.to, days: p.days },
+    articles: rows.map(r => ({
+      name: r.name, code: r.code, qty: r.qty,
+      avgPrice: Math.round((r.value / r.qty) * 10000) / 10000,
+      minPrice: r.minPrice, maxPrice: r.maxPrice, varies: Math.abs(r.maxPrice - r.minPrice) > 1e-9,
+    })),
+  };
+}
+
+module.exports = { daily, dayDetail, articlePrices };

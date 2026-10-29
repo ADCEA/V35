@@ -561,7 +561,10 @@ Onglet **Statistiques** de l'administration : **un seul filtre de dates en haut 
 cette année, ou dates libres ; 400 jours au plus) qui s'applique à TOUS les blocs de la page. `GET /api/admin/stats?from=&to=` et
 `GET /api/admin/stats/nps?from=&to=` : commandes, articles, statuts, top hôtels et top articles portent sur les commandes *reçues* dans la
 période (heure de Paris) ; commandes livrées, poids et kilomètres sur les commandes *livrées* (date du BL) ; NPS sur les réponses de la
-période. Sans dates, ces deux routes renvoient toute l'activité. Tuiles de synthèse,
+période. Sans dates, ces deux routes renvoient toute l'activité.
+Le bloc « Articles les plus commandés » affiche aussi le **prix unitaire HT moyen** de chaque article (moyenne pondérée par les quantités commandées sur la
+période, reprises exclues ; une astérisque signale un prix qui a varié). C'est un montant : il vient de `GET /api/admin/billing/stats/articles`,
+derrière le verrou de la Facturation — verrouillée, le bloc l'indique et propose de l'ouvrir. Tuiles de synthèse,
 graphique jour par jour (au choix du chiffre affiché), tableau jour par jour avec détail dépliable (commandes reçues et livrées,
 valeur, factures, règlements) et export Excel (CSV).
 

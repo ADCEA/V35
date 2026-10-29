@@ -14,12 +14,10 @@ const dailyStats = require('../utils/dailyStats');
 const dailyFail = (res, e) => (e && e.name === 'StatsError' ? res.status(e.status).json({ error: e.message }) : (console.error('[stats]', e), res.status(500).json({ error: 'Erreur serveur.' })));
 
 function overview(p) {
-  // Commandes reçues dans la période : on lit large (jour avant/après, décalage UTC → Paris) puis on trie à l'heure de Paris.
+  // Commandes reçues dans la période (voir dailyStats.receivedIds).
   let received = '1=1'; const rArgs = [];
   if (p) {
-    const rows = db.prepare('SELECT id, created_at FROM orders WHERE substr(created_at, 1, 10) BETWEEN ? AND ?').all(dailyStats.addDays(p.from, -1), dailyStats.addDays(p.to, 1));
-    const ids = rows.filter(r => { const d = dailyStats.parisDate(r.created_at); return d >= p.from && d <= p.to; }).map(r => r.id);
-    received = 'o.id IN (SELECT value FROM json_each(?))'; rArgs.push(JSON.stringify(ids));
+    received = 'o.id IN (SELECT value FROM json_each(?))'; rArgs.push(JSON.stringify(dailyStats.receivedIds(p)));
   }
   const delivered = p ? `o.status = 'livree' AND ${dailyStats.DELIVERY_DATE_SQL} BETWEEN ? AND ?` : "o.status = 'livree'";
   const dArgs = p ? [p.from, p.to] : [];

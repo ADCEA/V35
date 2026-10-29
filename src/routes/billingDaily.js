@@ -11,6 +11,11 @@ router.get('/stats/daily', wrap((req, res) => {
   res.json(daily.daily(req.query.from, req.query.to));
 }));
 
+// Prix unitaire moyen par article sur la période (page Statistiques, bloc « Articles les plus commandés »).
+router.get('/stats/articles', wrap((req, res) => {
+  res.json(daily.articlePrices(req.query.from, req.query.to));
+}));
+
 router.get('/stats/daily/:date', wrap((req, res) => {
   res.json(daily.dayDetail(req.params.date));
 }));

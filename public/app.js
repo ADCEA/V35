@@ -2003,9 +2003,13 @@ async function renderStats() {
     if (typeof renderDailyDashboard === 'function') renderDailyDashboard(daily).catch(err => { daily.innerHTML = `<p class="form-error" style="display:block;">${escHtml(err.message)}</p>`; });
     try {
       const qs = `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-      const [stats, nps] = await Promise.all([api('GET', '/api/admin/stats' + qs), api('GET', '/api/admin/stats/nps' + qs)]);
+      // Prix moyens : montants, donc derrière le verrou de la Facturation (423 = verrouillée → on l'indique, sans bloquer le reste).
+      const prices = api('GET', '/api/admin/billing/stats/articles' + qs).then(r => ({ articles: r.articles })).catch(e => ({ locked: e.status === 423 || e.status === 403 }));
+      const [stats, nps, priceInfo] = await Promise.all([api('GET', '/api/admin/stats' + qs), api('GET', '/api/admin/stats/nps' + qs), prices]);
       if (mine !== seq || !body.isConnected) return;
-      body.innerHTML = statsBodyHtml(stats, nps, from, to);
+      body.innerHTML = statsBodyHtml(stats, nps, from, to, priceInfo);
+      const unlock = body.querySelector('#stats-prices-unlock');
+      if (unlock) unlock.onclick = () => switchAdminView('billing');
     } catch (err) {
       if (mine === seq && body.isConnected) body.innerHTML = `<p class="form-error" style="display:block;">${escHtml(err.message)}</p>`;
     }
@@ -2015,11 +2019,19 @@ async function renderStats() {
   apply();
 }
 
-function statsBodyHtml(stats, nps, from, to) {
+function statsBodyHtml(stats, nps, from, to, priceInfo = {}) {
   const dFr = (iso) => iso.split('-').reverse().join('/');
   const maxHotel = Math.max(1, ...stats.topHotels.map(h => h.orderCount));
   const maxArticle = Math.max(1, ...stats.topArticles.map(a => a.totalQty));
   const np = nps.period;
+  // Prix unitaire moyen par article (montants : seulement si la Facturation est déverrouillée).
+  const priceOf = new Map((priceInfo.articles || []).map(x => [`${x.name}\u0000${x.code}`, x]));
+  const eur3 = (n) => n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) + ' €';
+  const priceCell = (a) => {
+    if (!priceInfo.articles) return '';
+    const x = priceOf.get(`${a.name}\u0000${a.code}`);
+    return x ? `<span class="mono stats-row-price" title="${x.varies ? `Prix variable sur la période : de ${eur3(x.minPrice)} à ${eur3(x.maxPrice)}` : 'Prix unitaire HT'}">${eur3(x.avgPrice)}${x.varies ? '*' : ''}</span>` : '<span class="mono stats-row-price">—</span>';
+  };
   const signed = (n) => (n > 0 ? '+' : '') + n;
   return `
     <div class="stats-grid">
@@ -2087,14 +2099,17 @@ function statsBodyHtml(stats, nps, from, to) {
         `).join('')}
       </div>
       <div class="stats-list-card">
-        <h5>Articles les plus commandés</h5>
+        <h5>Articles les plus commandés${priceInfo.articles ? ' <span style="font-weight:400;color:var(--steel);font-size:12px;">— quantité et prix unitaire HT moyen</span>' : ''}</h5>
+        ${priceInfo.locked ? '<div class="dd-lock" style="margin-bottom:10px;"><span><b>Prix moyens protégés.</b> Déverrouillez la Facturation pour voir le prix unitaire moyen de chaque article.</span><button class="btn-secondary" id="stats-prices-unlock" type="button">Ouvrir la Facturation</button></div>' : ''}
         ${stats.topArticles.length === 0 ? '<p class="empty-note">Aucune commande sur cette période.</p>' : stats.topArticles.map(a => `
           <div class="stats-row">
             <span>${escHtml(a.name)}</span>
             <span class="stats-row-bar"><span class="stats-row-bar-fill" style="width:${(a.totalQty / maxArticle) * 100}%;"></span></span>
             <span class="mono">${a.totalQty}</span>
+            ${priceCell(a)}
           </div>
         `).join('')}
+        ${priceInfo.articles && priceInfo.articles.some(x => x.varies) ? '<p class="stats-row-note">* prix variable sur la période (survolez pour le détail) : la valeur affichée est la moyenne pondérée par les quantités.</p>' : ''}
       </div>
     </div>
   `;

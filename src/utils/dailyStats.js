@@ -37,6 +37,12 @@ function parisDate(ts) {
   return Number.isNaN(d.getTime()) ? s.slice(0, 10) : parisFmt.format(d);
 }
 
+/** Identifiants des commandes REÇUES dans la période (date de création, heure de Paris) : on lit large puis on trie à l'heure de Paris. */
+function receivedIds(p) {
+  const rows = db.prepare('SELECT id, created_at FROM orders WHERE substr(created_at, 1, 10) BETWEEN ? AND ?').all(addDays(p.from, -1), addDays(p.to, 1));
+  return rows.filter(r => { const d = parisDate(r.created_at); return d >= p.from && d <= p.to; }).map(r => r.id);
+}
+
 const round1 = (n) => Math.round(n * 10) / 10;
 const emptyDay = (date) => ({
   date, ordersReceived: 0, piecesOrdered: 0,
@@ -122,4 +128,4 @@ function dayDetail(date) {
   return { date, received: received.map(shape), delivered: delivered.map(shape) };
 }
 
-module.exports = { daily, dayDetail, period, isIso, addDays, todayParis, parisDate, StatsError, MAX_DAYS, DELIVERY_DATE_SQL };
+module.exports = { daily, dayDetail, period, receivedIds, isIso, addDays, todayParis, parisDate, StatsError, MAX_DAYS, DELIVERY_DATE_SQL };
