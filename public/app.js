@@ -1985,58 +1985,83 @@ document.getElementById('ai-report-question').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); askAiReport(); }
 });
 
+// Page Statistiques : UN filtre de dates (public/stats-daily.js) pilote tous les blocs — activité jour par jour,
+// chiffres clés, NPS, répartition par statut, top hôtels et top articles.
 async function renderStats() {
-  const [stats, nps] = await Promise.all([
-    api('GET', '/api/admin/stats'),
-    api('GET', '/api/admin/stats/nps'),
-  ]);
   const el = document.getElementById('stats-content');
+  el.innerHTML = '<div id="stats-filter"></div><div id="daily-dashboard"></div><div id="stats-body"></div>';
+  let seq = 0;   // une réponse arrivée en retard ne doit jamais écraser une demande plus récente
 
+  const refresh = async () => {
+    const mine = ++seq;
+    const body = el.querySelector('#stats-body');
+    const daily = el.querySelector('#daily-dashboard');
+    if (!body || !daily) return;
+    const { from, to } = statsRange();
+    body.innerHTML = '<p class="empty-note">Chargement…</p>';
+    // Tableau de bord jour par jour (public/stats-daily.js) : chargé à part, ses erreurs ne cachent pas le reste.
+    if (typeof renderDailyDashboard === 'function') renderDailyDashboard(daily).catch(err => { daily.innerHTML = `<p class="form-error" style="display:block;">${escHtml(err.message)}</p>`; });
+    try {
+      const qs = `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+      const [stats, nps] = await Promise.all([api('GET', '/api/admin/stats' + qs), api('GET', '/api/admin/stats/nps' + qs)]);
+      if (mine !== seq || !body.isConnected) return;
+      body.innerHTML = statsBodyHtml(stats, nps, from, to);
+    } catch (err) {
+      if (mine === seq && body.isConnected) body.innerHTML = `<p class="form-error" style="display:block;">${escHtml(err.message)}</p>`;
+    }
+  };
+
+  const apply = renderStatsFilter(el.querySelector('#stats-filter'), refresh);
+  apply();
+}
+
+function statsBodyHtml(stats, nps, from, to) {
+  const dFr = (iso) => iso.split('-').reverse().join('/');
   const maxHotel = Math.max(1, ...stats.topHotels.map(h => h.orderCount));
   const maxArticle = Math.max(1, ...stats.topArticles.map(a => a.totalQty));
-
-  el.innerHTML = `
-    <div id="daily-dashboard"></div>
+  const np = nps.period;
+  const signed = (n) => (n > 0 ? '+' : '') + n;
+  return `
     <div class="stats-grid">
-      <div class="stats-card"><div class="eyebrow">Commandes totales</div><strong>${stats.totalOrders}</strong></div>
-      <div class="stats-card"><div class="eyebrow">Articles traités</div><strong>${stats.totalItems}</strong></div>
-      <div class="stats-card"><div class="eyebrow">Commandes (30 derniers jours)</div><strong>${stats.last30Days}</strong></div>
-      <div class="stats-card"><div class="eyebrow">Hôtels actifs</div><strong>${stats.topHotels.length}</strong></div>
+      <div class="stats-card"><div class="eyebrow">Commandes reçues</div><strong>${stats.totalOrders}</strong></div>
+      <div class="stats-card"><div class="eyebrow">Articles commandés</div><strong>${stats.totalItems}</strong></div>
+      <div class="stats-card"><div class="eyebrow">Commandes livrées</div><strong>${stats.deliveredOrders}</strong></div>
+      <div class="stats-card"><div class="eyebrow">Hôtels actifs</div><strong>${stats.activeHotels}</strong></div>
       <div class="stats-card"><div class="eyebrow">Poids livré (hors chariot)</div><strong>${stats.deliveredWeightKg} kg</strong></div>
       <div class="stats-card"><div class="eyebrow">Kilomètres parcourus</div><strong>${stats.totalDistanceKm} km</strong></div>
     </div>
 
     <div class="card" style="margin-bottom:20px;">
       <h4 class="card-subhead" style="margin-bottom:4px;">Satisfaction client (NPS)</h4>
-      <p style="font-size:12.5px;color:var(--steel);margin:0 0 14px;">Calculé à partir du questionnaire proposé aux hôtels dans « Mon espace », une fois par mois.</p>
-      ${nps.currentMonth ? `
+      <p style="font-size:12.5px;color:var(--steel);margin:0 0 14px;">Calculé à partir du questionnaire proposé aux hôtels dans « Mon espace », une fois par mois. Réponses reçues du ${dFr(from)} au ${dFr(to)}.</p>
+      ${np && np.responses ? `
         <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;margin-bottom:16px;">
           <div>
-            <div style="font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:${nps.currentMonth.nps >= 0 ? 'var(--teal)' : 'var(--rust)'};line-height:1;">${nps.currentMonth.nps > 0 ? '+' : ''}${nps.currentMonth.nps}</div>
-            <div style="font-size:12px;color:var(--steel-light);margin-top:4px;">NPS — ${nps.currentMonth.month}</div>
+            <div style="font-family:'Fredoka',sans-serif;font-size:40px;font-weight:600;color:${np.nps >= 0 ? 'var(--teal)' : 'var(--rust)'};line-height:1;">${signed(np.nps)}</div>
+            <div style="font-size:12px;color:var(--steel-light);margin-top:4px;">NPS de la période</div>
           </div>
-          <div style="display:flex;gap:16px;font-size:12.5px;color:var(--steel);">
-            <span>😍 Promoteurs : <b style="color:var(--ink);">${nps.currentMonth.promoters}</b></span>
-            <span>😐 Passifs : <b style="color:var(--ink);">${nps.currentMonth.passives}</b></span>
-            <span>😞 Détracteurs : <b style="color:var(--ink);">${nps.currentMonth.detractors}</b></span>
-            <span>· ${nps.currentMonth.responses} réponse${nps.currentMonth.responses > 1 ? 's' : ''}</span>
+          <div style="display:flex;gap:16px;font-size:12.5px;color:var(--steel);flex-wrap:wrap;">
+            <span>😍 Promoteurs : <b style="color:var(--ink);">${np.promoters}</b></span>
+            <span>😐 Passifs : <b style="color:var(--ink);">${np.passives}</b></span>
+            <span>😞 Détracteurs : <b style="color:var(--ink);">${np.detractors}</b></span>
+            <span>· ${np.responses} réponse${np.responses > 1 ? 's' : ''}</span>
           </div>
         </div>
-      ` : '<p class="empty-note">Aucune réponse pour le moment ce mois-ci.</p>'}
+      ` : '<p class="empty-note">Aucune réponse sur cette période.</p>'}
       ${nps.months.length > 1 ? `
         <div style="border-top:1px solid var(--line);padding-top:12px;">
-          <p style="font-size:13px;font-weight:500;color:var(--steel);margin:0 0 8px;">Historique</p>
+          <p style="font-size:13px;font-weight:500;color:var(--steel);margin:0 0 8px;">Mois par mois</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            ${nps.months.slice(1).map(m => `<span class="mini-badge">${m.month} : ${m.nps > 0 ? '+' : ''}${m.nps} (${m.responses})</span>`).join('')}
+            ${nps.months.map(m => `<span class="mini-badge">${escHtml(m.month)} : ${signed(m.nps)} (${m.responses})</span>`).join('')}
           </div>
         </div>
       ` : ''}
       ${nps.recentComments.length > 0 ? `
         <div style="border-top:1px solid var(--line);padding-top:12px;margin-top:14px;">
-          <p style="font-size:13px;font-weight:500;color:var(--steel);margin:0 0 8px;">Derniers commentaires</p>
+          <p style="font-size:13px;font-weight:500;color:var(--steel);margin:0 0 8px;">Commentaires de la période</p>
           ${nps.recentComments.map(c => `
             <div style="padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px;">
-              <span class="mini-badge" style="margin-right:6px;">${c.score}/10</span><b>${c.societe}</b> — ${c.comment}
+              <span class="mini-badge" style="margin-right:6px;">${c.score}/10</span><b>${escHtml(c.societe)}</b> — ${escHtml(c.comment)}
             </div>
           `).join('')}
         </div>
@@ -2044,7 +2069,7 @@ async function renderStats() {
     </div>
 
     <div class="card" style="margin-bottom:20px;">
-      <h4 class="card-subhead" style="margin-bottom:12px;">Répartition par statut</h4>
+      <h4 class="card-subhead" style="margin-bottom:12px;">Répartition par statut <span style="font-weight:400;color:var(--steel);font-size:12.5px;">(commandes reçues sur la période)</span></h4>
       <div class="stats-status-breakdown">
         ${STATUSES.map(s => `<span class="stats-status-pill">${s.label} : <b>${stats.byStatus[s.id] || 0}</b></span>`).join('')}
       </div>
@@ -2053,9 +2078,9 @@ async function renderStats() {
     <div class="stats-lists">
       <div class="stats-list-card">
         <h5>Top hôtels (par nombre de commandes)</h5>
-        ${stats.topHotels.length === 0 ? '<p class="empty-note">Pas encore de données.</p>' : stats.topHotels.map(h => `
+        ${stats.topHotels.length === 0 ? '<p class="empty-note">Aucune commande sur cette période.</p>' : stats.topHotels.map(h => `
           <div class="stats-row">
-            <span>${h.societe}</span>
+            <span>${escHtml(h.societe)}</span>
             <span class="stats-row-bar"><span class="stats-row-bar-fill" style="width:${(h.orderCount / maxHotel) * 100}%;"></span></span>
             <span class="mono">${h.orderCount}</span>
           </div>
@@ -2063,9 +2088,9 @@ async function renderStats() {
       </div>
       <div class="stats-list-card">
         <h5>Articles les plus commandés</h5>
-        ${stats.topArticles.length === 0 ? '<p class="empty-note">Pas encore de données.</p>' : stats.topArticles.map(a => `
+        ${stats.topArticles.length === 0 ? '<p class="empty-note">Aucune commande sur cette période.</p>' : stats.topArticles.map(a => `
           <div class="stats-row">
-            <span>${a.name}</span>
+            <span>${escHtml(a.name)}</span>
             <span class="stats-row-bar"><span class="stats-row-bar-fill" style="width:${(a.totalQty / maxArticle) * 100}%;"></span></span>
             <span class="mono">${a.totalQty}</span>
           </div>
@@ -2073,8 +2098,6 @@ async function renderStats() {
       </div>
     </div>
   `;
-  // Tableau de bord jour par jour (public/stats-daily.js) : chargé à part, ses erreurs ne cachent pas le reste.
-  if (typeof renderDailyDashboard === 'function') renderDailyDashboard(el.querySelector('#daily-dashboard')).catch(err => { el.querySelector('#daily-dashboard').innerHTML = `<p class="form-error" style="display:block;">${escHtml(err.message)}</p>`; });
 }
 
 // ---------- Chariots et camions (équipements de logistique) ----------

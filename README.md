@@ -125,8 +125,9 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
 - **Logistique livraison** — gérez vos chauffeurs (nom + véhicule optionnel),
   puis glissez les commandes "prêtes" vers le chauffeur qui les livrera.
   Une colonne "Non assigné" regroupe celles pas encore prises en charge.
-- **Statistiques** — vue d'ensemble : commandes totales, articles traités,
-  activité des 30 derniers jours, répartition par statut, top hôtels et
+- **Statistiques** — un seul filtre de dates en haut de page pilote tout :
+  activité jour par jour, chiffres clés (commandes reçues et livrées, articles,
+  hôtels actifs, poids, km), NPS, répartition par statut, top hôtels et
   articles les plus commandés.
 - **Historique des livraisons** et **Commandes automatiques** — inchangés,
   voir plus bas.
@@ -556,7 +557,11 @@ les regroupe pour les rattacher à la bonne fiche :
 
 ### Tableau de bord journalier (Statistiques)
 
-Onglet **Statistiques** de l'administration : période rapide (7 / 30 jours, mois, 90 jours) ou dates libres, tuiles de synthèse,
+Onglet **Statistiques** de l'administration : **un seul filtre de dates en haut de page** (7 / 30 / 90 jours, ce mois-ci, mois dernier,
+cette année, ou dates libres ; 400 jours au plus) qui s'applique à TOUS les blocs de la page. `GET /api/admin/stats?from=&to=` et
+`GET /api/admin/stats/nps?from=&to=` : commandes, articles, statuts, top hôtels et top articles portent sur les commandes *reçues* dans la
+période (heure de Paris) ; commandes livrées, poids et kilomètres sur les commandes *livrées* (date du BL) ; NPS sur les réponses de la
+période. Sans dates, ces deux routes renvoient toute l'activité. Tuiles de synthèse,
 graphique jour par jour (au choix du chiffre affiché), tableau jour par jour avec détail dépliable (commandes reçues et livrées,
 valeur, factures, règlements) et export Excel (CSV).
 

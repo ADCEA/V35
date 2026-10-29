@@ -16,7 +16,8 @@
   const METHODS = { virement: 'Virement', cheque: 'Chèque', prelevement: 'Prélèvement', carte: 'Carte bancaire', especes: 'Espèces', autre: 'Autre' };
   const STATUS = { recue: 'reçue', traitement: 'en cours', prete: 'prête', livree: 'livrée' };
 
-  const PRESETS = [['7', '7 jours'], ['30', '30 jours'], ['month', 'Ce mois-ci'], ['last', 'Mois dernier'], ['90', '90 jours']];
+  const PRESETS = [['7', '7 jours'], ['30', '30 jours'], ['month', 'Ce mois-ci'], ['last', 'Mois dernier'], ['90', '90 jours'], ['year', 'Cette année']];
+  const MAX_DAYS = 400;   // même limite que le serveur
   const S = { preset: '30', from: '', to: '', metric: null, hideEmpty: true, ops: null, money: null, locked: false, open: new Set(), detail: new Map(), error: '', seq: 0 };
 
   function range(key) {
@@ -25,9 +26,13 @@
     if (key === '30') return [addDays(t, -29), t];
     if (key === '90') return [addDays(t, -89), t];
     if (key === 'month') return [t.slice(0, 8) + '01', t];
+    if (key === 'year') return [t.slice(0, 4) + '-01-01', t];
     if (key === 'last') { const first = new Date(`${t.slice(0, 8)}01T00:00:00Z`); first.setUTCMonth(first.getUTCMonth() - 1); const start = first.toISOString().slice(0, 10); return [start, addDays(t.slice(0, 8) + '01', -1)]; }
     return [S.from, S.to];
   }
+  // Période choisie dans le filtre de la page (préréglage ou dates libres).
+  const current = () => (S.preset === 'custom' ? [S.from, S.to] : range(S.preset));
+  const daysIn = (f, t) => Math.round((Date.parse(`${t}T00:00:00Z`) - Date.parse(`${f}T00:00:00Z`)) / 86400000) + 1;
 
   // ---------- colonnes du tableau (et de l'export) ----------
   const COLS = [
@@ -70,7 +75,7 @@
   const active = (r) => r.ordersReceived || r.ordersDelivered || r.invoiceCount || r.creditCount || r.paymentCount;
 
   async function load(host) {
-    const [from, to] = S.preset === 'custom' ? [S.from, S.to] : range(S.preset);
+    const [from, to] = current();
     S.from = from; S.to = to; S.error = '';
     const seq = ++S.seq;   // une réponse arrivée en retard ne doit jamais écraser une demande plus récente
     if (from > to) { S.ops = null; S.error = 'La date de début est postérieure à la date de fin.'; return paint(host); }
@@ -219,31 +224,52 @@
     if (unlock) unlock.onclick = () => { if (typeof switchAdminView === 'function') switchAdminView('billing'); };
   }
 
-  window.renderDailyDashboard = async function (host) {
-    if (!S.from) { [S.from, S.to] = range(S.preset); }
-    host.innerHTML = `<div class="card dd" style="margin-bottom:20px;">
-      <div class="dd-head"><div><h4 class="card-subhead" style="margin-bottom:4px;">Activité jour par jour</h4>
-        <p style="font-size:12.5px;color:var(--steel);margin:0;">Pour chaque jour : commandes, livraisons, pièces, poids, kilomètres — et les montants livrés, facturés et encaissés. Cliquez sur un jour pour voir le détail.</p></div>
-        <button class="btn-secondary" id="dd-export" type="button">Exporter (Excel)</button></div>
-      <div class="dd-controls">
-        <div class="dd-presets" role="group" aria-label="Période">${PRESETS.map(([k, l]) => `<button type="button" class="dd-chip ${S.preset === k ? 'on' : ''}" data-preset="${k}" aria-pressed="${S.preset === k}">${l}</button>`).join('')}</div>
-        <div class="dd-dates"><label>Du <input type="date" id="dd-from" value="${esc(S.from)}"></label><label>au <input type="date" id="dd-to" value="${esc(S.to)}"></label></div>
+  // Filtre de dates UNIQUE de la page Statistiques : il pilote le tableau jour par jour comme tous les autres blocs.
+  // `onChange()` est appelé à chaque nouvelle période valide ; `window.statsRange()` donne la période courante.
+  window.statsRange = function () { const [from, to] = current(); S.from = from; S.to = to; return { from, to }; };
+
+  window.renderStatsFilter = function (host, onChange) {
+    const { from, to } = window.statsRange();
+    host.innerHTML = `<div class="card dd-filter" style="margin-bottom:20px;">
+      <div class="dd-controls" style="margin-bottom:8px;">
+        <div class="dd-presets" role="group" aria-label="Période de toute la page">${PRESETS.map(([k, l]) => `<button type="button" class="dd-chip ${S.preset === k ? 'on' : ''}" data-preset="${k}" aria-pressed="${S.preset === k}">${l}</button>`).join('')}</div>
+        <div class="dd-dates"><label>Du <input type="date" id="dd-from" value="${esc(from)}"></label><label>au <input type="date" id="dd-to" value="${esc(to)}"></label></div>
       </div>
-      <div id="dd-body"></div></div>`;
+      <p class="dd-period-note" id="dd-period-note" aria-live="polite" style="font-size:12.5px;color:var(--steel);margin:0;"></p></div>`;
+    const note = host.querySelector('#dd-period-note');
+    const apply = () => {
+      const { from: f, to: t } = window.statsRange();
+      if (f > t) { note.style.color = 'var(--rust)'; note.textContent = 'La date de début est postérieure à la date de fin.'; return; }
+      if (daysIn(f, t) > MAX_DAYS) { note.style.color = 'var(--rust)'; note.textContent = `La période est limitée à ${MAX_DAYS} jours.`; return; }
+      note.style.color = 'var(--steel)';
+      note.textContent = `Toute la page porte sur la période choisie : du ${dFr(f)} au ${dFr(t)} (${daysIn(f, t)} jour${daysIn(f, t) > 1 ? 's' : ''}).`;
+      onChange();
+    };
     host.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => {
       S.preset = b.dataset.preset;
       host.querySelectorAll('[data-preset]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', String(x === b)); });
       const [f, t] = range(S.preset); host.querySelector('#dd-from').value = f; host.querySelector('#dd-to').value = t;
-      load(host);
+      apply();
     });
     const custom = () => {
       const f = host.querySelector('#dd-from').value; const t = host.querySelector('#dd-to').value;
       if (!f || !t) return;
       S.preset = 'custom'; S.from = f; S.to = t;
       host.querySelectorAll('[data-preset]').forEach(x => { x.classList.remove('on'); x.setAttribute('aria-pressed', 'false'); });
-      load(host);
+      apply();
     };
     host.querySelector('#dd-from').onchange = custom; host.querySelector('#dd-to').onchange = custom;
+    return apply;   // l'appelant déclenche le premier affichage
+  };
+
+  // Tableau jour par jour : suit la période du filtre de la page (plus de filtre propre).
+  window.renderDailyDashboard = async function (host) {
+    window.statsRange();
+    host.innerHTML = `<div class="card dd" style="margin-bottom:20px;">
+      <div class="dd-head"><div><h4 class="card-subhead" style="margin-bottom:4px;">Activité jour par jour</h4>
+        <p style="font-size:12.5px;color:var(--steel);margin:0;">Pour chaque jour : commandes, livraisons, pièces, poids, kilomètres — et les montants livrés, facturés et encaissés. Cliquez sur un jour pour voir le détail.</p></div>
+        <button class="btn-secondary" id="dd-export" type="button">Exporter (Excel)</button></div>
+      <div id="dd-body"></div></div>`;
     host.querySelector('#dd-export').onclick = () => { if (S.ops) exportCsv(); };
     await load(host);
   };
