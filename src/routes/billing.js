@@ -242,6 +242,11 @@ router.get('/integrity', wrap((req, res) => {
   res.json(engine.verifyIntegrity());
 }));
 
+// Contrôle (lecture seule) des quantités des factures émises : écarts avec les commandes, livraisons signalées incomplètes.
+router.get('/quantity-audit', wrap((req, res) => {
+  res.json(require('../billing/quantityAudit').auditInvoices());
+}));
+
 // Période d'un export FEC : ?from=AAAA-MM-JJ&to=AAAA-MM-JJ (bornes incluses), ou ?year=AAAA (année civile, comme avant).
 // Sans rien : l'année en cours. Le code de confirmation vaut pour la période exacte demandée.
 function fecPeriodOf(q) {

@@ -809,6 +809,6 @@ module.exports = {
   previewDraft, logEvent, createDraftFromLines, estimateOrdersHtCents, sanitizeLines, isIsoDate, sha256,
   BillingError, todayParis, addDays, lineCents, computeTotals, sirenFrom, luhnOk, isParticulier,
   getSettings, loadInvoice, listInvoiceableOrders,
-  createDraftFromOrders, updateDraft, deleteDraft, createCreditNoteDraft, issueInvoice,
+  buildNativeLines, createDraftFromOrders, updateDraft, deleteDraft, createCreditNoteDraft, issueInvoice,
   recordPayment, paidCents, cashCents, discountSums, escompteStatus, creditedCents, balanceCents, paymentStatus, verifyIntegrity,
 };
