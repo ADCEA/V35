@@ -68,6 +68,7 @@
 .bl-alert.ok{background:var(--bl-ok-bg); border-color:#A9DCC8; color:#0F5F46;}
 .bl-alert.info{background:var(--bl-info-bg); border-color:#B5D6F6; color:#0B3F73;}
 .bl-alert ul{margin:6px 0 0 18px; padding:0;}
+.bl-panel + .bl-alert{margin-top:14px;}
 
 /* ---------- formulaires ---------- */
 .bl-field{margin-bottom:14px;}
@@ -308,6 +309,9 @@ table.bl-table{width:100%; border-collapse:collapse; font-size:14px;}
 .bl-presets{display:flex; flex-wrap:wrap; align-items:center; gap:2px 6px; padding:8px 14px; border-bottom:1px solid var(--line); font-size:13px;}
 .bl-presets .bl-muted{margin-left:auto; font-size:13px; text-align:right;}
 .bl-table tr.bl-diff td{background:var(--bl-wait-bg);}
+.bl-table .bl-qty-in{width:84px; padding:5px 8px; text-align:right; font-variant-numeric:tabular-nums;}
+.bl-qty-actions{display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:12px;}
+.bl-qty-actions .bl-muted{font-size:12.5px;}
 .bl-table td .sub.bl-num{display:block;}
 @media (max-width:760px){.bl-presets .bl-muted{margin-left:0; flex-basis:100%; text-align:left;}}
 

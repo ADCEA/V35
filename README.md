@@ -413,11 +413,17 @@ et à choisir le tarif en vigueur).
   puces de paiement). Un BL à facturer, en brouillon ou facturé dans l'ancien circuit n'a pas de paiement à suivre. Le CSV a une colonne
   `paiement` et respecte le filtre ;
 - **Montants** : quantité livrée × prix figé sur la commande. Un bon dont la quantité livrée diffère de la commande est signalé ;
+- **Quantités livrées** : la facture reprend la quantité **livrée**, jamais la commandée. À la création d'une commande la quantité
+  livrée est pré-remplie avec la commandée ; si la livraison est incomplète, « Corriger les quantités livrées » (fiche du BL, tant qu'il est
+  *À facturer*) ou le champ « livré » de la fiche commande (en traitement, prête ou livrée) la rectifient, la quantité commandée ne bouge
+  jamais. Dès que la commande est dans un brouillon ou une facture, les quantités sont **figées** (refus 409) : supprimer le brouillon, ou
+  émettre un avoir total, les rend à nouveau modifiables. Une correction faite après la préparation est inscrite au journal de facturation
+  (`delivered_qty_changed`). « + Ajouter un article » sur un article déjà présent garde la quantité livrée déjà saisie ;
 - **Exports** : PDF d'un bon, **PDF groupé** de tous les bons filtrés (un bon par page, du plus ancien au plus récent,
   500 bons au plus) et CSV Excel (`;`, virgule décimale, BOM) ;
 - depuis la fiche d'un hôtel, « Voir ses bons de livraison » ouvre la page déjà filtrée.
 
-La page ne fait que lire : elle ne modifie ni commande ni facture. Elle est derrière le code de la Facturation.
+La page ne modifie ni commande ni facture, hormis la correction des quantités livrées ci-dessus. Elle est derrière le code de la Facturation.
 
 ### Restreindre des articles aux hôtels qui les utilisent
 
@@ -805,7 +811,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (269 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (274 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

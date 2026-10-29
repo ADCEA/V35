@@ -699,7 +699,10 @@ async function openOrderModal(orderId, context) {
   if (!order) return;
   const currentIdx = STATUSES.findIndex(s => s.id === order.status);
   const isAdminContext = ADMIN_MODAL_CONTEXTS.includes(context);
-  const editableQty = isAdminContext && order.status === 'traitement';
+  // La facture suit les quantités LIVRÉES : on peut les corriger tant que la commande n'est pas reprise dans une facture.
+  const qtyStage = ['traitement', 'prete', 'livree'].includes(order.status);
+  const editableQty = isAdminContext && qtyStage && !order.billed;
+  const qtyLocked = isAdminContext && qtyStage && order.billed;
 
   const itemsHtml = editableQty
     ? order.items.map(i => `
@@ -741,9 +744,11 @@ async function openOrderModal(orderId, context) {
     <div class="ticket-dash"></div>
     ${itemsHtml}
     ${editableQty ? `
+      <p class="qty-bill-hint">La facture reprend les quantités <b>livrées</b>. Par défaut elles sont égales aux quantités commandées : corrigez-les si la livraison est incomplète${order.status === 'livree' ? ' (possible tant que la commande n’est pas facturée)' : ''}.</p>
       <button class="btn-secondary" id="btn-save-qty" style="width:100%;margin-top:12px;">Enregistrer les quantités livrées</button>
       <div class="qty-save-note" id="qty-save-note"></div>
     ` : ''}
+    ${qtyLocked ? '<p class="qty-bill-hint locked">Commande déjà reprise dans une facture : les quantités livrées sont figées. Pour corriger, émettez un avoir.</p>' : ''}
     <div class="timeline" style="margin-top:22px;">
       ${STATUSES.map((s, i) => `
         <div class="tl-step ${i < currentIdx ? 'done' : ''} ${i === currentIdx ? 'current' : ''}">

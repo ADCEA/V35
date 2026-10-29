@@ -18,6 +18,9 @@ const { sendWhatsAppNotification } = require('../utils/whatsapp');
 const { notifyOrderDelivered } = require('../utils/webhookNotify');
 
 const mail = require('../billing/mail');
+const deliveries = require('../billing/deliveries');
+const deliveredQty = require('../billing/deliveredQty');
+const { BillingError } = require('../billing/engine');
 const router = express.Router();
 
 const STATUSES = ['recue', 'traitement', 'prete', 'livree'];
@@ -599,7 +602,9 @@ router.get('/orders/:id/copy', (req, res) => {
 // GET /api/admin/orders — toutes les commandes, tous clients
 router.get('/orders', (req, res) => {
   const orders = db.prepare('SELECT * FROM orders ORDER BY created_at DESC').all();
-  res.json({ orders: orders.map(o => serializeOrder(o, getItems(o.id))) });
+  // `billed` : commande déjà reprise dans une facture ou un brouillon, donc quantités livrées figées.
+  const billed = deliveries.billedOrderIds();
+  res.json({ orders: orders.map(o => ({ ...serializeOrder(o, getItems(o.id)), billed: billed.has(o.id) })) });
 });
 
 // PATCH /api/admin/orders/:id/status
@@ -706,38 +711,22 @@ router.post('/orders/:id/create-followup', (req, res) => {
   res.status(201).json({ order: serializeOrder(followupOrder, getItems(followupId)) });
 });
 
-// PATCH /api/admin/orders/:id/items — ajuste la quantité RÉELLEMENT PRÉPARÉE
-// de chaque article (commande "en traitement"). La quantité commandée par le
-// client (colonne qty) n'est jamais modifiée : seule delivered_qty change,
-// pour que le client puisse toujours voir les deux valeurs sur son aperçu.
+// PATCH /api/admin/orders/:id/items — ajuste la quantité RÉELLEMENT LIVRÉE
+// de chaque article. La facture suit ces quantités : elles restent donc
+// corrigeables (commande en traitement, prête ou livrée) jusqu'à ce que la
+// commande soit reprise dans une facture ou un brouillon. La quantité
+// commandée par le client (colonne qty) n'est jamais modifiée : seule
+// delivered_qty change, pour que le client voie toujours les deux valeurs.
+// Règles et journalisation : billing/deliveredQty.js.
 router.patch('/orders/:id/items', (req, res) => {
   const orderId = Number(req.params.id);
+  try {
+    deliveredQty.setDelivered(orderId, (req.body || {}).items);
+  } catch (e) {
+    if (e instanceof BillingError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
   const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
-  if (!order) return res.status(404).json({ error: 'Commande introuvable.' });
-  if (order.status !== 'traitement') {
-    return res.status(409).json({ error: 'Les quantités ne peuvent être modifiées que pour une commande en traitement.' });
-  }
-
-  const { items } = req.body || {};
-  if (!Array.isArray(items)) {
-    return res.status(400).json({ error: "Liste d'articles invalide." });
-  }
-
-  const existing = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
-  const update = db.prepare('UPDATE order_items SET delivered_qty = ? WHERE order_id = ? AND service_id = ?');
-
-  db.transaction(() => {
-    existing.forEach(row => {
-      const found = items.find(i => i.id === row.service_id);
-      if (!found) return; // article non transmis : on laisse sa valeur actuelle
-      const raw = parseInt(found.deliveredQty, 10);
-      // Ligne négative (reprise) : la quantité livrée reste négative ou nulle ; ligne normale : positive ou nulle.
-      const okSign = Number.isInteger(raw) && (row.qty < 0 ? raw <= 0 : raw >= 0);
-      const deliveredQty = okSign ? raw : row.delivered_qty;
-      update.run(deliveredQty, order.id, row.service_id);
-    });
-  })();
-
   res.json({ order: serializeOrder(order, getItems(order.id)) });
 });
 
@@ -772,7 +761,13 @@ router.post('/orders/:id/items', (req, res) => {
     return res.status(400).json({ error: 'Quantité invalide (entier non nul, négatif possible pour une reprise).' });
   }
 
-  const existing = db.prepare('SELECT id, qty FROM order_items WHERE order_id = ? AND service_id = ?').get(orderId, serviceId);
+  // Une commande déjà reprise dans une facture (ou un brouillon) ne change plus : les montants y sont figés.
+  try { deliveredQty.assertNotBilled(orderId); } catch (e) {
+    if (e instanceof BillingError) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+
+  const existing = db.prepare('SELECT id, qty, delivered_qty AS deliveredQty FROM order_items WHERE order_id = ? AND service_id = ?').get(orderId, serviceId);
   if (existing) {
     // Déjà présent sur cette commande : on ajuste la ligne existante
     // plutôt que d'en créer une seconde pour le même article.
@@ -780,7 +775,11 @@ router.post('/orders/:id/items', (req, res) => {
     if (newQty === 0) return res.status(409).json({ error: 'Cet article est déjà sur la commande : la quantité tomberait à zéro. Mettez plutôt la quantité livrée à 0.' });
     // Une ligne ne change pas de sens (normale ↔ reprise) en passant par ce raccourci.
     if ((existing.qty > 0) !== (newQty > 0)) return res.status(409).json({ error: "Cet article est déjà sur la commande avec le signe opposé : modifiez la ligne existante ou ajoutez la quantité avec le même signe." });
-    db.prepare('UPDATE order_items SET qty = ?, delivered_qty = ? WHERE id = ?').run(newQty, newQty, existing.id);
+    // La quantité livrée déjà saisie est conservée : on y ajoute seulement ce qui vient d'être ajouté
+    // (sans repasser sous zéro pour une ligne normale, ni au-dessus pour une reprise).
+    const delivered = (existing.deliveredQty ?? existing.qty) + qtyNum;
+    const newDelivered = newQty > 0 ? Math.max(0, delivered) : Math.min(0, delivered);
+    db.prepare('UPDATE order_items SET qty = ?, delivered_qty = ? WHERE id = ?').run(newQty, newDelivered, existing.id);
   } else {
     db.prepare(`
       INSERT INTO order_items (order_id, service_id, name, code, sage_code, price, qty, delivered_qty, production_stage)

@@ -2,7 +2,7 @@
 //
 // Un BL est une commande au statut « livrée ». Sa date est la date de livraison (à défaut, celle de création) :
 // c'est la même que celle utilisée pour facturer et pour appliquer le tarif en vigueur.
-// Rien n'est écrit ici : ce module ne fait que lire.
+// Rien n'est écrit ici : ce module ne fait que lire (les corrections de quantités sont dans deliveredQty.js).
 
 const db = require('../db');
 const engine = require('./engine');
@@ -82,6 +82,19 @@ function loadBilling() {
   const invoices = new Map(db.prepare(activeInvoiceSql).all().map(r => [r.orderId, r]));
   const legacy = new Set(db.prepare('SELECT order_id FROM invoice_orders').all().map(r => r.order_id));
   return { invoices, legacy };
+}
+
+/** État de facturation d'une seule commande (mêmes règles que la liste des BL). */
+function billingOfOrder(orderId) {
+  const row = db.prepare(`${activeInvoiceSql} AND no.order_id = ?`).get(orderId);
+  const legacy = new Set(db.prepare('SELECT order_id FROM invoice_orders WHERE order_id = ?').all(orderId).map(r => r.order_id));
+  return billingOf(orderId, new Map(row ? [[orderId, row]] : []), legacy);
+}
+
+/** Identifiants des commandes déjà reprises dans une facture ou un brouillon (quantités figées). */
+function billedOrderIds() {
+  const { invoices, legacy } = loadBilling();
+  return new Set([...invoices.keys(), ...legacy]);
 }
 
 /** Liste des BL livrés, du plus récent au plus ancien, avec totaux sur l'ensemble des résultats. */
@@ -180,4 +193,4 @@ function deliveriesCsv(filters) {
   return '﻿' + lines.join('\r\n') + '\r\n';
 }
 
-module.exports = { listDeliveries, getDelivery, exportSet, deliveriesCsv, STATUSES, PAYMENTS, MAX_EXPORT, MAX_LIST };
+module.exports = { listDeliveries, getDelivery, billingOfOrder, billedOrderIds, exportSet, deliveriesCsv, STATUSES, PAYMENTS, MAX_EXPORT, MAX_LIST };

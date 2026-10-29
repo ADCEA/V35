@@ -1,11 +1,12 @@
 // Routes « bons de livraison » de la facturation : liste filtrée par date et par hôtel, détail, PDF, exports,
-// et regroupement des BL dont le nom d'hôtel a été saisi librement.
+// correction des quantités livrées (tant que le bon n'est pas facturé) et regroupement des BL dont le nom d'hôtel a été saisi librement.
 // Montées par routes/billing.js APRÈS le verrou : la Facturation doit être déverrouillée.
-// Seul le rattachement des BL à une fiche hôtel écrit, et il exige la ressaisie du code (après un aperçu libre).
+// Le rattachement des BL à une fiche hôtel exige la ressaisie du code (après un aperçu libre) ; la correction des quantités livrées est journalisée.
 
 const express = require('express');
 const engine = require('../billing/engine');
 const deliveries = require('../billing/deliveries');
+const deliveredQty = require('../billing/deliveredQty');
 const unlinked = require('../billing/unlinked');
 const lock = require('../billing/lock');
 const { buildDeliveryNotePdf } = require('../utils/pdf');
@@ -53,6 +54,16 @@ router.post('/deliveries/unlinked/link',
 router.get('/deliveries/:id', wrap((req, res) => {
   const { order, items, ...d } = deliveries.getDelivery(parseInt(req.params.id, 10));
   res.json({ delivery: d });
+}));
+
+// Correction des quantités livrées d'un BL pas encore facturé : la facture suit ces quantités (refus 409 si le bon
+// figure déjà dans une facture ou un brouillon). Chaque correction est inscrite au journal de facturation.
+router.put('/deliveries/:id/quantities', wrap((req, res) => {
+  const id = parseInt(req.params.id, 10);
+  deliveries.getDelivery(id);   // 404 si la commande n'est pas livrée
+  const changes = deliveredQty.setDelivered(id, (req.body || {}).items);
+  const { order, items, ...d } = deliveries.getDelivery(id);
+  res.json({ delivery: d, changes });
 }));
 
 // Envoi d'un bon par Outlook, PDF joint : même fenêtre d'envoi que les factures (destinataire = e-mail de l'hôtel).

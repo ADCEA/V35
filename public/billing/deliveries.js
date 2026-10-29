@@ -253,34 +253,68 @@
     d.body.innerHTML = '<div class="bl-spin">Chargement…</div>';
     let D;
     try { D = (await Bill.get('/deliveries/' + id)).delivery; } catch (err) { Bill.closeDrawer(); return Bill.fail(err); }
-    const b = D.billing;
-    const actions = [`<button class="bl-btn primary" id="dd-mail">Envoyer par e-mail</button>`, `<button class="bl-btn" id="dd-pdf">Télécharger le PDF</button>`];
-    if (b.status === 'invoiced' && b.invoiceId) actions.push(`<button class="bl-btn" id="dd-inv">Ouvrir la facture ${e(b.invoiceNumber || '')}</button>`);
-    if (b.status === 'draft' && b.invoiceId) actions.push('<button class="bl-btn" id="dd-inv">Ouvrir le brouillon</button>');
-    if (b.status === 'to_invoice') actions.push('<button class="bl-btn" id="dd-month">Facturer le mois</button>');
-    d.setHead({ title: `Bon ${e(D.ticket)}`, sub: `${e(D.client.societe)} · livré le ${dFr(D.date)}`, actions: actions.join('') });
-    d.body.innerHTML = `
-      <div class="bl-panel"><div class="bl-panel-b"><dl class="bl-kv">
-        <dt>Facturation</dt><dd>${billingTag(b)}${b.invoiceDate ? ` <span class="bl-muted">émise le ${dFr(b.invoiceDate)}</span>` : ''}</dd>
-        ${b.payment ? `<dt>Paiement</dt><dd>${payTag(b)}${b.dueDate ? ` <span class="bl-muted">échéance le ${dFr(b.dueDate)}</span>` : ''}</dd>` : ''}
-        <dt>Hôtel</dt><dd>${e(D.client.societe)}</dd>
-        <dt>Adresse de livraison</dt><dd>${e(D.client.adresse || '—')}</dd>
-        <dt>Contact</dt><dd>${e([D.client.contact, D.client.tel].filter(Boolean).join(' · ') || '—')}</dd>
-        ${D.notes ? `<dt>Notes</dt><dd style="white-space:pre-line">${e(D.notes)}</dd>` : ''}
-      </dl></div></div>
-      ${D.adjusted ? '<div class="bl-alert warn">Certaines quantités livrées diffèrent de la commande : la facture suit les quantités livrées.</div>' : ''}
-      <div class="bl-panel"><div class="bl-tablewrap"><table class="bl-table"><thead><tr><th>Article</th><th class="r">Commandé</th><th class="r">Livré</th><th class="r">Prix HT</th><th class="r">Total HT</th></tr></thead><tbody>
-        ${D.lines.map(l => `<tr class="${l.deliveredQty != null && l.deliveredQty !== l.qty ? 'bl-diff' : ''}"><td class="client">${e(l.name)}<span class="sub">${e(l.sageCode || l.code || '')}</span></td>
-          <td class="r bl-num">${l.qty}</td><td class="r bl-num"><b>${l.delivered}</b></td><td class="r bl-num">${Bill.num3(l.price)}</td><td class="r bl-num">${eur(l.htCents)}</td></tr>`).join('')}
-        </tbody></table></div>
-        <div class="bl-panel-b"><div class="bl-totals"><div class="grand"><span>Total HT</span><span>${eur(D.htCents)}</span></div></div>
-          <p class="bl-hint" style="margin-top:10px">Les prix sont ceux figés sur la commande au moment de sa saisie (tarif de l'hôtel à cette date).</p></div></div>`;
-    d.el.querySelector('#dd-mail').onclick = () => Bill.mailModal({ title: 'Envoyer le bon de livraison', previewPath: `/deliveries/${id}/mail-preview`, sendPath: `/deliveries/${id}/send`, pdfPath: `/deliveries/${id}/pdf` });
-    d.el.querySelector('#dd-pdf').onclick = async (ev) => {
-      const btn = ev.currentTarget; btn.disabled = true;
-      try { await Bill.download(`/deliveries/${id}/pdf`, `bon-livraison-${D.ticket}.pdf`); } catch (err) { Bill.fail(err); } finally { btn.disabled = false; }
-    };
-    const inv = d.el.querySelector('#dd-inv'); if (inv) inv.onclick = () => Bill.openInvoice(b.invoiceId, onChange);
-    const month = d.el.querySelector('#dd-month'); if (month) month.onclick = () => { Bill.closeDrawer(); Bill.go('month'); };
+    draw(false);
+
+    // editing = true : la colonne « Livré » devient saisissable (bon pas encore facturé).
+    function draw(editing) {
+      const b = D.billing;
+      const canEdit = b.status === 'to_invoice';
+      const actions = [`<button class="bl-btn primary" id="dd-mail">Envoyer par e-mail</button>`, `<button class="bl-btn" id="dd-pdf">Télécharger le PDF</button>`];
+      if (b.status === 'invoiced' && b.invoiceId) actions.push(`<button class="bl-btn" id="dd-inv">Ouvrir la facture ${e(b.invoiceNumber || '')}</button>`);
+      if (b.status === 'draft' && b.invoiceId) actions.push('<button class="bl-btn" id="dd-inv">Ouvrir le brouillon</button>');
+      if (b.status === 'to_invoice') actions.push('<button class="bl-btn" id="dd-month">Facturer le mois</button>');
+      d.setHead({ title: `Bon ${e(D.ticket)}`, sub: `${e(D.client.societe)} · livré le ${dFr(D.date)}`, actions: actions.join('') });
+      const note = editing
+        ? '<div class="bl-alert info">Saisissez ce qui a réellement été livré : la facture reprendra ces quantités. Une reprise de linge reste négative ou nulle.</div>'
+        : D.adjusted ? '<div class="bl-alert warn">Certaines quantités livrées diffèrent de la commande : la facture suit les quantités livrées.</div>' : '';
+      const cell = (l) => editing
+        ? `<input class="bl-input bl-qty-in" type="number" step="1" ${l.qty < 0 ? 'max="0"' : 'min="0"'} data-id="${e(l.id)}" value="${l.delivered}" aria-label="Quantité livrée : ${e(l.name)}">`
+        : `<b>${l.delivered}</b>`;
+      d.body.innerHTML = `
+        <div class="bl-panel"><div class="bl-panel-b"><dl class="bl-kv">
+          <dt>Facturation</dt><dd>${billingTag(b)}${b.invoiceDate ? ` <span class="bl-muted">émise le ${dFr(b.invoiceDate)}</span>` : ''}</dd>
+          ${b.payment ? `<dt>Paiement</dt><dd>${payTag(b)}${b.dueDate ? ` <span class="bl-muted">échéance le ${dFr(b.dueDate)}</span>` : ''}</dd>` : ''}
+          <dt>Hôtel</dt><dd>${e(D.client.societe)}</dd>
+          <dt>Adresse de livraison</dt><dd>${e(D.client.adresse || '—')}</dd>
+          <dt>Contact</dt><dd>${e([D.client.contact, D.client.tel].filter(Boolean).join(' · ') || '—')}</dd>
+          ${D.notes ? `<dt>Notes</dt><dd style="white-space:pre-line">${e(D.notes)}</dd>` : ''}
+        </dl></div></div>
+        ${note}
+        <div class="bl-panel"><div class="bl-tablewrap"><table class="bl-table"><thead><tr><th>Article</th><th class="r">Commandé</th><th class="r">Livré</th><th class="r">Prix HT</th><th class="r">Total HT</th></tr></thead><tbody>
+          ${D.lines.map(l => `<tr class="${l.deliveredQty != null && l.deliveredQty !== l.qty ? 'bl-diff' : ''}"><td class="client">${e(l.name)}<span class="sub">${e(l.sageCode || l.code || '')}</span></td>
+            <td class="r bl-num">${l.qty}</td><td class="r bl-num">${cell(l)}</td><td class="r bl-num">${Bill.num3(l.price)}</td><td class="r bl-num">${eur(l.htCents)}</td></tr>`).join('')}
+          </tbody></table></div>
+          <div class="bl-panel-b"><div class="bl-totals"><div class="grand"><span>Total HT</span><span>${eur(D.htCents)}</span></div></div>
+            ${editing
+              ? `<div class="bl-qty-actions"><button class="bl-btn primary" id="dd-qty-save">Enregistrer les quantités</button><button class="bl-btn" id="dd-qty-cancel">Annuler</button><span class="bl-muted" id="dd-qty-msg" role="status"></span></div>`
+              : canEdit ? `<div class="bl-qty-actions"><button class="bl-btn" id="dd-qty">Corriger les quantités livrées</button><span class="bl-muted">Tant que le bon n'est pas facturé.</span></div>`
+              : b.status === 'draft' ? '<p class="bl-hint" style="margin-top:10px">Ce bon est dans un brouillon de facture : supprimez le brouillon pour corriger les quantités livrées.</p>'
+              : '<p class="bl-hint" style="margin-top:10px">Bon facturé : les quantités sont figées. Pour corriger, émettez un avoir.</p>'}
+            <p class="bl-hint" style="margin-top:10px">Les prix sont ceux figés sur la commande au moment de sa saisie (tarif de l'hôtel à cette date).</p></div></div>`;
+      d.el.querySelector('#dd-mail').onclick = () => Bill.mailModal({ title: 'Envoyer le bon de livraison', previewPath: `/deliveries/${id}/mail-preview`, sendPath: `/deliveries/${id}/send`, pdfPath: `/deliveries/${id}/pdf` });
+      d.el.querySelector('#dd-pdf').onclick = async (ev) => {
+        const btn = ev.currentTarget; btn.disabled = true;
+        try { await Bill.download(`/deliveries/${id}/pdf`, `bon-livraison-${D.ticket}.pdf`); } catch (err) { Bill.fail(err); } finally { btn.disabled = false; }
+      };
+      const inv = d.el.querySelector('#dd-inv'); if (inv) inv.onclick = () => Bill.openInvoice(b.invoiceId, onChange);
+      const month = d.el.querySelector('#dd-month'); if (month) month.onclick = () => { Bill.closeDrawer(); Bill.go('month'); };
+      const edit = d.el.querySelector('#dd-qty'); if (edit) edit.onclick = () => draw(true);
+      const cancel = d.el.querySelector('#dd-qty-cancel'); if (cancel) cancel.onclick = () => draw(false);
+      const save = d.el.querySelector('#dd-qty-save');
+      if (save) save.onclick = async () => {
+        const msg = d.el.querySelector('#dd-qty-msg');
+        const items = [...d.el.querySelectorAll('.bl-qty-in')].map(i => ({ id: i.dataset.id, deliveredQty: i.value }));
+        // Une case vide ou de mauvais signe ne doit pas être ignorée en silence : on le dit avant d'envoyer.
+        const bad = items.find((it, k) => { const n = Number(it.deliveredQty); return it.deliveredQty === '' || !Number.isInteger(n) || (D.lines[k].qty < 0 ? n > 0 : n < 0); });
+        if (bad) { msg.textContent = 'Quantité invalide : entier positif ou nul (négatif ou nul pour une reprise).'; return; }
+        save.disabled = true; msg.textContent = '';
+        try {
+          const r = await Bill.put(`/deliveries/${id}/quantities`, { items });
+          D = r.delivery;
+          Bill.toast(r.changes.length ? `Quantités mises à jour (${r.changes.length} ligne${r.changes.length > 1 ? 's' : ''}).` : 'Aucune quantité modifiée.');
+          draw(false);
+        } catch (err) { save.disabled = false; msg.textContent = err.message; }
+      };
+    }
   }
 })();
