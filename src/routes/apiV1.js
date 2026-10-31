@@ -63,7 +63,9 @@ router.post('/orders', requireApiToken, (req, res) => {
   if (items.length === 0) {
     return res.status(400).json({ error: "Le champ 'items' est un tableau vide — au moins un article est requis." });
   }
-  if (livraisonPrevue && !/^\d{4}-\d{2}-\d{2}$/.test(livraisonPrevue)) {
+  if (items.length > 150) return res.status(400).json({ error: "Le champ 'items' contient trop de lignes (150 au plus)." });
+  if (notes != null && (typeof notes !== 'string' || notes.length > 2000)) return res.status(400).json({ error: "Le champ 'notes' doit être un texte de 2000 caractères au plus." });
+  if (livraisonPrevue && (typeof livraisonPrevue !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(livraisonPrevue))) {
     return res.status(400).json({ error: `Le champ 'livraisonPrevue' doit être au format AAAA-MM-JJ (reçu : "${livraisonPrevue}").` });
   }
 
@@ -72,8 +74,9 @@ router.post('/orders', requireApiToken, (req, res) => {
   );
   const resolved = [];
   for (const it of items) {
+    if (!it || typeof it !== 'object') return res.status(400).json({ error: 'Chaque élément de \'items\' doit être un objet { sageCode, qty }.' });
     const requestedCode = String(it.sageCode || '').toUpperCase();
-    const svc = allowedBySageCode[requestedCode];
+    const svc = Object.prototype.hasOwnProperty.call(allowedBySageCode, requestedCode) ? allowedBySageCode[requestedCode] : null;
     if (!svc) {
       // Distingue "ce code n'existe nulle part dans le catalogue" (faute
       // de frappe probable côté client) de "ce code existe bien, mais
@@ -87,7 +90,7 @@ router.post('/orders', requireApiToken, (req, res) => {
       return res.status(400).json({ error });
     }
     const qty = parseInt(it.qty, 10);
-    if (!Number.isInteger(qty) || qty <= 0) {
+    if (!Number.isInteger(qty) || qty <= 0 || qty > 100000) {
       return res.status(400).json({ error: `Quantité invalide pour l'article "${it.sageCode}" : reçu "${it.qty}", attendu un entier positif (ex. 1, 20).` });
     }
     resolved.push({ ...svc, qty });

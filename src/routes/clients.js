@@ -8,6 +8,8 @@ const { serializeOrder } = require('../utils/serializeOrder');
 const crypto = require('crypto');
 const guard = require('../utils/loginGuard');
 const mailer = require('../utils/mailer');
+const accessCode = require('../utils/accessCode');
+const security = require('../middleware/security');
 
 const router = express.Router();
 
@@ -23,19 +25,46 @@ function publicClient(row) {
   };
 }
 
+// Clés de session conservées quand on change d'identifiant de session à la connexion d'un hôtel (l'administration ouverte
+// dans le même navigateur ne doit pas être perdue).
+const KEEP_ON_CLIENT_LOGIN = ['isAdmin', 'adminSince', 'adminAt', 'adminPw', 'deviceOk', 'billing'];
+function openClientSession(req, res, clientId, onOpen) {
+  security.regenerate(req, KEEP_ON_CLIENT_LOGIN, (err) => {
+    if (err) { console.error(err); return res.status(500).json({ error: 'Erreur serveur.' }); }
+    req.session.clientId = clientId;
+    onOpen();
+  });
+}
+
+// Au plus 20 créations de compte par heure et par adresse (les comptes créés par un robot polluent la liste des hôtels).
+const registerLimit = security.rateLimit({ name: 'création de compte', windowMs: 60 * 60 * 1000, max: 20, message: "Trop de créations de compte depuis cette connexion. Réessayez dans une heure ou contactez Blanchisserie Cézanne." });
+const forgotLimit = security.rateLimit({ name: 'code oublié', windowMs: 60 * 60 * 1000, max: 30, message: 'Trop de demandes. Réessayez dans une heure.' });
+const loginLimit = security.rateLimit({ name: 'connexion hôtel', windowMs: 15 * 60 * 1000, max: 120, message: 'Trop de tentatives depuis cette connexion. Réessayez dans quelques minutes.' });
+
+// Champs texte libres : des textes, de longueur raisonnable (ils s'affichent ensuite dans l'administration).
+const TEXT_LIMITS = { societe: 120, contact: 120, tel: 40, adresse: 250, email: 254 };
+function badText(body, fields) {
+  for (const f of fields) {
+    const v = body[f];
+    if (v === undefined || v === null || v === '') continue;
+    if (typeof v !== 'string') return `Champ « ${f} » invalide.`;
+    if (v.length > TEXT_LIMITS[f]) return `Champ « ${f} » trop long (${TEXT_LIMITS[f]} caractères au plus).`;
+  }
+  return null;
+}
+
 // POST /api/clients/register
-router.post('/register', (req, res) => {
+router.post('/register', registerLimit, (req, res) => {
   const { societe, contact, tel, adresse, email, code } = req.body || {};
 
   if (!societe || !contact || !tel || !adresse || !email) {
     return res.status(400).json({ error: 'Merci de remplir tous les champs.' });
   }
+  { const bad = badText(req.body, ['societe', 'contact', 'tel', 'adresse', 'email']); if (bad) return res.status(400).json({ error: bad }); }
   if (!EMAIL_RE.test(email)) {
     return res.status(400).json({ error: 'Adresse email invalide.' });
   }
-  if (!/^\d{4,8}$/.test(code || '')) {
-    return res.status(400).json({ error: "Le code d'accès doit contenir entre 4 et 8 chiffres." });
-  }
+  { const bad = accessCode.check(code); if (bad) return res.status(400).json({ error: bad }); }
 
   const existing = db.prepare('SELECT id FROM clients WHERE email = ?').get(email.toLowerCase());
   if (existing) {
@@ -49,14 +78,13 @@ router.post('/register', (req, res) => {
   `).run(email.toLowerCase(), societe, contact, tel, adresse, codeHash);
 
   const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(info.lastInsertRowid);
-  req.session.clientId = client.id;
-  res.status(201).json({ client: publicClient(client) });
+  openClientSession(req, res, client.id, () => res.status(201).json({ client: publicClient(client) }));
 });
 
 // POST /api/clients/login
-router.post('/login', (req, res) => {
+router.post('/login', loginLimit, (req, res) => {
   const { email, code } = req.body || {};
-  if (!email || !code) {
+  if (typeof email !== 'string' || typeof code !== 'string' || !email || !code || email.length > 254 || code.length > 64) {
     return res.status(400).json({ error: 'Merci de renseigner votre email et votre code.' });
   }
   // Essais limités par adresse e-mail saisie (existante ou non : la réponse ne révèle rien).
@@ -70,8 +98,7 @@ router.post('/login', (req, res) => {
     return res.status(401).json({ error: "Email ou code d'accès incorrect." });
   }
   guard.ok(key);
-  req.session.clientId = client.id;
-  res.json({ client: publicClient(client) });
+  openClientSession(req, res, client.id, () => res.json({ client: publicClient(client) }));
 });
 
 // POST /api/clients/logout
@@ -97,6 +124,8 @@ router.get('/me', (req, res) => {
 // optionnels et peuvent être complétés progressivement.
 router.put('/me/billing', requireClient, (req, res) => {
   const { siret, tvaNumber, adresseFacturation } = req.body || {};
+  if ([siret, tvaNumber, adresseFacturation].some(v => v != null && typeof v !== 'string')) return res.status(400).json({ error: 'Informations de facturation invalides.' });
+  if ((tvaNumber || '').length > 40 || (adresseFacturation || '').length > 300 || (siret || '').length > 40) return res.status(400).json({ error: 'Une des informations est trop longue.' });
   const cur = db.prepare('SELECT client_type FROM clients WHERE id = ?').get(req.session.clientId);
   const particulier = cur && cur.client_type === 'particulier'; // un particulier n'a ni SIRET ni n° de TVA
   if (!particulier && siret && !/^\d{14}$/.test(siret.replace(/\s/g, ''))) {
@@ -172,7 +201,7 @@ router.put('/me/code', requireClient, (req, res) => {
     const after = guard.fail(key);
     return res.status(after.locked ? 429 : 403).json({ error: after.locked ? guard.message(after.retryAfterSec) : "Le code d'accès actuel est incorrect." });
   }
-  if (!/^\d{4,8}$/.test(String(newCode || ''))) return res.status(400).json({ error: "Le nouveau code doit contenir entre 4 et 8 chiffres." });
+  { const bad = accessCode.check(newCode, { who: 'nouveau code' }); if (bad) return res.status(400).json({ error: bad }); }
   guard.ok(key);
   db.prepare('UPDATE clients SET code_hash = ? WHERE id = ?').run(bcrypt.hashSync(String(newCode), 10), cur.id);
   db.prepare("UPDATE client_reset_tokens SET used_at = datetime('now') WHERE client_id = ? AND used_at IS NULL").run(cur.id);
@@ -183,7 +212,7 @@ router.put('/me/code', requireClient, (req, res) => {
 // POST /api/clients/forgot-code — envoie un lien (valable 1 h, à usage unique) pour choisir un nouveau code.
 // La réponse est la même que l'adresse soit connue ou non : on ne révèle pas quels comptes existent.
 const RESET_TTL_MIN = 60;
-router.post('/forgot-code', async (req, res) => {
+router.post('/forgot-code', forgotLimit, async (req, res) => {
   const email = String((req.body || {}).email || '').trim().toLowerCase();
   if (!EMAIL_RE.test(email)) return res.status(400).json({ error: 'Adresse email invalide.' });
   const base = publicBaseUrl();
@@ -217,7 +246,7 @@ router.post('/forgot-code', async (req, res) => {
 // POST /api/clients/reset-code — choisit le nouveau code avec le jeton reçu par e-mail.
 router.post('/reset-code', (req, res) => {
   const { token, code } = req.body || {};
-  if (!/^\d{4,8}$/.test(String(code || ''))) return res.status(400).json({ error: "Le code d'accès doit contenir entre 4 et 8 chiffres." });
+  { const bad = accessCode.check(code); if (bad) return res.status(400).json({ error: bad }); }
   const hash = crypto.createHash('sha256').update(String(token || '')).digest('hex');
   const row = db.prepare("SELECT t.id, t.client_id, c.societe FROM client_reset_tokens t JOIN clients c ON c.id = t.client_id WHERE t.token_hash = ? AND t.used_at IS NULL AND t.expires_at > datetime('now')").get(hash);
   if (!row) return res.status(400).json({ error: "Ce lien n'est plus valable. Demandez-en un nouveau depuis « Code oublié ? »." });

@@ -361,6 +361,14 @@ if (adminColumns.length > 0 && !adminColumns.includes('avg_speed_kmh')) {
 if (adminColumns.length > 0 && !adminColumns.includes('minutes_per_stop')) {
   db.exec(`ALTER TABLE admin ADD COLUMN minutes_per_stop REAL DEFAULT 20;`);
 }
+// Double authentification de l'administrateur (code à 6 chiffres d'une application d'authentification) :
+// secret chiffré (jamais en clair), activation, empreintes des codes de secours, dernier pas utilisé (pas de rejeu).
+if (adminColumns.length > 0 && !adminColumns.includes('totp_secret_enc')) {
+  db.exec(`ALTER TABLE admin ADD COLUMN totp_secret_enc TEXT;`);
+  db.exec(`ALTER TABLE admin ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0;`);
+  db.exec(`ALTER TABLE admin ADD COLUMN totp_recovery_json TEXT;`);
+  db.exec(`ALTER TABLE admin ADD COLUMN totp_last_step INTEGER NOT NULL DEFAULT -1;`);
+}
 
 const ordersGeoColumns = db.prepare(`PRAGMA table_info(orders)`).all().map(c => c.name);
 if (!ordersGeoColumns.includes('lat')) {

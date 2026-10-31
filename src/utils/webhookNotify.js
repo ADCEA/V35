@@ -8,6 +8,8 @@
 // injoignable, timeout...), ça ne doit JAMAIS bloquer le changement de
 // statut côté admin — juste être tenté, en silence en cas d'échec.
 
+const { assertPublicUrl } = require('./publicHost');
+
 const TIMEOUT_MS = 8000;
 
 /**
@@ -31,10 +33,14 @@ async function notifyOrderDelivered(client, order, items) {
     })),
   };
 
+  // Jamais vers une machine interne (serveur, réseau privé, métadonnées du cloud) ; et pas de redirection suivie
+  // (elle contournerait la vérification).
+  await assertPublicUrl(client.webhook_url);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     const res = await fetch(client.webhook_url, {
+      redirect: 'manual',
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

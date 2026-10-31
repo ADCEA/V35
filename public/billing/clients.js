@@ -78,7 +78,7 @@
           <div class="bl-field"><label for="nc-m">E-mail</label><input id="nc-m" type="email" placeholder="contact@hotel.fr"></div></div>
         <div class="bl-field"><label for="nc-a">Adresse</label><input id="nc-a"></div>
         <div class="bl-row2"><div class="bl-field"><label for="nc-p">Code postal</label><input id="nc-p" inputmode="numeric"></div><div class="bl-field"><label for="nc-v">Ville</label><input id="nc-v"></div></div>
-        <div class="bl-field"><label for="nc-k">Code d'accès à l'espace client (facultatif)</label><input id="nc-k" inputmode="numeric" maxlength="8" placeholder="4 à 8 chiffres"><div class="bl-hint">Sans code, l'hôtel n'a pas d'accès à son espace ; vous pourrez en définir un plus tard.</div></div>`,
+        <div class="bl-field"><label for="nc-k">Code d'accès à l'espace client (facultatif)</label><input id="nc-k" inputmode="numeric" maxlength="10" placeholder="6 à 10 chiffres"><div class="bl-hint">Sans code, l'hôtel n'a pas d'accès à son espace ; vous pourrez en définir un plus tard.</div></div>`,
       buttons: [{ label: 'Annuler', onClick: async () => {} }, { label: 'Créer le client', primary: true, onClick: async (m) => {
         const r = await Bill.post('/catalog/clients', { societe: m.$('#nc-s').value, contact: m.$('#nc-c').value, tel: m.$('#nc-t').value, email: m.$('#nc-m').value,
           adresse: m.$('#nc-a').value, codePostal: m.$('#nc-p').value, ville: m.$('#nc-v').value, code: m.$('#nc-k').value || undefined, clientType: m.$('#nc-ty').value });
@@ -90,7 +90,7 @@
   function importClients(main) {
     Bill.csvImport({
       title: 'Importer des hôtels', path: '/catalog/clients/import', scope: 'clients-import',
-      intro: 'Colonnes obligatoires : <b>societe</b>, <b>contact</b>, <b>tel</b>, <b>adresse</b>, <b>email</b>. Facultatives : code_postal, ville, code (4 à 8 chiffres), type (<b>professionnel</b> ou <b>particulier</b> ; professionnel si la cellule est vide). Un hôtel dont l\'e-mail existe déjà est mis à jour ; son code d\'accès ne change que si la colonne « code » est remplie.',
+      intro: 'Colonnes obligatoires : <b>societe</b>, <b>contact</b>, <b>tel</b>, <b>adresse</b>, <b>email</b>. Facultatives : code_postal, ville, code (6 à 10 chiffres), type (<b>professionnel</b> ou <b>particulier</b> ; professionnel si la cellule est vide). Un hôtel dont l\'e-mail existe déjà est mis à jour ; son code d\'accès ne change que si la colonne « code » est remplie.',
       template: { name: 'modele-hotels.csv', text: 'societe,contact,tel,adresse,code_postal,ville,email,code\nHotel Exemple,Jean Dupont,0490000000,12 rue de la Paix,84200,Carpentras,contact@hotel-exemple.fr,\n' },
       renderPreview: (r) => {
         const s = r.summary;
@@ -195,7 +195,7 @@
       box.querySelector('#i-code').onclick = () => Bill.sensitive({
         title: 'Nouveau code d\'accès de l\'hôtel', scope: `client-code:${id}`, okLabel: 'Enregistrer le code',
         text: `Ce code ouvre l'espace client de « ${C.societe} » (suivi de commandes). L'ancien code cesse de fonctionner immédiatement.`,
-        body: '<div class="bl-field"><label for="nk-c">Nouveau code (4 à 8 chiffres)</label><input id="nk-c" inputmode="numeric" maxlength="8" autocomplete="off"></div>',
+        body: '<div class="bl-field"><label for="nk-c">Nouveau code (6 à 10 chiffres)</label><input id="nk-c" inputmode="numeric" maxlength="10" autocomplete="off"></div>',
         onSubmit: async (m) => { await Bill.put(`/catalog/clients/${id}/access-code`, { code: m.$('#nk-c').value }); Bill.toast('Code d\'accès enregistré'); },
       });
       box.querySelector('#i-del').onclick = () => Bill.sensitive({

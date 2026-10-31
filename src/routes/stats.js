@@ -134,3 +134,5 @@ router.post('/ai-report', async (req, res) => {
 });
 
 module.exports = router;
+// Réutilisé, en lecture seule, par l'accès Claude (src/routes/claudeApi.js).
+module.exports.overview = overview;

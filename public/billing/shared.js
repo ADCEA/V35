@@ -255,7 +255,7 @@
     try { w.opener = null; } catch (_) { /* déjà isolé */ }
     let r;
     try { r = await Bill.post(logPath, { ...logBody, channel: 'outlook' }); } catch (err) { w.close(); throw err; }
-    if (r.webLink) {
+    if (r.webLink && /^https:\/\//i.test(r.webLink)) {
       w.location.href = r.webLink;
       Bill.toast('Brouillon créé dans Outlook, PDF joint : il ne reste qu\'à l\'envoyer', false, 7000);
       return r;

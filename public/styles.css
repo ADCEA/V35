@@ -812,3 +812,19 @@ details.bon[open] .esp-chev{transform:rotate(180deg);}
 #admin-dashboard :is(.stats-list-card h5,.room-type-card-head h5,.stats-card strong,.stat-card strong){font-weight:600;}
 
 @media (max-width:480px){ #admin-dashboard .admin-subnav button{font-size:13px;padding-left:6px;padding-right:6px;} }
+
+/* Réglages de sécurité (double authentification, journal) */
+.sec-box{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start;margin-top:10px;}
+.sec-qr{width:190px;max-width:100%;background:#fff;padding:6px;border:1px solid var(--line,#d9e0e7);border-radius:8px;}
+.sec-qr svg{display:block;width:100%;height:auto;}
+.sec-secret{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:14px;letter-spacing:.04em;word-break:break-all;background:var(--bg-soft,#f4f7fa);padding:8px 10px;border-radius:6px;margin:6px 0;}
+.sec-codes{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:6px;margin:10px 0;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:14px;}
+.sec-codes span{background:var(--bg-soft,#f4f7fa);padding:6px 8px;border-radius:6px;text-align:center;}
+.sec-state{display:inline-block;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;margin-bottom:6px;}
+.sec-state.on{background:#e3f4ec;color:#1b6b46;}
+.sec-state.off{background:#fdeee0;color:#9a4a12;}
+.sec-conn{font-size:12px;color:var(--steel);margin:0 0 10px;}
+.sec-journal{max-height:320px;overflow:auto;border:1px solid var(--line,#d9e0e7);border-radius:8px;}
+.sec-journal table{width:100%;border-collapse:collapse;font-size:12.5px;}
+.sec-journal th,.sec-journal td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--line,#e6ebf0);vertical-align:top;}
+.sec-journal tr.bad td{color:var(--rust);}

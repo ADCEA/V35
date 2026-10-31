@@ -155,6 +155,87 @@
     });
   }
 
+
+  // ================= Accès Claude (lecture seule) =================
+  const CL_STATUS = { active: ['paid', 'Actif'], expired: ['unpaid', 'Expiré'], revoked: ['draft', 'Révoqué'] };
+  const SCOPE_LABEL = { exploitation: 'Exploitation', hotels: 'Hôtels', finance: 'Finance' };
+
+  async function copyText(txt, okMsg) {
+    try { await navigator.clipboard.writeText(txt); Bill.toast(okMsg); } catch (_) { Bill.toast('Copie impossible : sélectionnez le texte à la main', true); }
+  }
+
+  // Fenêtre affichée une seule fois à la création : le jeton n'est plus relisible ensuite.
+  function showClaudeToken(r) {
+    const site = location.origin;
+    const msg = [
+      'Accès en lecture seule à mon logiciel de blanchisserie (aucune modification possible).',
+      `Adresse : ${site}/api/claude/v1`,
+      `Jeton, à envoyer dans l'en-tête « Authorization: Bearer <jeton> » : ${r.token}`,
+      `Périmètres ouverts : ${r.access.scopes.map(x => SCOPE_LABEL[x]).join(', ')}. Valable jusqu'au ${dFr(r.access.expiresAt.slice(0, 10))}.`,
+      `La liste des routes se lit avec GET ${site}/api/claude/v1`,
+    ].join('\n');
+    Bill.modal({
+      title: 'Accès créé : copiez-le maintenant', wide: true,
+      body: `<p class="bl-note">Ce jeton ne sera <b>plus jamais affiché</b>. Il permet à Claude de <b>lire</b> (jamais de modifier) : ${e(r.access.scopes.map(x => SCOPE_LABEL[x]).join(', '))}. Il expire le ${e(dFr(r.access.expiresAt.slice(0, 10)))} et vous pouvez le couper à tout moment depuis cette page. Collez le message ci-dessous dans votre conversation avec Claude.</p>
+        <div class="bl-field"><label for="cl-msg">Message à coller à Claude</label><textarea id="cl-msg" readonly rows="7" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px">${e(msg)}</textarea></div>`,
+      buttons: [
+        { label: 'Copier le message', primary: true, onClick: async () => { await copyText(msg, 'Message copié'); return true; } },
+        { label: "J'ai copié, fermer", onClick: async () => {} },
+      ],
+      onOpen: (m) => { const t = m.$('#cl-msg'); t.addEventListener('focus', () => t.select()); },
+    });
+  }
+
+  function claudeCreate(main, s) {
+    Bill.sensitive({
+      title: 'Créer un accès Claude', scope: 'claude-access', okLabel: "Créer l'accès",
+      text: 'Claude pourra seulement lire, jamais modifier. Choisissez ce qu\'il peut voir et pour combien de temps, puis confirmez avec le code de la Facturation.',
+      body: `<div class="bl-field"><label for="cl-label">Nom de cet accès</label><input id="cl-label" maxlength="60" placeholder="Par exemple : Analyse de novembre"></div>
+        <div class="bl-field"><label>Ce que Claude peut lire</label>
+          ${Object.entries(s.scopes).map(([k, d]) => `<label class="bl-check"><input type="checkbox" class="cl-scope" value="${k}"${k === 'exploitation' ? ' checked' : ''}><span><b>${e(SCOPE_LABEL[k])}</b> — ${e(d)}</span></label>`).join('')}</div>
+        <div class="bl-field"><label for="cl-days">Valable pendant</label><select id="cl-days">${[[1, '1 jour'], [7, '7 jours'], [30, '30 jours']].map(([v, l]) => `<option value="${v}"${v === s.defaultDays ? ' selected' : ''}>${l}</option>`).join('')}</select></div>`,
+      onSubmit: async (m) => {
+        const scopes = [...m.el.querySelectorAll('.cl-scope:checked')].map(x => x.value);
+        const r = await Bill.post('/claude/access', { label: m.$('#cl-label').value, scopes, days: Number(m.$('#cl-days').value) });
+        showClaudeToken(r);
+        paintClaude(main);
+      },
+    });
+  }
+
+  async function paintClaude(main) {
+    const box = main.querySelector('#sc-cl'); if (!box) return;
+    let s; try { s = await Bill.get('/claude/access'); } catch (err) { return Bill.fail(err, box); }
+    const active = s.tokens.filter(t => t.status === 'active');
+    box.innerHTML = `
+      <p class="bl-note">Donnez à Claude un accès pour <b>consulter</b> vos données (jamais pour les modifier), le temps d'une analyse. Vous choisissez ce qu'il peut voir ; l'accès <b>expire</b> tout seul (30 jours au plus) et se coupe d'un clic. Il ne permet ni de se connecter à l'administration, ni de lire les codes d'accès des hôtels, les IBAN ou les réglages. Chaque lecture est inscrite dans le journal ci-dessous.</p>
+      ${s.enabled ? '' : '<div class="bl-alert warn">Cette fonction est désactivée sur le serveur (variable <span class="bl-code">CLAUDE_ACCESS=off</span>). Aucun accès ne fonctionne tant qu\'elle l\'est.</div>'}
+      <div class="bl-actions"><button class="bl-btn ${active.length ? '' : 'primary'}" id="cl-new" ${s.enabled ? '' : 'disabled'}>Créer un accès</button>
+        ${active.length ? '<button class="bl-btn danger" id="cl-all">Tout révoquer</button>' : ''}</div>
+      ${s.tokens.length ? `<div class="bl-tablewrap" style="margin-top:12px"><table class="bl-table"><thead><tr><th>Nom</th><th>Peut lire</th><th>Expire</th><th>Dernière lecture</th><th class="r">Lectures</th><th></th></tr></thead><tbody>
+        ${s.tokens.map(t => { const st = CL_STATUS[t.status] || CL_STATUS.revoked; return `<tr><td>${e(t.label)}<span class="sub"><span class="bl-pill ${st[0]}">${st[1]}</span></span></td>
+          <td>${e(t.scopes.map(x => SCOPE_LABEL[x] || x).join(', '))}</td><td class="bl-num">${e(dtFr(t.expiresAt))}</td>
+          <td class="bl-num">${t.lastUsedAt ? e(dtFr(t.lastUsedAt)) : 'jamais'}</td><td class="r bl-num">${t.useCount}</td>
+          <td class="r">${t.status === 'active' ? `<button class="bl-btn small danger" data-rv="${t.id}">Révoquer</button>` : ''}</td></tr>`; }).join('')}</tbody></table></div>`
+        : '<p class="bl-hint" style="margin-top:12px">Aucun accès pour le moment.</p>'}
+      ${s.log.length ? `<details style="margin-top:14px"><summary class="bl-hint" style="cursor:pointer">Journal des lectures (${s.log.length} dernières)</summary><div class="bl-tablewrap" style="margin-top:8px;max-height:260px;overflow:auto"><table class="bl-table"><thead><tr><th>Date</th><th>Accès</th><th>Lecture</th><th>Résultat</th><th>Adresse</th></tr></thead><tbody>
+        ${s.log.map(l => `<tr><td class="bl-num">${e(dtFr(l.at))}</td><td>${e(l.label || '—')}</td><td><span class="bl-code">${e(String(l.path || '').replace('/api/claude/v1', '') || '/')}</span></td><td>${l.status < 400 ? 'ok' : `<span style="color:var(--bl-late)">refusé (${l.status})</span>`}</td><td>${e(l.ip || '')}</td></tr>`).join('')}</tbody></table></div></details>` : ''}
+      <p class="bl-hint" style="margin-top:12px">Coupure d'urgence totale : sur l'hébergeur, ajoutez la variable <span class="bl-code">CLAUDE_ACCESS</span> avec la valeur <span class="bl-code">off</span> et redémarrez.</p>`;
+    const nw = box.querySelector('#cl-new'); if (nw) nw.onclick = () => claudeCreate(main, s);
+    const all = box.querySelector('#cl-all');
+    if (all) all.onclick = async () => {
+      if (!(await Bill.confirm('Révoquer tous les accès Claude ?', `${plural(active.length, 'accès actif sera coupé', 'accès actifs seront coupés')} immédiatement. Claude ne pourra plus rien lire.`, 'Tout révoquer', true))) return;
+      try { const r = await Bill.del('/claude/access'); Bill.toast(`${plural(r.revoked, 'accès révoqué', 'accès révoqués')}`); } catch (err) { Bill.fail(err); }
+      paintClaude(main);
+    };
+    box.querySelectorAll('[data-rv]').forEach(b => b.onclick = async () => {
+      const t = s.tokens.find(x => String(x.id) === b.dataset.rv);
+      if (!(await Bill.confirm('Révoquer cet accès ?', `« ${t.label} » ne pourra plus rien lire.`, 'Révoquer', true))) return;
+      try { await Bill.del(`/claude/access/${t.id}`); Bill.toast('Accès révoqué'); } catch (err) { Bill.fail(err); }
+      paintClaude(main);
+    });
+  }
+
   Bill.register('security', {
     async render(main) {
       const mins = Math.round(Bill.state.idleMs / 60000);
@@ -165,6 +246,7 @@
           <p class="bl-hint" style="margin-top:12px">Code oublié ? Sur l'hébergeur (Render), ajoutez la variable <span class="bl-code">BILLING_LOCK_RESET</span> avec une valeur quelconque (changez-la à chaque nouvelle réinitialisation) et redémarrez : le code est effacé et un nouveau vous sera demandé. Aucune donnée n'est perdue.</p></div></div>
         <div class="bl-panel"><div class="bl-panel-h"><h3>Sauvegardes</h3></div><div class="bl-panel-b" id="sc-bk"><div class="bl-spin">Chargement…</div></div></div>
         <div class="bl-panel"><div class="bl-panel-h"><h3>Copie chaque soir sur mon ordinateur</h3></div><div class="bl-panel-b" id="sc-pc"><div class="bl-spin">Chargement…</div></div></div>
+        <div class="bl-panel"><div class="bl-panel-h"><h3>Accès Claude (lecture seule)</h3></div><div class="bl-panel-b" id="sc-cl"><div class="bl-spin">Chargement…</div></div></div>
         <div class="bl-panel"><div class="bl-panel-h"><h3>Mettre en place les copies hors serveur</h3></div><div class="bl-panel-b">
           <p class="bl-note">Une copie sur le disque du serveur ne protège pas d'une perte du serveur lui-même. Pour être réellement à l'abri, il faut une copie ailleurs. Sur l'hébergeur, ajoutez ces variables d'environnement, puis redémarrez :</p>
           <ol class="bl-steplist">
@@ -184,6 +266,7 @@
         } }],
       });
       await paintBackups(main);
+      await paintClaude(main);
     },
   });
 
@@ -266,7 +349,7 @@
         <button class="bl-btn primary" id="ol-on">Connecter mon Outlook…</button></div></div>`;
       box.querySelector('#ol-on').onclick = () => Bill.sensitive({ title: 'Connecter Outlook', scope: 'outlook-connect', okLabel: 'Continuer vers Microsoft',
         text: 'Vous allez être redirigé vers Microsoft pour choisir votre compte et autoriser la création de brouillons.',
-        onSubmit: async () => { const r = await Bill.post('/outlook/connect'); window.location.href = r.url; return true; } });
+        onSubmit: async () => { const r = await Bill.post('/outlook/connect'); if (!/^https:\/\//i.test(String(r.url || ''))) throw new Error('Adresse de connexion invalide.'); window.location.href = r.url; return true; } });
       return;
     }
     box.innerHTML = `<div class="bl-panel"><div class="bl-panel-h"><h3>Connexion en ligne à préparer (une seule fois)</h3></div><div class="bl-panel-b">

@@ -673,8 +673,57 @@ Le mot de passe administrateur ouvre toute la production ; il est maintenant pro
 
 À savoir : au premier déploiement, la session administrateur en cours est refusée une fois (elle n'a pas d'horodatage) : il faut se
 reconnecter. **Mot de passe administrateur oublié** : pas de réinitialisation par l'écran (comme avant) ; elle se fait directement dans
-la base, sur l'hébergeur. Limite connue : un seul mot de passe, sans second facteur ; les codes
-d'accès des hôtels (4 à 8 chiffres) restent un point faible, à traiter à part.
+la base, sur l'hébergeur. Le second facteur et les autres renforcements sont décrits
+juste en dessous.
+
+#### Renforcement supplémentaire
+
+- **double authentification (facultative, recommandée)** : Réglages → « Sécurité » → Activer. Application d'authentification au choix
+  (code à 6 chiffres, norme RFC 6238, aucune bibliothèque externe ni service tiers). Le mot de passe seul n'ouvre alors plus rien : la
+  connexion se fait en deux étapes, un code ne sert **qu'une fois**, 8 **codes de secours** à usage unique sont donnés à l'activation (seule
+  leur empreinte est conservée). Le secret est scellé (AES-256-GCM, clé dérivée de `SESSION_SECRET` : **ne changez pas `SESSION_SECRET`**
+  sans désactiver d'abord la double authentification, sinon le secret devient illisible). Les codes faux comptent dans le blocage ;
+  désactiver exige le mot de passe **et** un code de l'application ;
+- **journal de sécurité** (Réglages → « Sécurité », 1 000 dernières lignes) : connexions, échecs, blocages, changements de mot de passe,
+  double authentification, création et révocation des accès Claude. Jamais de mot de passe ni de code dedans ;
+- **politique de contenu (CSP)** : sur les pages, seuls les scripts du site s'exécutent (aucun script en ligne, aucun gestionnaire
+  `onclick=` en ligne ; jsPDF est servi par le site dans `public/vendor/`, plus par un CDN). Même si un texte saisi par un invité
+  contenait du code, le navigateur ne l'exécuterait pas. Les contenus saisis par des tiers (nom d'hôtel, adresse, notes…) sont de plus
+  échappés à l'affichage dans l'administration. `style-src` autorise encore les styles en ligne (de nombreux attributs `style=`) ;
+- **codes d'accès des hôtels** : 6 à 10 chiffres, sans suite (123456) ni répétition (111111, 121212). Les codes déjà choisis restent
+  valables jusqu'à leur changement. Essais limités par e-mail (5 erreurs → 15 min, durée doublée à chaque récidive, 24 h au plus).
+  `CLIENT_CODE_POLICY=legacy` rétablit l'ancienne règle (tests seulement) ;
+- **API publique** : cadences par adresse (création de compte 20 / h, commande d'invité 30 / h, hôtel connecté 120 / h, suivi de commande
+  60 / 15 min, connexion hôtel 120 / 15 min) ; champs bornés (société 120 caractères, adresse 250, notes 2 000, 150 lignes, quantité
+  100 000) ; le suivi par numéro de ticket (`/api/orders/track/<ticket>`) ne renvoie, sans connexion, **que** le statut et les dates — les
+  tickets se suivent et s'énuméreraient ; le détail est réservé à l'hôtel concerné et à l'administration ; nouvel identifiant de
+  session à la connexion d'un hôtel ;
+- **webhooks des hôtels** : adresse `localhost`, réseau privé, `.internal`, `.local`, métadonnées du cloud (169.254.x.x) ou IPv6 locale
+  refusées ; le nom est résolu au moment de l'envoi et l'adresse obtenue contrôlée ; redirections non suivies (sinon le serveur pourrait être
+  poussé à appeler sa propre machine) ;
+- dépendances : `nodemailer` mis à jour (vulnérabilité élevée corrigée).
+
+À savoir : derrière l'hébergeur, le serveur compte **un relais** devant lui (`TRUST_PROXY`, 1 par défaut). Réglages → « Sécurité »
+affiche l'adresse que le serveur voit : comparez-la à votre adresse publique ; si elle est celle du relais, mettez `TRUST_PROXY=2` (ou plus).
+Les jetons d'API des hôtels (`/api/v1`) sont encore stockés en clair : à passer en empreinte dans une prochaine étape.
+
+### Accès Claude (lecture seule)
+
+Pour que Claude puisse **consulter** les données (jamais les modifier) : Facturation → Sécurité et sauvegardes → « Accès Claude ».
+Créer un accès demande le code de la Facturation ; le jeton `czc_…` n'est montré **qu'une fois**, avec un message prêt à coller à Claude.
+
+- **périmètres au choix** : *exploitation* (commandes sans prix ni téléphone, statistiques d'activité), *hôtels* (coordonnées, adresse, SIRET),
+  *finance* (factures, avoirs, encaissements, ventes jour par jour). Un accès ne voit que ce qui a été coché ;
+- **jamais accessibles** avec ce jeton : administration, mots de passe et codes d'accès des hôtels, webhooks et clés techniques, IBAN et mandats,
+  réglages, sauvegardes, PDF ; **aucune écriture** : l'API `/api/claude/v1` n'accepte que `GET` (tout autre verbe : 405) ;
+- **durée limitée** : 1 à 30 jours (7 par défaut), 10 accès actifs au plus, 60 lectures par minute et par jeton ;
+- **révocation immédiate** (un accès, ou « Tout révoquer ») et **coupure d'urgence** : variable `CLAUDE_ACCESS=off` sur l'hébergeur ;
+- **journal** : chaque lecture est inscrite (date, accès, chemin, résultat, adresse) ; seule l'empreinte sha256 du jeton est en base ;
+  le jeton ne passe jamais dans l'adresse, seulement dans l'en-tête `Authorization: Bearer …` ;
+- 20 faux jetons en 15 minutes depuis une adresse ferment la route 15 minutes.
+
+La liste des routes se lit avec `GET /api/claude/v1` (jeton en en-tête). Une session Claude hébergée n'atteint le site que si le domaine y est
+autorisé dans les réglages du compte Claude (accès réseau) : sinon, utiliser une session qui a accès à internet.
 
 ### Verrou de la Facturation
 
@@ -845,7 +894,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (287 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (315 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

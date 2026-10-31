@@ -20,6 +20,8 @@ const pennylane = require('../billing/pennylane');
 const outlookModule = require('../billing/outlook');
 const outlookState = () => { const s = outlookModule.status(); return { configured: s.configured, connected: s.connected, needsReconnect: s.needsReconnect, account: s.account && s.account.email }; };
 const { wrap, present } = require('../billing/http');
+const claudeAccess = require('../utils/claudeAccess');
+const securityLog = require('../utils/securityLog');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -309,6 +311,45 @@ router.post('/backup/pull/setup', lock.requireStepUp('backup-pull'), wrap((req, 
 router.delete('/backup/pull', lock.requireStepUp('backup-pull'), wrap((req, res) => {
   backup.revokePullToken();
   res.json({ ok: true, state: backup.pullState() });
+}));
+
+// ---------- accès Claude (lecture seule) ----------
+// Le jeton ouvre /api/claude/v1 (GET uniquement) et rien d'autre. Création : ressaisie du code ; le jeton n'est montré qu'une
+// fois. Révocation : immédiate, sans ressaisie (couper un accès doit toujours être facile).
+
+const asBillingError = (fn) => (req, res) => {
+  try { return fn(req, res); } catch (e) {
+    if (e instanceof claudeAccess.ClaudeAccessError) throw new engine.BillingError(e.message, e.status);
+    throw e;
+  }
+};
+const claudeState = () => ({
+  enabled: claudeAccess.enabled(), scopes: claudeAccess.SCOPES, maxDays: claudeAccess.MAX_DAYS, defaultDays: claudeAccess.DEFAULT_DAYS,
+  maxActive: claudeAccess.MAX_ACTIVE, tokens: claudeAccess.listTokens(), log: claudeAccess.recentLog(40),
+});
+
+router.get('/claude/access', wrap((req, res) => { res.json(claudeState()); }));
+
+router.post('/claude/access', lock.requireStepUp('claude-access'), wrap(asBillingError((req, res) => {
+  if (!claudeAccess.enabled()) throw new engine.BillingError("L'accès Claude est désactivé sur ce serveur (variable CLAUDE_ACCESS=off).", 409);
+  const b = req.body || {};
+  const t = claudeAccess.createToken({ label: b.label, scopes: b.scopes, days: b.days });
+  securityLog.record('claude_token_created', req, `« ${t.label} » · ${t.scopes.join(', ')} · jusqu'au ${t.expiresAt.slice(0, 10)}`);
+  // Le jeton en clair n'existe que dans cette réponse.
+  res.status(201).json({ ok: true, token: t.token, access: { id: t.id, label: t.label, scopes: t.scopes, expiresAt: t.expiresAt }, state: claudeState() });
+})));
+
+router.delete('/claude/access/:id', wrap((req, res) => {
+  const ok = claudeAccess.revoke(req.params.id);
+  if (!ok) throw new engine.BillingError('Accès introuvable ou déjà révoqué.', 404);
+  securityLog.record('claude_token_revoked', req, `accès n° ${Number(req.params.id)}`);
+  res.json({ ok: true, state: claudeState() });
+}));
+
+router.delete('/claude/access', wrap((req, res) => {
+  const n = claudeAccess.revokeAll();
+  securityLog.record('claude_token_revoked_all', req, `${n} accès`);
+  res.json({ ok: true, revoked: n, state: claudeState() });
 }));
 
 // ---------- Pennylane ----------

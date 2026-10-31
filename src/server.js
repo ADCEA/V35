@@ -21,6 +21,7 @@ const driverPortalRouter = require('./routes/driverPortal');
 const garageRouter = require('./routes/garage');
 const apiV1Router = require('./routes/apiV1');
 const backupPullRouter = require('./routes/backupPull');
+const claudeApiRouter = require('./routes/claudeApi');
 const billingRouter = require('./routes/billing');
 const { startInvoiceStatusScheduler } = require('./utils/invoiceStatusSync');
 
@@ -97,6 +98,7 @@ app.use('/api/admin/garage', garageRouter);
 app.use('/api/admin/billing', billingRouter);
 app.use('/api/v1', apiV1Router);
 app.use('/api/backup-pull', backupPullRouter);
+app.use('/api/claude/v1', claudeApiRouter);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

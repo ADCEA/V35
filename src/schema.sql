@@ -441,3 +441,39 @@ CREATE TABLE IF NOT EXISTS client_documents (
   uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_client_documents_client ON client_documents(client_id);
+
+-- Journal de sécurité (connexions à l'administration, échecs, blocages, changements de mot de passe, double authentification).
+-- Les 1 000 dernières lignes sont conservées. Jamais de mot de passe ni de code dedans.
+CREATE TABLE IF NOT EXISTS security_log (
+  id     INTEGER PRIMARY KEY AUTOINCREMENT,
+  at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  event  TEXT NOT NULL,
+  ip     TEXT,
+  agent  TEXT,
+  detail TEXT
+);
+
+-- Accès Claude : jetons en lecture seule, à durée limitée, révocables. Seule l'empreinte (sha256) du jeton est conservée ;
+-- le jeton lui-même n'est montré qu'une fois, à la création. Jamais d'écriture possible avec ces jetons.
+CREATE TABLE IF NOT EXISTS claude_tokens (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  label        TEXT NOT NULL,
+  token_hash   TEXT NOT NULL UNIQUE,
+  scopes       TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  expires_at   TEXT NOT NULL,
+  last_used_at TEXT,
+  last_ip      TEXT,
+  use_count    INTEGER NOT NULL DEFAULT 0,
+  revoked_at   TEXT
+);
+-- Chaque lecture faite avec un jeton Claude (sans les données lues). Les 2 000 dernières lignes sont conservées.
+CREATE TABLE IF NOT EXISTS claude_access_log (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  token_id INTEGER,
+  method   TEXT,
+  path     TEXT,
+  status   INTEGER,
+  ip       TEXT
+);

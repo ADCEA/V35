@@ -24,6 +24,7 @@ const db = require('../db');
 const engine = require('./engine');
 const { CATEGORIES, resolveClientPrice, todayParis } = require('../services');
 const { parseCsv } = require('../utils/csv');
+const accessCode = require('../utils/accessCode');
 
 const { BillingError } = engine;
 
@@ -398,7 +399,7 @@ function cleanClientFields(body, existing) {
 }
 
 function validateAccessCode(code) {
-  if (!/^\d{4,8}$/.test(String(code))) throw new BillingError("Le code d'accès doit contenir entre 4 et 8 chiffres.");
+  const bad = accessCode.check(code); if (bad) throw new BillingError(bad);
 }
 
 function createClient(body) {
@@ -490,6 +491,10 @@ function setWebhook(clientId, { webhookUrl, regenerateSecret }) {
   if (url) {
     let u; try { u = new URL(url); } catch { throw new BillingError('URL invalide.'); }
     if (!/^https?:$/.test(u.protocol)) throw new BillingError('URL invalide (http ou https).');
+    if (u.username || u.password) throw new BillingError("L'URL ne doit pas contenir d'identifiants.");
+    const host = u.hostname.replace(/^\[|\]$/g, '');
+    const { isPrivateIp } = require('../utils/publicHost');
+    if (/^(localhost|.*\.localhost|.*\.local|.*\.internal)$/i.test(host) || (require('net').isIP(host) && isPrivateIp(host))) throw new BillingError('Adresse interne refusée : indiquez l\'adresse publique du logiciel de l\'hôtel.');
   }
   const secret = (regenerateSecret || !c.webhook_secret) ? crypto.randomBytes(20).toString('hex') : c.webhook_secret;
   db.prepare('UPDATE clients SET webhook_url = ?, webhook_secret = ? WHERE id = ?').run(url || null, secret, clientId);
@@ -524,7 +529,7 @@ function importClients(csvText, { apply = false } = {}) {
       seen.set(email, line);
       const codePostal = (row.code_postal || '').trim() || null; const ville = (row.ville || '').trim() || null;
       const provided = (row.code || '').trim();
-      if (provided && !/^\d{4,8}$/.test(provided)) return out.errors.push({ line, error: `Colonne « code » invalide : « ${provided} » (4 à 8 chiffres attendus).` });
+      if (provided && !accessCode.ok(provided)) return out.errors.push({ line, error: `Colonne « code » invalide : « ${provided} » (${accessCode.hint()}, ni suite ni chiffres répétés).` });
       const typeRaw = norm(row.type || '');
       const type = !typeRaw ? null : /^(pro|professionnel|entreprise|societe)$/.test(typeRaw) ? 'pro' : /^(particulier|particuliers|perso)$/.test(typeRaw) ? 'particulier' : undefined;
       if (type === undefined) return out.errors.push({ line, error: `Colonne « type » invalide : « ${row.type} » (attendu : professionnel ou particulier).` });

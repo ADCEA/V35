@@ -459,7 +459,7 @@ test("suppression d'article : bloquée si une règle de chambre l'utilise", () =
 });
 
 test('fiches clients : validations, modifications journalisées, suppression protégée', () => {
-  const c = catalog.createClient({ societe: 'Gîte du Test', email: 'Gite@Exemple.fr', siret: '552 100 554 00013', code: '123456' }).client;
+  const c = catalog.createClient({ societe: 'Gîte du Test', email: 'Gite@Exemple.fr', siret: '552 100 554 00013', code: '482916' }).client;
   assert.equal(c.email, 'gite@exemple.fr');
   assert.equal(c.siret, '55210055400013');
   assert.equal(c.invoiceDetailLevel, 'detail');
@@ -467,6 +467,8 @@ test('fiches clients : validations, modifications journalisées, suppression pro
   rejects(() => catalog.createClient({ societe: '' }), /nom/);
   rejects(() => catalog.createClient({ societe: 'Z', email: 'pas-un-mail' }), /email/i);
   rejects(() => catalog.createClient({ societe: 'Z', code: '12' }), /code d'accès/);
+  rejects(() => catalog.createClient({ societe: 'Z', code: '123456' }), /trop facile/);   // suite, chiffres répétés : refusés
+  rejects(() => catalog.createClient({ societe: 'Z', code: '1234' }), /6 et 10 chiffres/);
   rejects(() => catalog.updateClient(c.id, { siret: '123' }), /14 chiffres/);
   rejects(() => catalog.updateClient(c.id, { invoiceDetailLevel: 'bizarre' }), /Niveau/);
   rejects(() => catalog.updateClient(c.id, { email: 'alpha@exemple.fr' }), /déjà utilisé/);
@@ -479,11 +481,12 @@ test('fiches clients : validations, modifications journalisées, suppression pro
   assert.ok(catalog.listClients().clients.find(x => x.id === beta).issues.includes('SIREN/SIRET manquant'));
 
   // le code d'accès est stocké chiffré
-  catalog.setAccessCode(c.id, '654321');
+  catalog.setAccessCode(c.id, '729385');
   const hash = db.prepare('SELECT code_hash FROM clients WHERE id=?').get(c.id).code_hash;
-  assert.ok(hash.startsWith('$2') && !hash.includes('654321'));
+  assert.ok(hash.startsWith('$2') && !hash.includes('729385'));
   rejects(() => catalog.setAccessCode(c.id, 'abc'), /code d'accès/);
-  assert.ok(!JSON.stringify(events('client_access_code_reset')).includes('654321'), "le code n'est jamais journalisé");
+  rejects(() => catalog.setAccessCode(c.id, '111111'), /trop facile/);
+  assert.ok(!JSON.stringify(events('client_access_code_reset')).includes('729385'), "le code n'est jamais journalisé");
 
   // jetons et webhook
   const t = catalog.createToken(c.id, 'Logiciel de commande');
@@ -495,6 +498,10 @@ test('fiches clients : validations, modifications journalisées, suppression pro
   assert.equal(catalog.setWebhook(c.id, { webhookUrl: 'https://exemple.fr/hook' }).webhookSecret, w.webhookSecret, 'le secret ne change pas sans demande');
   assert.notEqual(catalog.setWebhook(c.id, { webhookUrl: 'https://exemple.fr/hook', regenerateSecret: true }).webhookSecret, w.webhookSecret);
   rejects(() => catalog.setWebhook(c.id, { webhookUrl: 'ftp://exemple.fr' }), /URL/);
+  // une adresse interne n'est jamais acceptée (le serveur ne doit pas être poussé à appeler sa propre machine ou son réseau)
+  for (const bad of ['http://localhost:3000/x', 'http://127.0.0.1/x', 'http://10.0.0.5/x', 'http://192.168.1.2/x', 'http://169.254.169.254/latest', 'http://[::1]/x', 'http://machine.internal/x'])
+    rejects(() => catalog.setWebhook(c.id, { webhookUrl: bad }), /interne/);
+  rejects(() => catalog.setWebhook(c.id, { webhookUrl: 'https://user:mdp@exemple.fr/hook' }), /identifiants/);
 
   // un hôtel qui a des documents de facturation ne peut pas être supprimé
   engine.createDraftFromLines(c.id, [{ description: 'Prestation', quantity: 1, unitPrice: 10, vatRate: 20 }]);

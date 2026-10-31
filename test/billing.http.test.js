@@ -27,7 +27,7 @@ async function sensitive(scope, method, url, body, raw = false) {
 }
 
 test.before(async () => {
-  const env = { ...process.env, DATA_DIR, PORT: String(PORT), SESSION_SECRET: 'test-secret', BACKUP_SCHEDULER: 'off' };
+  const env = { ...process.env, DATA_DIR, PORT: String(PORT), SESSION_SECRET: 'test-secret', BACKUP_SCHEDULER: 'off', CLIENT_CODE_POLICY: 'legacy' };
   delete env.ODOO_URL; delete env.ODOO_API_KEY;
   server = spawn('node', [path.join(__dirname, '..', 'src', 'server.js')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   await new Promise((resolve, reject) => {

@@ -25,14 +25,36 @@ const conf = () => ({
 });
 
 // ---------- en-têtes ----------
+// Politique de contenu des PAGES : aucun script ne peut venir d'ailleurs que de ce site (ni script en ligne, ni autre domaine),
+// de sorte qu'un texte piégé qui passerait entre les mailles de l'échappement ne s'exécuterait pas. Les styles en ligne restent
+// permis (l'interface en utilise beaucoup) ; polices de Google Fonts ; aperçus PDF dans des cadres du même site.
+const CSP_PAGE = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com data:",
+  "img-src 'self' data: blob:",
+  "connect-src 'self'",
+  "frame-src 'self' blob:",
+  "object-src 'self' blob:",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self'",
+].join('; ');
+
 function securityHeaders(req, res, next) {
+  const api = req.path.startsWith('/api/');
   res.set({
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'SAMEORIGIN',
-    'Content-Security-Policy': "frame-ancestors 'self'",
+    // Les réponses de l'API (JSON, PDF) ne portent que l'interdiction d'être affichées dans un autre site : une politique
+    // complète sur un PDF empêcherait certains navigateurs de l'afficher.
+    'Content-Security-Policy': api ? "frame-ancestors 'self'" : CSP_PAGE,
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Cross-Origin-Opener-Policy': 'same-origin',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()',
   });
+  if (api) res.set('Cross-Origin-Resource-Policy', 'same-origin');
   if (req.secure) res.set('Strict-Transport-Security', 'max-age=15552000');
   next();
 }
@@ -101,6 +123,38 @@ function extraDelayMs(now = Date.now()) {
 // Nettoyage des adresses sans activité récente (la table ne grossit pas indéfiniment).
 setInterval(() => { const now = Date.now(); for (const [ip, e] of byIp) if (e.blockedUntil < now && now - (e.fails[e.fails.length - 1] || 0) > DAY && now - e.lastStrike > DAY) byIp.delete(ip); }, 60 * MIN).unref();
 
+
+// ---------- limiteur de débit (routes publiques) ----------
+// Compte les appels par clé (adresse ou compte) sur une fenêtre glissante ; au-delà de `max` : 429 + Retry-After.
+// Les plafonds sont volontairement larges : derrière un relais d'hébergement, des visiteurs différents peuvent partager une adresse.
+function rateLimit({ name, windowMs, max, key = (req) => req.ip, message = 'Trop de demandes. Réessayez dans quelques minutes.', countOnly = null }) {
+  const hits = new Map();
+  setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (!v.length || now - v[v.length - 1] > windowMs) hits.delete(k); }, windowMs).unref();
+  return function limiter(req, res, next) {
+    if (countOnly && !countOnly(req)) return next();
+    const k = String(key(req)); const now = Date.now();
+    const list = (hits.get(k) || []).filter(t => now - t < windowMs);
+    if (list.length >= max) {
+      const wait = Math.max(1, Math.ceil((list[0] + windowMs - now) / 1000));
+      console.warn(`[sécurité] ${name} : trop de demandes depuis ${k} (${list.length}/${max}).`);
+      return res.set('Retry-After', String(wait)).status(429).json({ error: message, code: 'RATE_LIMITED', retryAfterSec: wait });
+    }
+    list.push(now); hits.set(k, list);
+    next();
+  };
+}
+
+/** Nouvel identifiant de session en gardant certaines clés (contre le vol d'une session préparée à l'avance). */
+function regenerate(req, keep, done) {
+  const carried = {};
+  for (const k of keep || []) if (req.session && req.session[k] !== undefined) carried[k] = req.session[k];
+  req.session.regenerate((err) => {
+    if (err) return done(err);
+    Object.assign(req.session, carried);
+    done(null);
+  });
+}
+
 // ---------- session administrateur ----------
 const pwFingerprint = (hash) => crypto.createHash('sha256').update(String(hash || '')).digest('hex').slice(0, 24);
 const currentFingerprint = () => { const r = db.prepare('SELECT password_hash FROM admin WHERE id = 1').get(); return r ? pwFingerprint(r.password_hash) : null; };
@@ -135,5 +189,5 @@ function adminActive(session, now = Date.now(), { touch = false } = {}) {
 module.exports = {
   securityHeaders, sameOriginOnly,
   loginKey, loginCheck, loginFail, loginSuccess, extraDelayMs,
-  openAdminSession, closeAdminSession, adminActive, pwFingerprint,
+  openAdminSession, closeAdminSession, adminActive, pwFingerprint, rateLimit, regenerate,
 };

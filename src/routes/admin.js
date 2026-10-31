@@ -6,6 +6,11 @@ const bcrypt = require('bcryptjs');
 const db = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const security = require('../middleware/security');
+const accessCodeRule = require('../utils/accessCode');
+const totp = require('../utils/totp');
+const secretBox = require('../utils/secretBox');
+const securityLog = require('../utils/securityLog');
+const qrcode = require('qrcode-generator');
 const { buildDeliveryNoteText, buildDeliveryNoteHtml } = require('../utils/deliveryNote');
 const { buildDeliveryNotePdf, buildInvoiceAnnexPdf, buildInvoiceSummaryPdf } = require('../utils/pdf');
 const { sendMail, isConfigured } = require('../utils/mailer');
@@ -39,12 +44,40 @@ router.get('/status', (req, res) => {
 });
 
 // Ouvre la session administrateur sur un NOUVEL identifiant de session (contre le vol d'une session préparée à l'avance).
+// Le compte hôtel éventuellement ouvert dans le même navigateur reste ouvert.
 function startAdminSession(req, res, status = 200) {
-  req.session.regenerate((err) => {
+  security.regenerate(req, ['clientId'], (err) => {
     if (err) { console.error(err); return res.status(500).json({ error: 'Erreur serveur.' }); }
     security.openAdminSession(req.session);
     res.status(status).json({ ok: true });
   });
+}
+
+const minutesLabel = (sec) => { const m = Math.ceil(sec / 60); return m <= 1 ? '1 minute' : m < 120 ? `${m} minutes` : `${Math.ceil(m / 60)} heures`; };
+const blockedReply = (res, sec) => res.set('Retry-After', String(sec)).status(429)
+  .json({ error: `Trop de tentatives. Réessayez dans ${minutesLabel(sec)}.`, code: 'TOO_MANY_ATTEMPTS', retryAfterSec: sec });
+
+// ---------- double authentification (code à 6 chiffres) ----------
+const totpOn = (admin) => Boolean(admin && admin.totp_enabled && admin.totp_secret_enc);
+const ISSUER = 'Blanchisserie Cézanne';
+
+/** Vérifie un code de la 2ᵉ étape : code de l'application, ou code de secours (à usage unique). → { ok, method, left } */
+function checkSecondFactor(admin, raw, { allowRecovery = true } = {}) {
+  const code = String(raw || '').trim();
+  if (allowRecovery && totp.looksLikeRecovery(code)) {
+    const list = JSON.parse(admin.totp_recovery_json || '[]');
+    const h = totp.recoveryHash(code);
+    const i = list.indexOf(h);
+    if (i === -1) return { ok: false };
+    list.splice(i, 1);
+    db.prepare('UPDATE admin SET totp_recovery_json = ? WHERE id = 1').run(JSON.stringify(list));
+    return { ok: true, method: 'recovery', left: list.length };
+  }
+  let secret; try { secret = secretBox.unseal(admin.totp_secret_enc); } catch { return { ok: false, unreadable: true }; }
+  const step = totp.verify(secret, code, { afterStep: admin.totp_last_step });
+  if (step === null) return { ok: false };
+  db.prepare('UPDATE admin SET totp_last_step = ? WHERE id = 1').run(step);
+  return { ok: true, method: 'totp' };
 }
 
 // POST /api/admin/setup — définit le mot de passe la toute première fois
@@ -53,44 +86,77 @@ router.post('/setup', (req, res) => {
     return res.status(409).json({ error: 'Un mot de passe administrateur existe déjà.' });
   }
   const { password } = req.body || {};
-  if (!password || password.length < 6) {
+  if (typeof password !== 'string' || password.length < 6) {
     return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 6 caractères.' });
   }
+  if (password.length > 200) return res.status(400).json({ error: 'Mot de passe trop long.' });
   const hash = bcrypt.hashSync(password, 10);
   db.prepare('INSERT INTO admin (id, password_hash, delivery_email) VALUES (1, ?, NULL)').run(hash);
+  securityLog.record('admin_setup', req);
   startAdminSession(req, res, 201);
 });
 
-const minutesLabel = (sec) => { const m = Math.ceil(sec / 60); return m <= 1 ? '1 minute' : m < 120 ? `${m} minutes` : `${Math.ceil(m / 60)} heures`; };
+// Un échec de mot de passe ou de code : compté, journalisé, et blocage au-delà de 5 (voir middleware/security.js).
+async function failAttempt(req, res, key, event, message) {
+  const f = security.loginFail(key);
+  console.warn(`[sécurité] ${event} depuis ${req.ip} (${key.startsWith('dev:') ? 'navigateur connu' : 'adresse'})`);
+  securityLog.record(event, req, key.startsWith('dev:') ? 'navigateur connu' : null);
+  const delay = security.extraDelayMs(); if (delay) await new Promise(r => setTimeout(r, delay));
+  if (f.blocked) { securityLog.record('admin_blocked', req, `${Math.round(f.retryAfterSec / 60)} min`); return blockedReply(res, f.retryAfterSec); }
+  return res.status(401).json({ error: `${message}${f.attemptsLeft <= 2 ? ` ${f.attemptsLeft} essai${f.attemptsLeft > 1 ? 's' : ''} avant blocage temporaire.` : ''}` });
+}
 
-// POST /api/admin/login — au plus quelques essais par adresse : au-delà, blocage de plus en plus long (voir middleware/security.js)
+// POST /api/admin/login — au plus quelques essais par adresse : au-delà, blocage de plus en plus long.
+// Avec la double authentification activée, le mot de passe ne suffit pas : la réponse demande le code (étape 2).
 router.post('/login', async (req, res) => {
   const admin = getAdminRow();
   if (!admin) return res.status(409).json({ error: "Aucun mot de passe défini. Passez d'abord par la configuration." });
-  const ip = req.ip, key = security.loginKey(req);
+  const key = security.loginKey(req);
   const gate = security.loginCheck(key);
-  if (gate.blocked) {
-    return res.set('Retry-After', String(gate.retryAfterSec)).status(429)
-      .json({ error: `Trop de tentatives. Réessayez dans ${minutesLabel(gate.retryAfterSec)}.`, code: 'TOO_MANY_ATTEMPTS', retryAfterSec: gate.retryAfterSec });
-  }
+  if (gate.blocked) return blockedReply(res, gate.retryAfterSec);
   const { password } = req.body || {};
-  if (typeof password !== 'string' || !password || !bcrypt.compareSync(password, admin.password_hash)) {
-    const f = security.loginFail(key);
-    console.warn(`[sécurité] échec de connexion administrateur depuis ${ip} (${key.startsWith('dev:') ? 'navigateur connu' : 'adresse'})`);
-    const delay = security.extraDelayMs(); if (delay) await new Promise(r => setTimeout(r, delay));
-    if (f.blocked) {
-      return res.set('Retry-After', String(f.retryAfterSec)).status(429)
-        .json({ error: `Trop de tentatives. Réessayez dans ${minutesLabel(f.retryAfterSec)}.`, code: 'TOO_MANY_ATTEMPTS', retryAfterSec: f.retryAfterSec });
-    }
-    return res.status(401).json({ error: `Mot de passe incorrect.${f.attemptsLeft <= 2 ? ` ${f.attemptsLeft} essai${f.attemptsLeft > 1 ? 's' : ''} avant blocage temporaire.` : ''}` });
+  if (typeof password !== 'string' || !password || password.length > 200 || !bcrypt.compareSync(password, admin.password_hash)) {
+    return failAttempt(req, res, key, 'admin_login_fail', 'Mot de passe incorrect.');
+  }
+  if (totpOn(admin)) {
+    // Mot de passe juste, code encore attendu : on n'efface PAS le compteur d'échecs (sinon on pourrait deviner le code
+    // 5 fois par saisie du mot de passe) et l'administration reste fermée.
+    return security.regenerate(req, ['clientId', 'deviceOk'], (err) => {
+      if (err) { console.error(err); return res.status(500).json({ error: 'Erreur serveur.' }); }
+      req.session.pending2fa = Date.now();
+      res.json({ ok: false, needCode: true });
+    });
   }
   security.loginSuccess(key);
+  securityLog.record('admin_login_ok', req);
+  startAdminSession(req, res);
+});
+
+// POST /api/admin/login/2fa — 2ᵉ étape : code de l'application d'authentification, ou code de secours.
+router.post('/login/2fa', async (req, res) => {
+  const admin = getAdminRow();
+  const key = security.loginKey(req);
+  const gate = security.loginCheck(key);
+  if (gate.blocked) return blockedReply(res, gate.retryAfterSec);
+  const t = req.session.pending2fa;
+  if (!admin || !totpOn(admin) || !t || Date.now() - t > 5 * 60 * 1000) {
+    delete req.session.pending2fa;
+    return res.status(401).json({ error: 'Reprenez la connexion en saisissant le mot de passe.', code: 'RESTART_LOGIN' });
+  }
+  const { code } = req.body || {};
+  const r = typeof code === 'string' && code.length <= 32 ? checkSecondFactor(admin, code) : { ok: false };
+  if (!r.ok) return failAttempt(req, res, key, 'admin_2fa_fail', r.unreadable ? 'Double authentification illisible (clé du serveur changée) : contactez le support.' : 'Code incorrect.');
+  security.loginSuccess(key);
+  delete req.session.pending2fa;
+  securityLog.record('admin_login_ok', req, r.method === 'recovery' ? `code de secours utilisé (${r.left} restant${r.left > 1 ? 's' : ''})` : 'double authentification');
   startAdminSession(req, res);
 });
 
 // POST /api/admin/logout
 router.post('/logout', (req, res) => {
+  if (req.session.isAdmin) securityLog.record('admin_logout', req);
   security.closeAdminSession(req.session);
+  delete req.session.pending2fa;
   res.json({ ok: true });
 });
 
@@ -99,24 +165,104 @@ router.use(requireAdmin);
 
 // POST /api/admin/password — change le mot de passe administrateur. Demande l'ancien (même si la session est ouverte) ;
 // tous les AUTRES appareils connectés sont déconnectés immédiatement (l'empreinte du mot de passe est vérifiée à chaque requête).
-router.post('/password', (req, res) => {
+router.post('/password', async (req, res) => {
   const admin = getAdminRow();
   const { current, next } = req.body || {};
   const key = security.loginKey(req);
   const gate = security.loginCheck(key);
-  if (gate.blocked) return res.set('Retry-After', String(gate.retryAfterSec)).status(429).json({ error: `Trop de tentatives. Réessayez dans ${minutesLabel(gate.retryAfterSec)}.`, code: 'TOO_MANY_ATTEMPTS' });
+  if (gate.blocked) return blockedReply(res, gate.retryAfterSec);
   if (typeof current !== 'string' || !bcrypt.compareSync(current, admin.password_hash)) {
-    const f = security.loginFail(key);
-    return res.status(f.blocked ? 429 : 401).json({ error: f.blocked ? `Trop de tentatives. Réessayez dans ${minutesLabel(f.retryAfterSec)}.` : 'Mot de passe actuel incorrect.' });
+    return failAttempt(req, res, key, 'admin_password_check_fail', 'Mot de passe actuel incorrect.');
   }
   if (typeof next !== 'string' || next.length < 10) return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 10 caractères.' });
+  if (next.length > 200) return res.status(400).json({ error: 'Mot de passe trop long.' });
   if (next === current) return res.status(400).json({ error: "Le nouveau mot de passe doit être différent de l'actuel." });
   security.loginSuccess(key);
   db.prepare('UPDATE admin SET password_hash = ? WHERE id = 1').run(bcrypt.hashSync(next, 10));
   // Cette session reste ouverte avec la nouvelle empreinte ; toutes les autres sont refusées à leur prochaine requête.
   req.session.adminPw = security.pwFingerprint(getAdminRow().password_hash);
+  securityLog.record('admin_password_changed', req);
   console.warn('[sécurité] mot de passe administrateur modifié.');
   res.json({ ok: true });
+});
+
+// GET /api/admin/security — état de la protection : double authentification, ce que le serveur voit de la connexion,
+// journal des derniers événements de sécurité.
+router.get('/security', (req, res) => {
+  const admin = getAdminRow();
+  res.json({
+    totpEnabled: totpOn(admin),
+    recoveryLeft: totpOn(admin) ? JSON.parse(admin.totp_recovery_json || '[]').length : 0,
+    connection: { ip: req.ip, forwardedFor: req.get('x-forwarded-for') || null, secure: req.secure, trustProxy: req.app.get('trust proxy') },
+    journal: securityLog.recent(40),
+  });
+});
+
+// Ressaisie du mot de passe (et d'un code) avant de toucher à la double authentification.
+function reauth(req, res, { needCode = false } = {}) {
+  const admin = getAdminRow();
+  const key = security.loginKey(req);
+  const gate = security.loginCheck(key);
+  if (gate.blocked) { blockedReply(res, gate.retryAfterSec); return null; }
+  const { password, code } = req.body || {};
+  let good = typeof password === 'string' && password.length <= 200 && bcrypt.compareSync(password, admin.password_hash);
+  if (good && needCode) good = typeof code === 'string' && code.length <= 32 && checkSecondFactor(admin, code, { allowRecovery: false }).ok;
+  if (!good) {
+    const f = security.loginFail(key);
+    securityLog.record('admin_reauth_fail', req);
+    if (f.blocked) blockedReply(res, f.retryAfterSec);
+    else res.status(401).json({ error: needCode ? 'Mot de passe ou code incorrect.' : 'Mot de passe incorrect.' });
+    return null;
+  }
+  security.loginSuccess(key);
+  return admin;
+}
+
+// POST /api/admin/2fa/setup {password} — prépare l'activation : nouveau secret, QR code à scanner. Rien n'est actif tant que
+// le premier code n'a pas été confirmé (2fa/enable).
+router.post('/2fa/setup', (req, res) => {
+  const admin = reauth(req, res); if (!admin) return;
+  if (totpOn(admin)) return res.status(409).json({ error: 'La double authentification est déjà active.' });
+  const secret = totp.newSecret();
+  db.prepare('UPDATE admin SET totp_secret_enc = ?, totp_enabled = 0, totp_recovery_json = NULL, totp_last_step = -1 WHERE id = 1').run(secretBox.seal(secret));
+  const uri = totp.otpauthUri({ secret, account: 'administration', issuer: ISSUER });
+  const q = qrcode(0, 'M'); q.addData(uri); q.make();
+  res.json({ secret: secret.match(/.{1,4}/g).join(' '), uri, qrSvg: q.createSvgTag({ cellSize: 5, margin: 3, scalable: true }) });
+});
+
+// POST /api/admin/2fa/enable {code} — confirme avec un premier code : la double authentification devient obligatoire à la
+// connexion. Renvoie 8 codes de secours, affichés cette seule fois.
+router.post('/2fa/enable', (req, res) => {
+  const admin = getAdminRow();
+  if (totpOn(admin)) return res.status(409).json({ error: 'La double authentification est déjà active.' });
+  if (!admin.totp_secret_enc) return res.status(409).json({ error: "Recommencez : l'activation n'a pas été préparée." });
+  const { code } = req.body || {};
+  let secret; try { secret = secretBox.unseal(admin.totp_secret_enc); } catch { return res.status(409).json({ error: "Recommencez : l'activation doit être préparée à nouveau." }); }
+  const step = typeof code === 'string' ? totp.verify(secret, code, { afterStep: -1 }) : null;
+  if (step === null) return res.status(400).json({ error: "Code incorrect. Vérifiez l'heure de votre téléphone et saisissez le code affiché maintenant." });
+  const codes = totp.newRecoveryCodes(8);
+  db.prepare('UPDATE admin SET totp_enabled = 1, totp_recovery_json = ?, totp_last_step = ? WHERE id = 1').run(JSON.stringify(codes.map(totp.recoveryHash)), step);
+  securityLog.record('admin_2fa_enabled', req);
+  res.json({ ok: true, recoveryCodes: codes });
+});
+
+// POST /api/admin/2fa/disable {password, code} — désactive (mot de passe ET code de l'application exigés).
+router.post('/2fa/disable', (req, res) => {
+  const admin = reauth(req, res, { needCode: true }); if (!admin) return;
+  if (!totpOn(admin)) return res.status(409).json({ error: "La double authentification n'est pas active." });
+  db.prepare('UPDATE admin SET totp_enabled = 0, totp_secret_enc = NULL, totp_recovery_json = NULL, totp_last_step = -1 WHERE id = 1').run();
+  securityLog.record('admin_2fa_disabled', req);
+  res.json({ ok: true });
+});
+
+// POST /api/admin/2fa/recovery {password, code} — nouveaux codes de secours (les anciens sont annulés).
+router.post('/2fa/recovery', (req, res) => {
+  const admin = reauth(req, res, { needCode: true }); if (!admin) return;
+  if (!totpOn(admin)) return res.status(409).json({ error: "La double authentification n'est pas active." });
+  const codes = totp.newRecoveryCodes(8);
+  db.prepare('UPDATE admin SET totp_recovery_json = ? WHERE id = 1').run(JSON.stringify(codes.map(totp.recoveryHash)));
+  securityLog.record('admin_2fa_recovery_renewed', req);
+  res.json({ ok: true, recoveryCodes: codes });
 });
 
 // GET /api/admin/clients — liste des hôtels pour les sélecteurs de la production (nouvelle commande,
@@ -144,8 +290,8 @@ router.post('/clients', (req, res) => {
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'Adresse email invalide.' });
   }
-  if (code && !/^\d{4,8}$/.test(code)) {
-    return res.status(400).json({ error: "Le code d'accès doit contenir entre 4 et 8 chiffres." });
+  if (code && accessCodeRule.check(code)) {
+    return res.status(400).json({ error: accessCodeRule.check(code) });
   }
   if (email) {
     const existing = db.prepare('SELECT id FROM clients WHERE email = ?').get(email);

@@ -20,7 +20,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="/billing/billing.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="/vendor/jspdf.umd.min.js"></script>
 </head>
 <body>
 
@@ -114,7 +114,7 @@
           <div class="auth-info" id="info-connexion"></div>
           <div class="auth-error" id="err-connexion"></div>
           <div class="field"><label for="login-email">Email</label><input id="login-email" type="email" autocomplete="email" placeholder="vous@societe.fr"></div>
-          <div class="field"><label for="login-code">Code d'accès</label><input id="login-code" type="password" inputmode="numeric" maxlength="8" autocomplete="current-password" placeholder="••••"></div>
+          <div class="field"><label for="login-code">Code d'accès</label><input id="login-code" type="password" inputmode="numeric" maxlength="10" autocomplete="current-password" placeholder="••••"></div>
           <button class="btn-primary" id="btn-login">Se connecter</button>
           <button type="button" class="link-btn" id="btn-forgot">Code oublié ?</button>
         </div>
@@ -130,8 +130,8 @@
           <div class="field-hint">Merci d'inclure le code postal — ça évite les erreurs de localisation pour l'organisation des tournées.</div>
           <div class="field"><label>Email</label><input id="reg-email" type="email" placeholder="vous@societe.fr"></div>
           <div class="field-row">
-            <div class="field"><label>Code d'accès</label><input id="reg-code" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" placeholder="4 à 8 chiffres"></div>
-            <div class="field"><label>Confirmer le code</label><input id="reg-code2" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" placeholder="4 à 8 chiffres"></div>
+            <div class="field"><label>Code d'accès</label><input id="reg-code" type="password" inputmode="numeric" maxlength="10" autocomplete="new-password" placeholder="6 à 10 chiffres"></div>
+            <div class="field"><label>Confirmer le code</label><input id="reg-code2" type="password" inputmode="numeric" maxlength="10" autocomplete="new-password" placeholder="6 à 10 chiffres"></div>
           </div>
           <div class="field-hint">Ce code protège l'accès à votre espace. Si vous l'oubliez, « Code oublié ? » sur l'écran de connexion vous permettra d'en choisir un nouveau.</div>
           <button class="btn-primary" id="btn-register">Créer mon compte</button>
@@ -153,10 +153,10 @@
         <div class="auth-form card" id="form-reset">
           <h4 class="card-subhead">Nouveau code d'accès</h4>
           <div class="auth-error" id="err-reset"></div>
-          <p class="auth-lead">Choisissez un code de 4 à 8 chiffres.</p>
+          <p class="auth-lead">Choisissez un code de 6 à 10 chiffres (ni suite, ni chiffres répétés).</p>
           <div class="field-row">
-            <div class="field"><label for="reset-code">Nouveau code</label><input id="reset-code" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" placeholder="4 à 8 chiffres"></div>
-            <div class="field"><label for="reset-code2">Confirmer le code</label><input id="reset-code2" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" placeholder="4 à 8 chiffres"></div>
+            <div class="field"><label for="reset-code">Nouveau code</label><input id="reset-code" type="password" inputmode="numeric" maxlength="10" autocomplete="new-password" placeholder="6 à 10 chiffres"></div>
+            <div class="field"><label for="reset-code2">Confirmer le code</label><input id="reset-code2" type="password" inputmode="numeric" maxlength="10" autocomplete="new-password" placeholder="6 à 10 chiffres"></div>
           </div>
           <button class="btn-primary" id="btn-reset-save">Enregistrer mon nouveau code</button>
           <button type="button" class="link-btn" id="btn-reset-back">Retour à la connexion</button>
@@ -249,7 +249,7 @@
               </div>
               <div class="field"><label for="prof-adresse">Adresse de collecte</label><input id="prof-adresse" autocomplete="street-address"></div>
               <div class="field"><label for="prof-email">E-mail de connexion</label><input id="prof-email" type="email" autocomplete="email"></div>
-              <div class="field" id="prof-code-field" style="display:none;"><label for="prof-current-code">Votre code d'accès actuel (pour confirmer le changement d'e-mail)</label><input id="prof-current-code" type="password" inputmode="numeric" maxlength="8" autocomplete="current-password"></div>
+              <div class="field" id="prof-code-field" style="display:none;"><label for="prof-current-code">Votre code d'accès actuel (pour confirmer le changement d'e-mail)</label><input id="prof-current-code" type="password" inputmode="numeric" maxlength="10" autocomplete="current-password"></div>
               <div class="field-hint" id="prof-name-hint"></div>
               <button class="btn-secondary" id="btn-save-profile" style="width:auto;">Enregistrer</button>
               <div class="qty-save-note" id="profile-note"></div>
@@ -274,10 +274,10 @@
             <summary>Mon code d'accès</summary>
             <div class="acct-body">
               <div class="auth-error" id="err-code"></div>
-              <div class="field"><label for="code-current">Code actuel</label><input id="code-current" type="password" inputmode="numeric" maxlength="8" autocomplete="current-password"></div>
+              <div class="field"><label for="code-current">Code actuel</label><input id="code-current" type="password" inputmode="numeric" maxlength="10" autocomplete="current-password"></div>
               <div class="field-row">
-                <div class="field"><label for="code-new">Nouveau code</label><input id="code-new" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" placeholder="4 à 8 chiffres"></div>
-                <div class="field"><label for="code-new2">Confirmer le nouveau code</label><input id="code-new2" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" placeholder="4 à 8 chiffres"></div>
+                <div class="field"><label for="code-new">Nouveau code</label><input id="code-new" type="password" inputmode="numeric" maxlength="10" autocomplete="new-password" placeholder="6 à 10 chiffres"></div>
+                <div class="field"><label for="code-new2">Confirmer le nouveau code</label><input id="code-new2" type="password" inputmode="numeric" maxlength="10" autocomplete="new-password" placeholder="6 à 10 chiffres"></div>
               </div>
               <button class="btn-secondary" id="btn-save-code" style="width:auto;">Changer mon code</button>
               <div class="qty-save-note" id="code-note"></div>
@@ -308,8 +308,14 @@
             <button class="btn-primary" id="btn-admin-setup">Définir le mot de passe</button>
           </div>
           <div id="admin-gate-login">
-            <div class="field"><label>Mot de passe administration</label><input id="admin-pwd" type="password" placeholder="••••••••"></div>
+            <div class="field"><label>Mot de passe administration</label><input id="admin-pwd" type="password" placeholder="••••••••" autocomplete="current-password"></div>
             <button class="btn-primary" id="btn-admin-login">Déverrouiller</button>
+          </div>
+          <div id="admin-gate-2fa" style="display:none;">
+            <p style="font-size:13px;color:var(--steel);margin:0 0 14px;">Saisissez le code à 6 chiffres affiché par votre application d'authentification. Un code de secours (xxxxx-xxxxx) fonctionne aussi, une seule fois.</p>
+            <div class="field"><label for="admin-code">Code de vérification</label><input id="admin-code" type="text" inputmode="text" autocomplete="one-time-code" maxlength="12" placeholder="123456"></div>
+            <button class="btn-primary" id="btn-admin-2fa">Valider</button>
+            <button class="btn-secondary" id="btn-admin-2fa-cancel" type="button" style="margin-top:8px;width:100%;">Revenir au mot de passe</button>
           </div>
         </div>
       </div>
@@ -565,7 +571,7 @@
           <div class="card settings-card">
             <h4>Sécurité — Mot de passe administrateur</h4>
             <p>Au moins 10 caractères. Une fois changé, tous les autres appareils connectés à l'administration sont déconnectés. Sans activité pendant 12 heures, ou après 7 jours, il faut se reconnecter.</p>
-            <form id="admin-pwd-form" autocomplete="off" onsubmit="return false;">
+            <form id="admin-pwd-form" autocomplete="off">
               <input type="text" name="username" autocomplete="username" value="administrateur" hidden readonly tabindex="-1" aria-hidden="true">
               <div class="settings-row">
                 <div class="field"><label for="settings-pwd-current">Mot de passe actuel</label><input type="password" id="settings-pwd-current" autocomplete="current-password"></div>
@@ -575,6 +581,18 @@
               </div>
             </form>
             <div class="settings-save-note" id="admin-pwd-note" role="status"></div>
+          </div>
+
+          <div class="card settings-card" id="sec-2fa-card">
+            <h4>Sécurité — Double authentification</h4>
+            <p>En plus du mot de passe, un code à 6 chiffres qui change toutes les 30 secondes, affiché par une application d'authentification sur votre téléphone (Google Authenticator, Microsoft Authenticator, Authy, 1Password…). Quelqu'un qui connaîtrait le mot de passe ne pourrait pas entrer sans votre téléphone.</p>
+            <div id="sec-2fa-body"><p class="empty-note">Chargement…</p></div>
+          </div>
+
+          <div class="card settings-card">
+            <h4>Sécurité — Journal des connexions</h4>
+            <p id="sec-conn-line" class="sec-conn"></p>
+            <div id="sec-journal" class="sec-journal"><p class="empty-note">Chargement…</p></div>
           </div>
         </div>
 

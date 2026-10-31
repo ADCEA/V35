@@ -85,7 +85,7 @@ function renderHomeServices() {
         ${group.items.map(s => `
           <div class="home-service-card">
             <div class="service-badge">${s.code}</div>
-            <div>${s.name}</div>
+            <div>${escapeHtml(s.name)}</div>
           </div>
         `).join('')}
       </div>
@@ -104,7 +104,7 @@ function renderServiceList() {
         <div class="service-row">
           <div class="service-id">
             <div class="service-badge">${s.code}</div>
-            <div class="service-name">${s.name}</div>
+            <div class="service-name">${escapeHtml(s.name)}</div>
           </div>
           <div class="qty-control">
             <button data-act="dec" data-id="${s.id}" aria-label="Diminuer">−</button>
@@ -150,7 +150,7 @@ function renderSummary() {
   }
   box.innerHTML = lines.map(([id, q]) => {
     const s = SERVICES.find(x => x.id === id);
-    return `<div class="summary-line"><span>${s.name} × ${q}</span></div>`;
+    return `<div class="summary-line"><span>${escapeHtml(s.name)} × ${q}</span></div>`;
   }).join('');
   btn.disabled = false;
 }
@@ -217,9 +217,9 @@ function showConfirmation(order) {
       <span class="ticket-status ${order.status}">${statusLabel(order.status)}</span>
     </div>
     <div class="ticket-dash"></div>
-    ${order.items.map(i => `<div class="ticket-item"><span>${i.name} × ${i.qty}</span></div>`).join('')}
+    ${order.items.map(i => `<div class="ticket-item"><span>${escapeHtml(i.name)} × ${i.qty}</span></div>`).join('')}
     <div class="ticket-meta">
-      ${order.client.societe} — ${order.client.contact}<br>
+      ${escapeHtml(order.client.societe)} — ${escapeHtml(order.client.contact)}<br>
       Livraison prévue : ${order.livraisonPrevue || 'à confirmer'}<br>
       Conservez ce numéro pour suivre votre commande.
     </div>
@@ -723,7 +723,7 @@ async function openOrderModal(orderId, context) {
     ? order.items.map(i => `
         <div class="modal-qty-row">
           <div>
-            <div>${i.name}</div>
+            <div>${escapeHtml(i.name)}</div>
             <div class="modal-qty-ordered-hint">Commandé : ${i.qty}${i.qty < 0 ? ' (reprise)' : ''}</div>
           </div>
           <div class="modal-qty-control">
@@ -735,11 +735,11 @@ async function openOrderModal(orderId, context) {
     : order.items.map(i => {
         const delivered = i.deliveredQty ?? i.qty;
         if (delivered === i.qty) {
-          return `<div class="ticket-item"><span>${i.name} × ${i.qty}${i.qty < 0 ? ' (reprise)' : ''}</span></div>`;
+          return `<div class="ticket-item"><span>${escapeHtml(i.name)} × ${i.qty}${i.qty < 0 ? ' (reprise)' : ''}</span></div>`;
         }
         return `
           <div class="ticket-item-adjusted">
-            <div class="item-name">${i.name}</div>
+            <div class="item-name">${escapeHtml(i.name)}</div>
             <div class="qty-compare-line">
               <span class="qty-ordered">${i.qty} commandé</span>
               <span class="qty-delivered">${delivered} livré</span>
@@ -773,15 +773,15 @@ async function openOrderModal(orderId, context) {
       `).join('')}
     </div>
     <div class="ticket-meta">
-      ${order.client.societe} — ${order.client.contact}<br>
-      ${order.client.adresse}<br>
-      ${isAdminContext ? '' : `Livraison prévue : ${order.livraisonPrevue || 'non précisée'}<br>`}
+      ${escapeHtml(order.client.societe)} — ${escapeHtml(order.client.contact)}<br>
+      ${escapeHtml(order.client.adresse)}<br>
+      ${isAdminContext ? '' : `Livraison prévue : ${escapeHtml(order.livraisonPrevue || 'non précisée')}<br>`}
       Commande passée le ${new Date(order.createdAt).toLocaleDateString('fr-FR')}
-      ${order.notes ? `<br>Notes : ${order.notes}` : ''}
+      ${order.notes ? `<br>Notes : ${escapeHtml(order.notes)}` : ''}
     </div>
     ${isAdminContext ? `
       <div class="field-row" style="margin-top:10px;align-items:end;">
-        <div class="field" style="max-width:200px;"><label>Livraison prévue</label><input type="date" id="modal-livraison-prevue" value="${order.livraisonPrevue || ''}"></div>
+        <div class="field" style="max-width:200px;"><label>Livraison prévue</label><input type="date" id="modal-livraison-prevue" value="${escapeHtml(order.livraisonPrevue || '')}"></div>
         <button class="btn-secondary" id="btn-save-livraison-prevue" style="width:auto;">Enregistrer</button>
         <span class="qty-save-note" id="livraison-prevue-note"></span>
       </div>
@@ -885,7 +885,7 @@ async function openAddItemUI(orderId) {
         <div class="field">
           <label>Article</label>
           <select id="add-item-select-${orderId}">
-            ${articles.map(a => `<option value="${a.id}">${a.name}</option>`).join('')}
+            ${articles.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('')}
           </select>
         </div>
         <div class="field" style="max-width:150px;">
@@ -1002,7 +1002,7 @@ async function renderTeamZone(orderId, context) {
         ${manualOrderClientsCache.map(c => `
           <label class="driver-chip" style="cursor:pointer;">
             <input type="checkbox" value="${c.id}" ${selectedIds.has(c.id) ? 'checked' : ''} style="margin-right:4px;">
-            ${c.societe}
+            ${escapeHtml(c.societe)}
           </label>
         `).join('')}
       </div>
@@ -1233,7 +1233,7 @@ async function sendDeliveryNote(orderId) {
       if (note) note.textContent = `Message prêt, PDF joint : cliquez sur « ${r.emlName} » dans la barre de téléchargement pour l'ouvrir dans Outlook.`;
       return;
     }
-    if (r.webLink) {
+    if (r.webLink && /^https:\/\//i.test(r.webLink)) {
       w.location.href = r.webLink;
       if (note) note.textContent = 'Brouillon créé dans Outlook, PDF joint : il ne reste qu\'à l\'envoyer ✓';
       return;
@@ -1280,18 +1280,40 @@ document.getElementById('btn-admin-setup').addEventListener('click', async () =>
   }
 });
 
+// Écran de connexion : mot de passe, puis (si la double authentification est active) code à 6 chiffres.
+function showAdminStep(step) {
+  document.getElementById('admin-gate-login').style.display = step === 'login' ? 'block' : 'none';
+  document.getElementById('admin-gate-2fa').style.display = step === '2fa' ? 'block' : 'none';
+}
 document.getElementById('btn-admin-login').addEventListener('click', async () => {
   clearAuthErrors();
   const password = document.getElementById('admin-pwd').value;
   try {
-    await api('POST', '/api/admin/login', { password });
-    adminUnlocked = true;
+    const r = await api('POST', '/api/admin/login', { password });
     document.getElementById('admin-pwd').value = '';
+    if (r && r.needCode) { showAdminStep('2fa'); document.getElementById('admin-code').focus(); return; }
+    adminUnlocked = true;
     await renderAdminGate();
   } catch (err) {
     showAuthError('err-admin', err.message);
   }
 });
+document.getElementById('admin-pwd').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('btn-admin-login').click(); });
+document.getElementById('btn-admin-2fa').addEventListener('click', async () => {
+  clearAuthErrors();
+  const code = document.getElementById('admin-code').value.trim();
+  try {
+    await api('POST', '/api/admin/login/2fa', { code });
+    document.getElementById('admin-code').value = '';
+    adminUnlocked = true;
+    await renderAdminGate();
+  } catch (err) {
+    if (err.data && err.data.code === 'RESTART_LOGIN') showAdminStep('login');
+    showAuthError('err-admin', err.message);
+  }
+});
+document.getElementById('admin-code').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('btn-admin-2fa').click(); });
+document.getElementById('btn-admin-2fa-cancel').addEventListener('click', () => { clearAuthErrors(); document.getElementById('admin-code').value = ''; showAdminStep('login'); });
 
 document.getElementById('btn-admin-lock').addEventListener('click', async () => {
   await api('POST', '/api/admin/logout');
@@ -1317,10 +1339,106 @@ async function renderAdminGate() {
   gate.style.display = 'block';
   dash.style.display = 'none';
   document.getElementById('admin-gate-setup').style.display = status.exists ? 'none' : 'block';
-  document.getElementById('admin-gate-login').style.display = status.exists ? 'block' : 'none';
+  showAdminStep(status.exists ? 'login' : 'none');
+}
+
+// ---------- réglages de sécurité : double authentification, journal ----------
+const SEC_EVENTS = {
+  admin_login_ok: 'Connexion réussie', admin_login_fail: 'Mot de passe incorrect', admin_2fa_fail: 'Code de vérification incorrect',
+  admin_blocked: 'Connexion bloquée (trop d\'essais)', admin_logout: 'Déconnexion', admin_password_changed: 'Mot de passe changé',
+  admin_setup: 'Mot de passe créé', admin_2fa_enabled: 'Double authentification activée', admin_2fa_disabled: 'Double authentification désactivée',
+  admin_2fa_recovery_renewed: 'Nouveaux codes de secours', admin_reauth_fail: 'Ressaisie refusée', admin_password_check_fail: 'Ancien mot de passe incorrect',
+  claude_token_created: 'Accès Claude créé', claude_token_revoked: 'Accès Claude révoqué', claude_token_revoked_all: 'Tous les accès Claude révoqués', claude_access: 'Accès Claude utilisé',
+};
+const secNote = (id, msg, bad) => { const n = document.getElementById(id); if (!n) return; n.classList.toggle('error', Boolean(bad)); n.textContent = msg; n.classList.add('show'); };
+
+async function renderSecurityPanel() {
+  const body = document.getElementById('sec-2fa-body');
+  let s;
+  try { s = await api('GET', '/api/admin/security'); } catch (err) { body.innerHTML = `<p class="empty-note">${escapeHtml(err.message)}</p>`; return; }
+  document.getElementById('sec-conn-line').textContent =
+    `Connexion vue par le serveur : adresse ${s.connection.ip || 'inconnue'}, ${s.connection.secure ? 'chiffrée (https)' : 'non chiffrée'}.`;
+
+  if (s.totpEnabled) {
+    body.innerHTML = `
+      <span class="sec-state on">Activée</span>
+      <p style="font-size:13px;margin:4px 0 10px;">Codes de secours restants : <b>${Number(s.recoveryLeft)}</b>.</p>
+      <div class="settings-row">
+        <div class="field"><label for="sec-dis-pwd">Mot de passe</label><input type="password" id="sec-dis-pwd" autocomplete="current-password"></div>
+        <div class="field"><label for="sec-dis-code">Code de l'application</label><input id="sec-dis-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+        <button class="btn-secondary" id="btn-2fa-recovery" style="width:auto;">Nouveaux codes de secours</button>
+        <button class="btn-secondary" id="btn-2fa-disable" style="width:auto;">Désactiver</button>
+      </div>
+      <div class="settings-save-note" id="sec-2fa-note" role="status"></div>`;
+    const creds = () => ({ password: document.getElementById('sec-dis-pwd').value, code: document.getElementById('sec-dis-code').value.trim() });
+    document.getElementById('btn-2fa-disable').addEventListener('click', async () => {
+      try { await api('POST', '/api/admin/2fa/disable', creds()); await renderSecurityPanel(); secNote('sec-2fa-note', 'Double authentification désactivée.'); }
+      catch (err) { secNote('sec-2fa-note', err.message, true); }
+    });
+    document.getElementById('btn-2fa-recovery').addEventListener('click', async () => {
+      try { const r = await api('POST', '/api/admin/2fa/recovery', creds()); showRecoveryCodes(r.recoveryCodes); }
+      catch (err) { secNote('sec-2fa-note', err.message, true); }
+    });
+  } else {
+    body.innerHTML = `
+      <span class="sec-state off">Désactivée</span>
+      <div class="settings-row" style="margin-top:6px;">
+        <div class="field"><label for="sec-en-pwd">Mot de passe</label><input type="password" id="sec-en-pwd" autocomplete="current-password"></div>
+        <button class="btn-secondary" id="btn-2fa-start">Activer</button>
+      </div>
+      <div class="settings-save-note" id="sec-2fa-note" role="status"></div>`;
+    document.getElementById('btn-2fa-start').addEventListener('click', async () => {
+      try {
+        const r = await api('POST', '/api/admin/2fa/setup', { password: document.getElementById('sec-en-pwd').value });
+        body.innerHTML = `
+          <p style="font-size:13px;margin:6px 0;">1. Dans votre application d'authentification, ajoutez un compte en scannant ce QR code (ou en saisissant la clé).</p>
+          <div class="sec-box">
+            <div class="sec-qr">${r.qrSvg}</div>
+            <div style="flex:1;min-width:220px;">
+              <div style="font-size:12px;color:var(--steel);">Clé à saisir à la main :</div>
+              <div class="sec-secret">${escapeHtml(r.secret)}</div>
+            </div>
+          </div>
+          <p style="font-size:13px;margin:12px 0 6px;">2. Saisissez le code à 6 chiffres affiché pour confirmer.</p>
+          <div class="settings-row">
+            <div class="field"><label for="sec-en-code">Code</label><input id="sec-en-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></div>
+            <button class="btn-secondary" id="btn-2fa-enable">Confirmer et activer</button>
+          </div>
+          <div class="settings-save-note" id="sec-2fa-note" role="status"></div>`;
+        document.getElementById('btn-2fa-enable').addEventListener('click', async () => {
+          try { const e = await api('POST', '/api/admin/2fa/enable', { code: document.getElementById('sec-en-code').value.trim() }); showRecoveryCodes(e.recoveryCodes); }
+          catch (err) { secNote('sec-2fa-note', err.message, true); }
+        });
+      } catch (err) { secNote('sec-2fa-note', err.message, true); }
+    });
+  }
+
+  const rows = (s.journal || []).map(j => {
+    const bad = /fail|blocked/.test(j.event);
+    const when = new Date(j.at).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', dateStyle: 'short', timeStyle: 'short' });
+    return `<tr class="${bad ? 'bad' : ''}"><td>${escapeHtml(when)}</td><td>${escapeHtml(SEC_EVENTS[j.event] || j.event)}${j.detail ? ` <span style="color:var(--steel);">— ${escapeHtml(j.detail)}</span>` : ''}</td><td>${escapeHtml(j.ip || '')}</td></tr>`;
+  }).join('');
+  document.getElementById('sec-journal').innerHTML = rows
+    ? `<table><thead><tr><th>Quand</th><th>Événement</th><th>Adresse</th></tr></thead><tbody>${rows}</tbody></table>`
+    : '<p class="empty-note" style="padding:10px;">Aucun événement enregistré pour le moment.</p>';
+}
+
+function showRecoveryCodes(codes) {
+  const body = document.getElementById('sec-2fa-body');
+  body.innerHTML = `
+    <span class="sec-state on">Activée</span>
+    <p style="font-size:13px;margin:6px 0;"><b>Notez ces codes de secours</b> et gardez-les ailleurs que sur ce téléphone. Chacun ne sert qu'une fois si vous perdez l'accès à l'application. Ils ne seront plus affichés.</p>
+    <div class="sec-codes">${codes.map(c => `<span>${escapeHtml(c)}</span>`).join('')}</div>
+    <button class="btn-secondary" id="btn-2fa-copy" style="width:auto;">Copier</button>
+    <button class="btn-primary" id="btn-2fa-noted" style="width:auto;margin-left:8px;">J'ai noté mes codes</button>`;
+  document.getElementById('btn-2fa-copy').addEventListener('click', () => { try { navigator.clipboard.writeText(codes.join('\n')); } catch (_) { /* copie impossible : recopier à la main */ } });
+  document.getElementById('btn-2fa-noted').addEventListener('click', () => renderSecurityPanel());
 }
 
 async function renderSettingsPanel() {
+  renderSecurityPanel();
   const { deliveryEmail } = await api('GET', '/api/admin/settings');
   document.getElementById('settings-email').value = deliveryEmail || '';
 
@@ -1408,7 +1526,7 @@ async function loadOdooTaxesIntoSelect(selectedId) {
   try {
     const { taxes } = await api('GET', '/api/admin/odoo/taxes');
     select.innerHTML = '<option value="">— Aucune —</option>' +
-      taxes.map(t => `<option value="${t.id}" ${String(t.id) === String(selectedId) ? 'selected' : ''}>${t.name} (${t.amount}%)</option>`).join('');
+      taxes.map(t => `<option value="${t.id}" ${String(t.id) === String(selectedId) ? 'selected' : ''}>${escapeHtml(t.name)} (${t.amount}%)</option>`).join('');
   } catch (err) {
     note.classList.add('error');
     note.textContent = `Impossible de charger les taxes depuis Odoo : ${err.message}`;
@@ -1486,7 +1604,7 @@ function renderKanbanBody() {
         ${list.length === 0 ? '<div class="kcol-empty">Aucune commande</div>' : list.map(o => `
           <div class="mini-ticket ${o.status}" data-id="${o.id}" draggable="true" tabindex="0" role="button" aria-label="Voir le détail de la commande ${o.ticket}">
             <div class="mini-num">${o.ticket}</div>
-            <div class="mini-client">${o.client.societe}</div>
+            <div class="mini-client">${escapeHtml(o.client.societe)}</div>
             <div class="mini-sub">${o.items.length} réf.</div>
             ${st.id !== 'livree' ? `<button class="mini-advance" data-id="${o.id}">Faire avancer →</button>` : ''}
           </div>
@@ -1573,7 +1691,7 @@ async function renderProductionTotals() {
   const maxQty = Math.max(...totals.map(t => t.totalQty));
   el.innerHTML = totals.map(t => `
     <div class="stats-row">
-      <span><span class="mini-badge" style="margin-right:8px;">${t.code}</span>${t.name}</span>
+      <span><span class="mini-badge" style="margin-right:8px;">${t.code}</span>${escapeHtml(t.name)}</span>
       <span class="stats-row-bar"><span class="stats-row-bar-fill" style="width:${(t.totalQty / maxQty) * 100}%;"></span></span>
       <span class="mono" style="font-weight:600;">${t.totalQty}</span>
     </div>
@@ -1601,7 +1719,7 @@ function populateProductionHotelFilter(items) {
   const select = document.getElementById('production-hotel-filter');
   const hotels = [...new Set(items.map(i => i.societe))].sort((a, b) => a.localeCompare(b));
   select.innerHTML = '<option value="">— Tous les hôtels —</option>' +
-    hotels.map(h => `<option value="${h}" ${h === productionHotelFilter ? 'selected' : ''}>${h}</option>`).join('');
+    hotels.map(h => `<option value="${escapeHtml(h)}" ${h === productionHotelFilter ? 'selected' : ''}>${escapeHtml(h)}</option>`).join('');
 }
 document.getElementById('production-hotel-filter').addEventListener('change', e => {
   productionHotelFilter = e.target.value;
@@ -1640,7 +1758,7 @@ function renderProductionProgress(items) {
   zone.innerHTML = `
     <div class="progress-card">
       <div class="progress-card-head">
-        <span>Taux d'avancement${productionHotelFilter ? ' — ' + productionHotelFilter : ''}</span>
+        <span>Taux d'avancement${productionHotelFilter ? ' — ' + escapeHtml(productionHotelFilter) : ''}</span>
         <b>${progressPct}%</b>
       </div>
       <div class="progress-bar">
@@ -1671,9 +1789,9 @@ function renderProductionKanbanBody() {
         <div class="kcol-head"><h4>${stage.label}</h4><span class="kcol-count">${list.length}</span></div>
         <div class="kcol-drop">
         ${list.length === 0 ? '<div class="kcol-empty">Aucun article</div>' : list.map(i => `
-          <div class="mini-ticket traitement" data-item-id="${i.id}" data-order-id="${i.orderId}" draggable="true" tabindex="0" role="button" aria-label="${i.name}, commande ${i.ticket}">
-            <div class="mini-num">${i.name} <span class="mono" style="font-weight:600;">×${i.qty}</span></div>
-            <div class="mini-client">${i.societe}</div>
+          <div class="mini-ticket traitement" data-item-id="${i.id}" data-order-id="${i.orderId}" draggable="true" tabindex="0" role="button" aria-label="${escapeHtml(i.name)}, commande ${i.ticket}">
+            <div class="mini-num">${escapeHtml(i.name)} <span class="mono" style="font-weight:600;">×${i.qty}</span></div>
+            <div class="mini-client">${escapeHtml(i.societe)}</div>
             <div class="mini-sub">${i.ticket}</div>
           </div>
         `).join('')}
@@ -1737,7 +1855,7 @@ async function renderDriversList() {
       const truck = truckTypesCache.find(t => t.id === d.truck_type_id);
       return `
       <span class="driver-chip">
-        ${d.name}${d.vehicle ? ` <span class="driver-vehicle">— ${d.vehicle}</span>` : ''}${truck ? ` <span class="driver-vehicle">(${truck.name})</span>` : ''}
+        ${escapeHtml(d.name)}${d.vehicle ? ` <span class="driver-vehicle">— ${escapeHtml(d.vehicle)}</span>` : ''}${truck ? ` <span class="driver-vehicle">(${escapeHtml(truck.name)})</span>` : ''}
         <button data-copy-link="${d.access_token}" aria-label="Copier le lien de sa tournée" title="Copier le lien de sa tournée">🔗</button>
         <button data-delete-driver="${d.id}" aria-label="Retirer ce chauffeur">✕</button>
       </span>
@@ -1790,7 +1908,7 @@ async function openConditioningUI(orderId) {
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
         ${cartTypesCache.map(c => `
           <div style="display:flex;align-items:center;gap:4px;">
-            <label style="font-size:11px;">${c.name}</label>
+            <label style="font-size:11px;">${escapeHtml(c.name)}</label>
             <input type="number" min="0" value="0" data-cart-type-id="${c.id}" style="width:44px;border:1px solid var(--line);border-radius:4px;padding:3px;font-size:11px;text-align:center;">
           </div>
         `).join('')}
@@ -1816,11 +1934,11 @@ async function openConditioningUI(orderId) {
       resultZone.innerHTML = `
         ${plan.carts.map(c => `
           <div style="background:var(--paper);border:1px solid var(--line);border-radius:5px;padding:8px 10px;margin-bottom:6px;">
-            <div style="font-weight:600;font-size:12px;color:var(--ink);">${c.name} — ${c.usedL} / ${c.capacityL} L · <span style="color:${c.usedKg >= c.maxWeightKg ? 'var(--rust)' : 'var(--steel)'};">${c.usedKg} / ${c.maxWeightKg} kg${c.usedKg >= c.maxWeightKg ? ' ⚠️ limite poids atteinte' : ''}</span></div>
+            <div style="font-weight:600;font-size:12px;color:var(--ink);">${escapeHtml(c.name)} — ${c.usedL} / ${c.capacityL} L · <span style="color:${c.usedKg >= c.maxWeightKg ? 'var(--rust)' : 'var(--steel)'};">${c.usedKg} / ${c.maxWeightKg} kg${c.usedKg >= c.maxWeightKg ? ' ⚠️ limite poids atteinte' : ''}</span></div>
             ${c.items.length === 0 ? '<div style="font-size:11px;color:var(--steel-light);">Vide</div>' : `
               <div style="font-size:10px;color:var(--steel-light);margin:4px 0 3px;">Ordre de chargement — le plus lourd d'abord, au fond du chariot :</div>
               ${c.items.map((i, idx) => `
-                <div style="font-size:11px;color:var(--steel);">${idx + 1}. ${i.name} × ${i.qty}${idx === 0 ? ' <span style="color:var(--steel-light);">(fond)</span>' : ''}</div>
+                <div style="font-size:11px;color:var(--steel);">${idx + 1}. ${escapeHtml(i.name)} × ${i.qty}${idx === 0 ? ' <span style="color:var(--steel-light);">(fond)</span>' : ''}</div>
               `).join('')}
             `}
           </div>
@@ -1828,7 +1946,7 @@ async function openConditioningUI(orderId) {
         ${plan.unpacked.length > 0 ? `
           <div style="background:var(--paper);border:1.5px solid var(--rust);border-radius:5px;padding:8px 10px;">
             <div style="font-weight:600;font-size:12px;color:var(--rust);">⚠️ Ne rentre pas, ajoutez un chariot :</div>
-            ${plan.unpacked.map(i => `<div style="font-size:11px;color:var(--rust);">• ${i.name} × ${i.qty}</div>`).join('')}
+            ${plan.unpacked.map(i => `<div style="font-size:11px;color:var(--rust);">• ${escapeHtml(i.name)} × ${i.qty}</div>`).join('')}
           </div>
         ` : '<p style="font-size:11px;color:var(--teal);font-weight:600;">✓ Tout tient dans les chariots choisis.</p>'}
         <button class="btn-secondary" id="btn-print-conditioning-${orderId}" style="width:auto;margin-top:10px;padding:6px 12px;font-size:11px;">🖨️ Bon de préparation (PDF)</button>
@@ -1856,7 +1974,7 @@ async function openConditioningUI(orderId) {
         }
       });
     } catch (err) {
-      resultZone.innerHTML = `<p style="font-size:11px;color:var(--rust);">${err.message}</p>`;
+      resultZone.innerHTML = `<p style="font-size:11px;color:var(--rust);">${escapeHtml(err.message)}</p>`;
     }
   });
 }
@@ -1869,7 +1987,7 @@ async function runRouteOptimization(driverId) {
     const { route, failed } = await api('POST', '/api/admin/logistics/optimize-route', { driverId });
     if (route.length === 0) {
       resultZone.innerHTML = failed.length > 0
-        ? `<p style="font-size:11px;color:var(--rust);">⚠️ Adresse non localisée, impossible de calculer l'itinéraire pour : ${failed.map(f => `${f.ticket} (${f.adresse})`).join(', ')}. Vérifiez que l'adresse est correctement orthographiée.</p>`
+        ? `<p style="font-size:11px;color:var(--rust);">⚠️ Adresse non localisée, impossible de calculer l'itinéraire pour : ${failed.map(f => `${f.ticket} (${escapeHtml(f.adresse)})`).join(', ')}. Vérifiez que l'adresse est correctement orthographiée.</p>`
         : '<p class="empty-note">Aucune commande prête à organiser.</p>';
       return;
     }
@@ -1877,20 +1995,20 @@ async function runRouteOptimization(driverId) {
       <div style="background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:8px 10px;margin-bottom:10px;font-size:11px;">
         ${route.map(s => `
           <div style="padding:4px 0;border-bottom:1px solid var(--line);">
-            <b>#${s.sequence}</b> ${s.societe} — ${s.ticket}
+            <b>#${s.sequence}</b> ${escapeHtml(s.societe)} — ${s.ticket}
             ${s.distanceFromPrevKm != null ? `<span style="color:var(--steel-light);"> (+${s.distanceFromPrevKm} km)</span>` : ''}
           </div>
         `).join('')}
         ${failed.length > 0 ? `
           <div style="margin-top:8px;color:var(--rust);">⚠️ Adresse(s) non localisée(s), ordre non calculé pour :
-            ${failed.map(f => `${f.ticket} (${f.adresse})`).join(', ')}
+            ${failed.map(f => `${f.ticket} (${escapeHtml(f.adresse)})`).join(', ')}
           </div>
         ` : ''}
       </div>
       <p style="font-size:10.5px;color:var(--steel-light);">Les numéros d'ordre apparaîtront sur les étiquettes au prochain rafraîchissement de cet écran.</p>
     `;
   } catch (err) {
-    resultZone.innerHTML = `<p style="font-size:11px;color:var(--rust);">${err.message}</p>`;
+    resultZone.innerHTML = `<p style="font-size:11px;color:var(--rust);">${escapeHtml(err.message)}</p>`;
   }
 }
 
@@ -1937,8 +2055,8 @@ async function renderLogisticsKanban() {
         ${list.length === 0 ? '<div class="kcol-empty">Aucune commande</div>' : list.map(o => `
           <div class="mini-ticket ${o.status === 'prete' ? 'logistics-ready' : 'logistics-pending'}" data-id="${o.id}" draggable="true" tabindex="0" role="button" aria-label="Voir le détail de la commande ${o.ticket}, statut ${statusLabel(o.status)}">
             <div class="mini-num">${o.ticket}${o.status === 'prete' && o.deliverySequence ? ` <span class="mono" style="color:var(--brand-deep);">#${o.deliverySequence}</span>` : ''}</div>
-            <div class="mini-client">${o.client.societe}</div>
-            <div class="mini-sub">${o.client.adresse}</div>
+            <div class="mini-client">${escapeHtml(o.client.societe)}</div>
+            <div class="mini-sub">${escapeHtml(o.client.adresse)}</div>
             <div class="mini-sub" style="font-weight:600;color:${o.status === 'prete' ? 'var(--teal)' : 'var(--rust)'};">${o.status === 'prete' ? '✓ Prête à partir' : statusLabel(o.status)}</div>
           </div>
         `).join('')}
@@ -2007,7 +2125,7 @@ async function askAiReport() {
       </div>
     `;
   } catch (err) {
-    zone.innerHTML = `<p style="font-size:12.5px;color:var(--rust);">${err.message}</p>`;
+    zone.innerHTML = `<p style="font-size:12.5px;color:var(--rust);">${escapeHtml(err.message)}</p>`;
   } finally {
     btn.disabled = false;
     btn.textContent = 'Poser la question';
@@ -2176,7 +2294,7 @@ async function renderCartTypesList() {
   } else {
     el.innerHTML = cartTypes.map(c => `
       <span class="driver-chip">
-        ${c.name} — ${c.lengthCm}×${c.widthCm}×${c.heightCm} cm <span class="driver-vehicle">(${c.volumeL} L)</span>
+        ${escapeHtml(c.name)} — ${c.lengthCm}×${c.widthCm}×${c.heightCm} cm <span class="driver-vehicle">(${c.volumeL} L)</span>
         <button data-delete-cart="${c.id}" aria-label="Retirer ce chariot">✕</button>
       </span>
     `).join('');
@@ -2213,7 +2331,7 @@ async function renderTruckTypesList() {
   } else {
     el.innerHTML = truckTypes.map(t => `
       <span class="driver-chip">
-        ${t.name} — ${t.lengthCm}×${t.widthCm}×${t.heightCm} cm <span class="driver-vehicle">(${(t.volumeL/1000).toFixed(2)} m³)</span>
+        ${escapeHtml(t.name)} — ${t.lengthCm}×${t.widthCm}×${t.heightCm} cm <span class="driver-vehicle">(${(t.volumeL/1000).toFixed(2)} m³)</span>
         <button data-delete-truck="${t.id}" aria-label="Retirer ce véhicule">✕</button>
       </span>
     `).join('');
@@ -2229,7 +2347,7 @@ async function renderTruckTypesList() {
   const select = document.getElementById('new-driver-truck-type');
   if (select) {
     select.innerHTML = '<option value="">— Aucun —</option>' +
-      truckTypes.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+      truckTypes.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
   }
 }
 document.getElementById('btn-add-truck-type').addEventListener('click', async () => {
@@ -2274,7 +2392,7 @@ async function renderFactureTab() {
     const { clients } = await api('GET', '/api/admin/clients');
     factureClientsCache = clients;
     select.innerHTML = '<option value="">— Choisir un hôtel —</option>' +
-      clients.map(c => `<option value="${c.id}">${c.societe}</option>`).join('');
+      clients.map(c => `<option value="${c.id}">${escapeHtml(c.societe)}</option>`).join('');
   }
 }
 
@@ -2344,7 +2462,7 @@ async function renderInvoiceableOrders(clientId) {
   try {
     ({ orders } = await api('GET', `/api/admin/clients/${clientId}/invoiceable-orders`));
   } catch (err) {
-    zone.innerHTML = `<p style="font-size:12.5px;color:var(--rust);">${err.message}</p>`;
+    zone.innerHTML = `<p style="font-size:12.5px;color:var(--rust);">${escapeHtml(err.message)}</p>`;
     genBtn.disabled = true;
     return;
   }
@@ -2398,7 +2516,7 @@ async function renderPastInvoices(clientId) {
   try {
     ({ invoices } = await api('GET', `/api/admin/clients/${clientId}/invoices`));
   } catch (err) {
-    zone.innerHTML = `<p style="font-size:12.5px;color:var(--rust);">${err.message}</p>`;
+    zone.innerHTML = `<p style="font-size:12.5px;color:var(--rust);">${escapeHtml(err.message)}</p>`;
     return;
   }
   if (invoices.length === 0) { zone.innerHTML = ''; return; }
@@ -2469,7 +2587,7 @@ async function renderGarageView() {
 
   zone.innerHTML = trucks.map(t => `
     <div class="card" style="margin-bottom:20px;">
-      <h4 class="card-subhead">${t.name}</h4>
+      <h4 class="card-subhead">${escapeHtml(t.name)}</h4>
       <div class="settings-row" style="margin-bottom:16px;">
         <div class="field">
           <label>Kilométrage actuel (km)</label>
@@ -2553,7 +2671,7 @@ async function renderMaintenanceList(truckId) {
         <b>${new Date(m.date).toLocaleDateString('fr-FR')}</b> — ${m.type}
         ${m.mileageKm != null ? ` · ${m.mileageKm.toLocaleString('fr-FR')} km` : ''}
         ${m.cost != null ? ` · ${m.cost.toFixed(2)} €` : ''}
-        ${m.notes ? `<div style="color:var(--steel);margin-top:2px;">${m.notes}</div>` : ''}
+        ${m.notes ? `<div style="color:var(--steel);margin-top:2px;">${escapeHtml(m.notes)}</div>` : ''}
       </div>
       <button data-delete-maintenance="${m.id}" style="background:none;border:none;color:var(--rust);cursor:pointer;font-size:14px;" aria-label="Supprimer">✕</button>
     </div>
@@ -2906,7 +3024,7 @@ function renderHistoryList() {
     <div class="own-ticket livree" data-id="${o.id}" tabindex="0" role="button" aria-label="Voir le détail de la commande ${o.ticket}">
       <div>
         <span class="mini-num">${o.ticket}</span>
-        <span class="mini-sub">${o.client.societe} · ${o.items.length} réf. · ${new Date(o.createdAt).toLocaleDateString('fr-FR')}</span>
+        <span class="mini-sub">${escapeHtml(o.client.societe)} · ${o.items.length} réf. · ${new Date(o.createdAt).toLocaleDateString('fr-FR')}</span>
       </div>
       <span class="own-badge livree">Livrée</span>
     </div>
