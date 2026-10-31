@@ -311,3 +311,21 @@ test('cadence : un invité ne peut pas inonder la production (30 commandes par h
   assert.equal(last.data.code, 'RATE_LIMITED');
   assert.ok(last.data.retryAfterSec > 0);
 });
+
+test('derrière Cloudflare puis Render : l\'adresse retenue est celle du visiteur, pas celle d\'un relais, et une fausse adresse ne la change pas', async () => {
+  const r = await startServer({ env: { RENDER: 'true', TRUST_PROXY: undefined } });
+  try {
+    const hdr = (xff, cookie) => ({ 'Content-Type': 'application/json', 'X-Forwarded-For': xff, 'X-Forwarded-Proto': 'https', ...(cookie ? { cookie } : {}) });
+    const setup = await fetch(`${r.BASE}/api/admin/setup`, { method: 'POST', headers: hdr('203.0.113.7, 172.64.1.1'), body: JSON.stringify({ password: PWD }) });
+    assert.equal(setup.status, 201);
+    const cookie = setup.headers.get('set-cookie').split(';')[0];
+    // chaîne réelle : visiteur, Cloudflare (ajouté par Render)
+    let sec = await (await fetch(`${r.BASE}/api/admin/security`, { headers: hdr('203.0.113.7, 172.64.1.1', cookie) })).json();
+    assert.equal(sec.connection.ip, '203.0.113.7');
+    assert.equal(sec.connection.trustProxy, 2);
+    assert.equal(sec.connection.secure, true);
+    // le visiteur écrit lui-même une fausse adresse devant : elle reste en tête de chaîne et n'est pas retenue
+    sec = await (await fetch(`${r.BASE}/api/admin/security`, { headers: hdr('6.6.6.6, 203.0.113.7, 172.64.1.1', cookie) })).json();
+    assert.equal(sec.connection.ip, '203.0.113.7', 'une adresse inventée par le visiteur ne compte pas');
+  } finally { await r.stop(); }
+});

@@ -236,9 +236,9 @@ de plateforme.
 
 En production, quel que soit l'hébergeur, pensez à :
 - définir un `SESSION_SECRET` long et aléatoire, différent de celui utilisé en local ;
-- derrière un reverse proxy : c'est déjà géré dans `src/server.js` (`trust proxy` à 1 par défaut,
-  cookie « Secure » automatique dès que la connexion est en HTTPS). Si l'hébergeur place plusieurs relais devant
-  l'application, régler `TRUST_PROXY` (nombre de relais) ; `TRUST_PROXY=0` pour un lancement sans relais.
+- derrière un reverse proxy : c'est déjà géré dans `src/server.js` (`trust proxy` à 2 sur Render — Cloudflare puis Render, mesuré —
+  et à 1 ailleurs ; cookie « Secure » automatique dès que la connexion est en HTTPS). Si l'hébergeur place un autre nombre de relais
+  devant l'application, régler `TRUST_PROXY` (nombre de relais) ; `TRUST_PROXY=0` pour un lancement sans relais.
 
 ## Espace client
 
@@ -703,8 +703,9 @@ juste en dessous.
   poussé à appeler sa propre machine) ;
 - dépendances : `nodemailer` mis à jour (vulnérabilité élevée corrigée).
 
-À savoir : derrière l'hébergeur, le serveur compte **un relais** devant lui (`TRUST_PROXY`, 1 par défaut). Réglages → « Sécurité »
-affiche l'adresse que le serveur voit : comparez-la à votre adresse publique ; si elle est celle du relais, mettez `TRUST_PROXY=2` (ou plus).
+À savoir : derrière l'hébergeur, le serveur doit compter le bon nombre de relais (`TRUST_PROXY` : 2 par défaut sur Render, 1 ailleurs).
+Réglages → « Sécurité » affiche l'adresse que le serveur voit : elle doit être **la vôtre**, pas celle d'un relais (Cloudflare) ; sinon,
+ajustez `TRUST_PROXY`.
 Les jetons d'API des hôtels (`/api/v1`) sont encore stockés en clair : à passer en empreinte dans une prochaine étape.
 
 ### Accès Claude (lecture seule)
@@ -894,7 +895,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (315 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (316 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

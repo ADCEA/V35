@@ -35,9 +35,12 @@ if (!process.env.SESSION_SECRET) {
   );
 }
 
-// Derrière le relais de Render : adresse réelle du visiteur (limite d'essais de connexion) et connexion sécurisée (cookie « Secure »).
-// TRUST_PROXY=0 pour un lancement sans relais, ou le nombre de relais si l'hébergement en place plusieurs.
-app.set('trust proxy', process.env.TRUST_PROXY === undefined ? 1 : (Number.isNaN(Number(process.env.TRUST_PROXY)) ? process.env.TRUST_PROXY : Number(process.env.TRUST_PROXY)));
+// Derrière les relais de l'hébergeur : adresse réelle du visiteur (limites d'essais et de cadence, journal) et connexion sécurisée
+// (cookie « Secure »). Sur Render, mesuré en production : DEUX relais (Cloudflare puis Render) — avec un seul, le serveur prenait
+// l'adresse de Cloudflare pour celle du visiteur, partagée par tous ceux qui passent par le même point d'entrée.
+// TRUST_PROXY=0 pour un lancement sans relais, ou le nombre de relais si l'hébergement en place un autre nombre.
+const DEFAULT_RELAYS = process.env.RENDER ? 2 : 1;
+app.set('trust proxy', process.env.TRUST_PROXY === undefined ? DEFAULT_RELAYS : (Number.isNaN(Number(process.env.TRUST_PROXY)) ? process.env.TRUST_PROXY : Number(process.env.TRUST_PROXY)));
 app.disable('x-powered-by');
 app.use(security.securityHeaders);
 app.use(express.json());
