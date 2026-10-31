@@ -154,16 +154,18 @@ router.get('/auth-options', (req, res) => {
 router.put('/me/profile', requireClient, (req, res) => {
   const b = req.body || {};
   const cur = db.prepare('SELECT * FROM clients WHERE id = ?').get(req.session.clientId);
-  const text = (k, label, max) => {
-    const v = b[k] === undefined ? cur[k] : String(b[k] ?? '').trim();
-    if (!v) throw Object.assign(new Error(`Merci de renseigner ${label}.`), { status: 400 });
+  // L'adresse postale est facultative pour un particulier ; elle reste obligatoire pour un professionnel.
+  const particulier = cur.client_type === 'particulier';
+  const text = (k, label, max, optional = false) => {
+    const v = b[k] === undefined ? (cur[k] ?? '') : String(b[k] ?? '').trim();
+    if (!v && !optional) throw Object.assign(new Error(`Merci de renseigner ${label}.`), { status: 400 });
     if (v.length > max) throw Object.assign(new Error(`${label[0].toUpperCase()}${label.slice(1)} est trop long.`), { status: 400 });
     return v;
   };
   try {
     const contact = text('contact', 'le nom du contact', 120);
     const tel = text('tel', 'un numéro de téléphone', 40);
-    const adresse = text('adresse', "l'adresse", 300);
+    const adresse = text('adresse', "l'adresse", 300, particulier);
     let email = cur.email;
     if (b.email !== undefined && String(b.email).trim().toLowerCase() !== (cur.email || '')) {
       email = String(b.email || '').trim().toLowerCase();

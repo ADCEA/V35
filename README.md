@@ -490,6 +490,13 @@ dans la fiche, section « Facturation » ; colonne facultative `type` à l'impor
 - La facture figée porte `buyer.type = "particulier"` : pas de SIREN, **pas d'indemnité forfaitaire de 40 €** (art. D441-5 : elle ne vise
   que les relations entre professionnels) ni sur le PDF, ni dans les conditions figées, ni dans les relances 2 et 3 par e-mail.
 - **Escompte** : non proposé par défaut à un particulier, même si l'escompte est activé pour tous ; seulement si sa fiche le demande (« Oui »).
+- **Adresse postale et e-mail facultatifs** : un particulier peut être créé (fiche, import CSV) et facturé avec son seul nom. Sa fiche n'est
+  jamais signalée « à compléter » pour une adresse, et ni la facture ni le devis ne la réclament (le PDF omet simplement le bloc d'adresse).
+  Dans l'import CSV, les cellules `adresse` et `email` d'une ligne particulier peuvent rester vides (les colonnes doivent exister) ; un
+  particulier sans e-mail est retrouvé par son nom au réimport, et une cellule d'adresse vide n'efface pas l'adresse déjà connue. Connecté,
+  un particulier peut aussi enregistrer son profil et passer commande sans adresse de collecte. Pour un professionnel, rien ne change :
+  adresse et e-mail restent exigés. Sans e-mail, pas d'espace client ni d'envoi automatique des factures ; sans adresse, la commande
+  n'est pas placée dans les tournées (elle apparaît parmi les adresses non localisées).
 - Les factures déjà émises ne changent jamais : changer le type d'une fiche n'a d'effet que sur les documents suivants.
 
 ### Export FEC sur une période
@@ -895,7 +902,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (316 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (319 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

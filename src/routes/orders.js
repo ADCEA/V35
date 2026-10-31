@@ -36,10 +36,14 @@ function nextTicket(now) {
 // POST /api/orders — créer une commande (client connecté ou invité)
 router.post('/', orderLimitGuest, orderLimitClient, (req, res) => {
   const { items, livraisonPrevue, notes, client } = req.body || {};
-  const { societe, contact, tel, adresse } = client || {};
+  const { societe, contact, tel } = client || {};
+  // L'adresse est facultative pour un client particulier connecté ; elle reste exigée pour tous les autres.
+  const sessionClient = req.session.clientId ? db.prepare('SELECT client_type FROM clients WHERE id = ?').get(req.session.clientId) : null;
+  const adresseOptional = Boolean(sessionClient && sessionClient.client_type === 'particulier');
+  const adresse = (client && client.adresse != null) ? client.adresse : (adresseOptional ? '' : undefined);
 
-  if (!societe || !contact || !tel || !adresse) {
-    return res.status(400).json({ error: 'Merci de renseigner société, contact, téléphone et adresse.' });
+  if (!societe || !contact || !tel || (!adresse && !adresseOptional)) {
+    return res.status(400).json({ error: adresseOptional ? 'Merci de renseigner société, contact et téléphone.' : 'Merci de renseigner société, contact, téléphone et adresse.' });
   }
   for (const [k, v] of Object.entries({ societe, contact, tel, adresse })) {
     if (typeof v !== 'string') return res.status(400).json({ error: `Champ « ${k} » invalide.` });

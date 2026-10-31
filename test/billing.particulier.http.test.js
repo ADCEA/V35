@@ -163,3 +163,126 @@ test('espace client : un particulier ne peut pas enregistrer de SIRET ni de TVA'
   assert.ok(!save.data.client.siret && !save.data.client.tvaNumber);
   assert.equal(save.data.client.adresseFacturation, '4 rue Neuve, 84200 Carpentras');
 });
+
+// ---- adresse postale et e-mail facultatifs pour un particulier (jamais pour un professionnel) ----
+
+// Le test précédent a ouvert une session « client » : on revient en administrateur (la Facturation se déverrouille à chaque action sensible).
+async function backToAdmin() {
+  s.newClient();
+  const r = await call('POST', '/api/admin/login', { password: 'secret123' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const u = await call('POST', `${B}/lock/unlock`, { code: CODE });
+  assert.equal(u.status, 200, JSON.stringify(u.data));
+}
+
+test('particulier sans adresse ni e-mail : fiche « prête », facture et devis émis ; le professionnel reste exigé', async () => {
+  await backToAdmin();
+  const p = await call('POST', `${B}/catalog/clients`, { societe: 'Madame Sans Adresse', clientType: 'particulier' });
+  assert.equal(p.status, 201, JSON.stringify(p.data));
+  const ps = p.data.client;
+  assert.deepEqual(ps.issues, [], 'aucune alerte pour un particulier sans adresse : ' + JSON.stringify(ps.issues));
+  assert.equal(ps.email, null);
+
+  const q = await call('POST', `${B}/catalog/clients`, { societe: 'Hôtel Sans Adresse', siret: '55210055400013' });
+  assert.equal(q.status, 201, JSON.stringify(q.data));
+  const pro2 = q.data.client.id;
+  assert.deepEqual(q.data.client.issues, ['adresse de facturation manquante'], 'un professionnel sans adresse reste signalé');
+
+  // facture
+  const okInv = await (await invoiceFor(ps.id, '2026-10-12')).issue();
+  assert.equal(okInv.status, 200, JSON.stringify(okInv.data));
+  const refused = await (await invoiceFor(pro2, '2026-10-12')).issue();
+  assert.equal(refused.status, 422, JSON.stringify(refused.data));
+  assert.match(refused.data.error, /adresse de facturation manquante/);
+
+  // devis
+  const qp = await call('POST', `${B}/quotes`, { clientId: ps.id, lines: [{ description: 'Location nappes', quantity: 10, unitPrice: 4, vatRate: 20 }] });
+  assert.equal(qp.status, 201, JSON.stringify(qp.data));
+  assert.equal((await call('POST', `${B}/quotes/${qp.data.quote.id}/issue`, { issueDate: '2026-10-12' })).status, 200, 'devis émis pour un particulier sans adresse');
+  const qq = await call('POST', `${B}/quotes`, { clientId: pro2, lines: [{ description: 'Location nappes', quantity: 10, unitPrice: 4, vatRate: 20 }] });
+  const refusedQuote = await call('POST', `${B}/quotes/${qq.data.quote.id}/issue`, { issueDate: '2026-10-12' });
+  assert.ok(refusedQuote.status >= 400, JSON.stringify(refusedQuote.data));
+  assert.match(JSON.stringify(refusedQuote.data), /adresse manquante/);
+
+  // PDF de la facture d'un particulier sans adresse : généré normalement
+  const issued = db.prepare(`SELECT id FROM native_invoices WHERE client_id = ? AND status='issued'`).get(ps.id);
+  const pdf = await call('GET', `${B}/invoices/${issued.id}/pdf`, undefined, true);
+  assert.equal(pdf.status, 200);
+  assert.equal(Buffer.from(await pdf.arrayBuffer()).subarray(0, 5).toString(), '%PDF-');
+});
+
+test('import CSV : adresse et e-mail peuvent rester vides pour un particulier, pas pour un professionnel', async () => {
+  await backToAdmin();
+  const csv = [
+    'societe,contact,tel,adresse,email,type',
+    'Monsieur Sans Rien,Marc,0633333333,,,particulier',
+    'Madame Sans Mail,Anne,0644444444,8 rue du Four,,particulier',
+    'Hôtel Sans Adresse CSV,Luc,0490111111,,luc@x.fr,professionnel',
+    'Hôtel Sans Mail CSV,Eva,0490222222,2 rue Haute,,professionnel',
+    'Monsieur Sans Rien,Marc,0633333333,,,particulier',
+  ].join('\n');
+  const sim = await call('POST', `${B}/catalog/clients/import`, { csv });
+  assert.equal(sim.status, 200, JSON.stringify(sim.data));
+  assert.equal(sim.data.created.length, 2, JSON.stringify(sim.data));
+  assert.equal(sim.data.errors.length, 2);
+  assert.match(sim.data.errors.find(e => e.line === 4).error, /adresse/);
+  assert.match(sim.data.errors.find(e => e.line === 5).error, /Email/i);
+  assert.equal(sim.data.duplicates.length, 1, 'même nom répété dans le fichier : ignoré');
+  assert.ok(sim.data.created.every(c => !c.code), 'sans e-mail, aucun code d\'accès à communiquer');
+
+  const a = await sensitive('clients-import', 'POST', `${B}/catalog/clients/import`, { csv, apply: true });
+  assert.equal(a.status, 200, JSON.stringify(a.data));
+  const rows = db.prepare(`SELECT societe, email, adresse, client_type FROM clients WHERE societe IN ('Monsieur Sans Rien','Madame Sans Mail') ORDER BY societe`).all();
+  assert.deepEqual(rows, [
+    { societe: 'Madame Sans Mail', email: null, adresse: '8 rue du Four', client_type: 'particulier' },
+    { societe: 'Monsieur Sans Rien', email: null, adresse: '', client_type: 'particulier' },
+  ]);
+
+  // réimport : retrouvé par son nom (pas de doublon) et l'adresse déjà connue n'est pas effacée par une cellule vide
+  const csv2 = ['societe,contact,tel,adresse,email,type', 'Madame Sans Mail,Anne B.,0644444444,,,particulier'].join('\n');
+  const again = await sensitive('clients-import', 'POST', `${B}/catalog/clients/import`, { csv: csv2, apply: true });
+  assert.equal(again.status, 200, JSON.stringify(again.data));
+  assert.equal(again.data.updated.length, 1);
+  assert.equal(again.data.created.length, 0);
+  const m = db.prepare(`SELECT contact, adresse FROM clients WHERE societe = 'Madame Sans Mail'`).all();
+  assert.deepEqual(m, [{ contact: 'Anne B.', adresse: '8 rue du Four' }]);
+});
+
+test('espace client et commande : l\'adresse est facultative pour un particulier connecté, obligatoire sinon', async () => {
+  await backToAdmin();
+  const code = '482915';
+  const mk = async (societe, email, clientType) => {
+    const c = await call('POST', `${B}/catalog/clients`, { societe, contact: 'Moi', tel: '0600000000', email, clientType, siret: clientType === 'pro' ? '55210055400013' : undefined });
+    assert.equal(c.status, 201, JSON.stringify(c.data));
+    const id = c.data.client.id;
+    assert.equal((await sensitive(`client-code:${id}`, 'PUT', `${B}/catalog/clients/${id}/access-code`, { code })).status, 200);
+    return id;
+  };
+  await mk('Particulier Connecté', 'part.conn@x.fr', 'particulier');
+  await mk('Pro Connecté', 'pro.conn@x.fr', 'pro');
+  const order = { items: [{ id: 'd', qty: 1 }], client: { societe: 'X', contact: 'Moi', tel: '0600000000' } };
+  const svc = db.prepare('SELECT id FROM articles LIMIT 1').get();
+  assert.ok(svc, 'le catalogue de démarrage contient au moins un article');
+  order.items[0].id = svc.id;
+
+  s.newClient();
+  assert.equal((await call('POST', '/api/clients/login', { email: 'part.conn@x.fr', code })).status, 200);
+  const prof = await call('PUT', '/api/clients/me/profile', { contact: 'Moi', tel: '0600000000', adresse: '' });
+  assert.equal(prof.status, 200, JSON.stringify(prof.data));
+  assert.equal(prof.data.client.adresse, '');
+  const o = await call('POST', '/api/orders', order);
+  assert.equal(o.status, 201, 'commande d\'un particulier sans adresse : ' + JSON.stringify(o.data));
+
+  s.newClient();
+  assert.equal((await call('POST', '/api/clients/login', { email: 'pro.conn@x.fr', code })).status, 200);
+  const profPro = await call('PUT', '/api/clients/me/profile', { contact: 'Moi', tel: '0600000000', adresse: '' });
+  assert.equal(profPro.status, 400, 'un professionnel doit garder son adresse');
+  const oPro = await call('POST', '/api/orders', order);
+  assert.equal(oPro.status, 400);
+  assert.match(oPro.data.error, /adresse/);
+
+  s.newClient();   // invité : l'adresse reste exigée
+  const oGuest = await call('POST', '/api/orders', order);
+  assert.equal(oGuest.status, 400);
+  assert.match(oGuest.data.error, /adresse/);
+});

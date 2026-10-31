@@ -519,7 +519,8 @@ function missingMentions(seller, buyer, inv, issueDate) {
   need(seller.vatNumber, "Émetteur : numéro de TVA intracommunautaire manquant.");
 
   need(buyer.name, "Client : dénomination manquante.");
-  need(buyer.address, "Client : adresse de facturation manquante.");
+  // L'adresse postale est facultative pour un particulier (facture au nom seul) ; elle reste exigée d'un professionnel.
+  if (buyer.type !== 'particulier') need(buyer.address, "Client : adresse de facturation manquante.");
   // Le SIREN du client devient obligatoire sur les factures B2B émises depuis le 1er septembre 2026 ; un particulier n'en a pas.
   if (buyer.type !== 'particulier') {
     need(buyer.siren.length === 9, `Client « ${buyer.name} » : SIREN/SIRET manquant (fiche client) — obligatoire sur les factures depuis le 1er septembre 2026.`);

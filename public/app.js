@@ -172,8 +172,10 @@ document.getElementById('btn-submit').addEventListener('click', async () => {
   const adresse = document.getElementById('f-adresse').value.trim();
   const notes = document.getElementById('f-notes').value.trim();
 
-  if (!societe || !contact || !tel || !adresse) {
-    showFormError('order-error', 'Merci de renseigner société, contact, téléphone et adresse.');
+  // L'adresse de collecte est facultative pour un client particulier connecté.
+  const adresseFacultative = Boolean(currentClient && currentClient.clientType === 'particulier');
+  if (!societe || !contact || !tel || (!adresse && !adresseFacultative)) {
+    showFormError('order-error', adresseFacultative ? 'Merci de renseigner société, contact et téléphone.' : 'Merci de renseigner société, contact, téléphone et adresse.');
     return;
   }
   const items = Object.entries(cart).filter(([, q]) => q > 0).map(([id, qty]) => ({ id, qty }));

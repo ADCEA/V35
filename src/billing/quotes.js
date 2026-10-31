@@ -115,7 +115,7 @@ function missing(seller, buyer, q, issueDate, validUntil) {
   if (!(seller.address && seller.postalCode && seller.city)) p.push("Émetteur : adresse du siège incomplète.");
   if (engine.sirenFrom(seller.siren || seller.siret).length !== 9) p.push('Émetteur : SIREN manquant.');
   if (!buyer.name) p.push('Client : dénomination manquante.');
-  if (!buyer.address) p.push('Client : adresse manquante.');
+  if (!buyer.address && buyer.type !== 'particulier') p.push('Client : adresse manquante.');   // facultative pour un particulier
   if (!engine.isIsoDate(issueDate)) p.push('Date du devis invalide.');
   if (validUntil < issueDate) p.push('La date de validité précède la date du devis.');
   if (!q.lines.some(l => !l.is_section)) p.push('Aucune ligne chiffrée.');

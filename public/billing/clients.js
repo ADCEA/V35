@@ -90,7 +90,7 @@
   function importClients(main) {
     Bill.csvImport({
       title: 'Importer des hôtels', path: '/catalog/clients/import', scope: 'clients-import',
-      intro: 'Colonnes obligatoires : <b>societe</b>, <b>contact</b>, <b>tel</b>, <b>adresse</b>, <b>email</b>. Facultatives : code_postal, ville, code (6 à 10 chiffres), type (<b>professionnel</b> ou <b>particulier</b> ; professionnel si la cellule est vide). Un hôtel dont l\'e-mail existe déjà est mis à jour ; son code d\'accès ne change que si la colonne « code » est remplie.',
+      intro: 'Colonnes obligatoires : <b>societe</b>, <b>contact</b>, <b>tel</b>, <b>adresse</b>, <b>email</b> (les cellules <b>adresse</b> et <b>email</b> peuvent rester vides pour un particulier ; un particulier sans e-mail est retrouvé par son nom). Facultatives : code_postal, ville, code (6 à 10 chiffres), type (<b>professionnel</b> ou <b>particulier</b> ; professionnel si la cellule est vide). Un hôtel dont l\'e-mail existe déjà est mis à jour ; son code d\'accès ne change que si la colonne « code » est remplie.',
       template: { name: 'modele-hotels.csv', text: 'societe,contact,tel,adresse,code_postal,ville,email,code\nHotel Exemple,Jean Dupont,0490000000,12 rue de la Paix,84200,Carpentras,contact@hotel-exemple.fr,\n' },
       renderPreview: (r) => {
         const s = r.summary;
@@ -155,8 +155,8 @@
         : '<div class="bl-alert ok">Toutes les informations nécessaires à la facture sont renseignées.</div>'}
         <div class="bl-panel"><div class="bl-panel-h"><h3>Coordonnées</h3></div><div class="bl-panel-b">
           <div class="bl-row2"><div class="bl-field"><label for="i-s">Nom</label><input id="i-s" value="${v('societe')}"></div><div class="bl-field"><label for="i-c">Contact</label><input id="i-c" value="${v('contact')}"></div></div>
-          <div class="bl-row2"><div class="bl-field"><label for="i-t">Téléphone</label><input id="i-t" inputmode="tel" value="${v('tel')}"></div><div class="bl-field"><label for="i-m">E-mail</label><input id="i-m" type="email" value="${v('email')}"><div class="bl-hint">Sert aussi à l'envoi des factures et à l'accès à l'espace client.</div></div></div>
-          <div class="bl-field"><label for="i-a">Adresse</label><input id="i-a" value="${v('adresse')}"></div>
+          <div class="bl-row2"><div class="bl-field"><label for="i-t">Téléphone</label><input id="i-t" inputmode="tel" value="${v('tel')}"></div><div class="bl-field"><label for="i-m">E-mail</label><input id="i-m" type="email" value="${v('email')}"><div class="bl-hint" id="i-m-hint">Sert aussi à l'envoi des factures et à l'accès à l'espace client.</div></div></div>
+          <div class="bl-field"><label for="i-a">Adresse</label><input id="i-a" value="${v('adresse')}"><div class="bl-hint" id="i-a-hint"></div></div>
           <div class="bl-row2"><div class="bl-field"><label for="i-p">Code postal</label><input id="i-p" inputmode="numeric" value="${v('codePostal')}"><div class="bl-hint">Indispensable pour localiser l'hôtel dans les tournées.</div></div><div class="bl-field"><label for="i-v">Ville</label><input id="i-v" value="${v('ville')}"></div></div>
         </div></div>
         <div class="bl-panel"><div class="bl-panel-h"><h3>Facturation</h3></div><div class="bl-panel-b">
@@ -179,6 +179,9 @@
         const part = box.querySelector('#i-ty').value === 'particulier';
         box.querySelector('#i-pro-ids').style.display = part ? 'none' : '';
         box.querySelector('#i-ty-hint').textContent = part ? 'Pas de SIRET ni de TVA sur ses factures, pas d\'indemnité de recouvrement de 40 €, escompte proposé seulement si vous le choisissez ci-dessous.' : '';
+        // L'adresse postale et l'e-mail sont facultatifs pour un particulier.
+        box.querySelector('#i-a-hint').textContent = part ? 'Facultative pour un particulier : sa facture peut porter son nom seul. Sans adresse, sa livraison n\'apparaît pas dans les tournées.' : '';
+        box.querySelector('#i-m-hint').textContent = part ? 'Facultatif pour un particulier. Sans e-mail, pas d\'espace client et pas d\'envoi automatique des factures.' : 'Sert aussi à l\'envoi des factures et à l\'accès à l\'espace client.';
       };
       box.querySelector('#i-ty').onchange = syncType; syncType();
       box.querySelector('#i-save').onclick = async (ev) => {

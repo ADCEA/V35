@@ -66,7 +66,8 @@ function billingIssues({ siret, adresse_facturation, adresse, clientType }) {
     if (siren.length !== 9) issues.push('SIREN/SIRET manquant');
     else if (!engine.luhnOk(siren)) issues.push('SIREN/SIRET invalide');
   }
-  if (!(adresse_facturation || adresse)) issues.push('adresse de facturation manquante');
+  // Un particulier n'a pas à donner d'adresse postale : sa facture se fait avec son nom seul.
+  if (clientType !== 'particulier' && !(adresse_facturation || adresse)) issues.push('adresse de facturation manquante');
   return issues;
 }
 
@@ -502,7 +503,7 @@ function setWebhook(clientId, { webhookUrl, regenerateSecret }) {
   return { webhookUrl: url || null, webhookSecret: secret };
 }
 
-/** Import CSV des hôtels (colonnes : societe, contact, tel, adresse, email obligatoires). */
+/** Import CSV des hôtels (colonnes : societe, contact, tel, adresse, email ; adresse et email peuvent rester vides pour un particulier). */
 function importClients(csvText, { apply = false } = {}) {
   let parsed;
   try { parsed = parseCsv(String(csvText || '')); } catch (e) { throw new BillingError(`Fichier CSV illisible : ${e.message}`); }
@@ -510,11 +511,14 @@ function importClients(csvText, { apply = false } = {}) {
   const missing = ['societe', 'contact', 'tel', 'adresse', 'email'].filter(c => !parsed.headers.includes(c));
   if (missing.length) throw new BillingError(`Colonne(s) obligatoire(s) manquante(s) : ${missing.join(', ')}. Colonnes trouvées : ${parsed.headers.join(', ')}.`);
 
-  const byEmail = db.prepare('SELECT id, code_hash FROM clients WHERE email = ?');
+  const byEmail = db.prepare('SELECT id, code_hash, adresse, client_type FROM clients WHERE email = ?');
   const bySociete = db.prepare('SELECT email FROM clients WHERE LOWER(TRIM(societe)) = ?');
+  // Un particulier peut n'avoir ni e-mail ni adresse : on le retrouve alors par son nom (parmi les particuliers sans e-mail).
+  const noEmailRows = db.prepare(`SELECT id, societe, code_hash, adresse FROM clients WHERE email IS NULL AND client_type = 'particulier'`).all();
+  const bySocieteNoEmail = (name) => noEmailRows.find(r => norm(r.societe) === name);
   const insert = db.prepare('INSERT INTO clients (email, societe, contact, tel, adresse, code_postal, ville, code_hash, client_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
   // Sans colonne « type » (ou cellule vide) : un client existant garde son type, un nouveau client est professionnel.
-  const update = db.prepare('UPDATE clients SET societe=?, contact=?, tel=?, adresse=?, code_postal=?, ville=?, code_hash=?, client_type=COALESCE(?, client_type) WHERE email=?');
+  const update = db.prepare('UPDATE clients SET societe=?, contact=?, tel=?, adresse=?, code_postal=?, ville=?, code_hash=?, client_type=COALESCE(?, client_type) WHERE id=?');
   const out = { created: [], updated: [], duplicates: [], possibleDuplicates: [], errors: [] };
   const seen = new Map();
 
@@ -522,27 +526,35 @@ function importClients(csvText, { apply = false } = {}) {
     parsed.rows.forEach((row, idx) => {
       const line = idx + 2;
       const societe = (row.societe || '').trim(); const contact = (row.contact || '').trim(); const tel = (row.tel || '').trim();
-      const adresse = (row.adresse || '').trim(); const email = (row.email || '').trim().toLowerCase();
-      for (const [k, v] of Object.entries({ societe, contact, tel, adresse })) if (!v) return out.errors.push({ line, error: `Colonne « ${k} » vide.` });
-      if (!email || !EMAIL_RE.test(email)) return out.errors.push({ line, error: `Email invalide : « ${row.email} ».` });
-      if (seen.has(email)) return out.duplicates.push({ line, email, error: `Doublon dans le fichier — même email qu'à la ligne ${seen.get(email)}, ignoré.` });
-      seen.set(email, line);
-      const codePostal = (row.code_postal || '').trim() || null; const ville = (row.ville || '').trim() || null;
-      const provided = (row.code || '').trim();
-      if (provided && !accessCode.ok(provided)) return out.errors.push({ line, error: `Colonne « code » invalide : « ${provided} » (${accessCode.hint()}, ni suite ni chiffres répétés).` });
+      const adresseCell = (row.adresse || '').trim(); const email = (row.email || '').trim().toLowerCase();
+      for (const [k, v] of Object.entries({ societe, contact, tel })) if (!v) return out.errors.push({ line, error: `Colonne « ${k} » vide.` });
       const typeRaw = norm(row.type || '');
       const type = !typeRaw ? null : /^(pro|professionnel|entreprise|societe)$/.test(typeRaw) ? 'pro' : /^(particulier|particuliers|perso)$/.test(typeRaw) ? 'particulier' : undefined;
       if (type === undefined) return out.errors.push({ line, error: `Colonne « type » invalide : « ${row.type} » (attendu : professionnel ou particulier).` });
-      const existing = byEmail.get(email);
+      const byMail = email ? byEmail.get(email) : null;
+      // Particulier : celui que la ligne déclare, ou, sans type indiqué, celui que la fiche existante porte déjà.
+      const particulier = (type || (byMail && byMail.client_type)) === 'particulier';
+      // L'adresse postale et l'e-mail sont facultatifs pour un particulier, obligatoires pour un professionnel.
+      if (!adresseCell && !particulier) return out.errors.push({ line, error: 'Colonne « adresse » vide.' });
+      if (email ? !EMAIL_RE.test(email) : !particulier) return out.errors.push({ line, error: `Email invalide : « ${row.email} ».` });
+      const key = email || `nom:${norm(societe)}`;
+      if (seen.has(key)) return out.duplicates.push({ line, email, error: email ? `Doublon dans le fichier — même email qu'à la ligne ${seen.get(key)}, ignoré.` : `Doublon dans le fichier — même nom qu'à la ligne ${seen.get(key)}, ignoré.` });
+      seen.set(key, line);
+      const codePostal = (row.code_postal || '').trim() || null; const ville = (row.ville || '').trim() || null;
+      const provided = (row.code || '').trim();
+      if (provided && !accessCode.ok(provided)) return out.errors.push({ line, error: `Colonne « code » invalide : « ${provided} » (${accessCode.hint()}, ni suite ni chiffres répétés).` });
+      const existing = email ? byMail : bySocieteNoEmail(norm(societe));
       if (existing) {
-        update.run(societe, contact, tel, adresse, codePostal, ville, provided ? bcrypt.hashSync(provided, 10) : existing.code_hash, type, email);
-        return out.updated.push({ line, societe, email, codeChanged: !!provided });
+        // Une cellule d'adresse vide (particulier) ne doit pas effacer l'adresse déjà connue.
+        update.run(societe, contact, tel, adresseCell || existing.adresse || '', codePostal, ville, provided ? bcrypt.hashSync(provided, 10) : existing.code_hash, type, existing.id);
+        return out.updated.push({ line, societe, email: email || null, codeChanged: !!provided });
       }
       const same = bySociete.get(norm(societe));
-      if (same) out.possibleDuplicates.push({ line, societe, error: `Un hôtel nommé « ${societe} » existe déjà avec l'email « ${same.email} » (celui-ci : « ${email} ») — à vérifier, créé quand même.` });
-      const finalCode = provided || String(100000 + crypto.randomInt(900000));
-      insert.run(email, societe, contact, tel, adresse, codePostal, ville, bcrypt.hashSync(finalCode, 10), type || 'pro');
-      out.created.push({ line, societe, email, code: finalCode, codeWasGenerated: !provided });
+      if (same) out.possibleDuplicates.push({ line, societe, error: `Un hôtel nommé « ${societe} » existe déjà${same.email ? ` avec l'email « ${same.email} »` : ' (sans email)'}${email ? ` (celui-ci : « ${email} »)` : ''} — à vérifier, créé quand même.` });
+      // Sans e-mail, pas d'espace client : aucun code à communiquer (empreinte d'un secret aléatoire jamais montré).
+      const finalCode = provided || (email ? String(100000 + crypto.randomInt(900000)) : null);
+      insert.run(email || null, societe, contact, tel, adresseCell, codePostal, ville, bcrypt.hashSync(finalCode || crypto.randomBytes(24).toString('hex'), 10), type || 'pro');
+      out.created.push({ line, societe, email: email || null, ...(finalCode ? { code: finalCode } : {}), codeWasGenerated: !!finalCode && !provided });
     });
     if (out.created.length || out.updated.length) log('clients_imported', { created: out.created.length, updated: out.updated.length });
     return out;
