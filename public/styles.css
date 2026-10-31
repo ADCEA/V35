@@ -167,6 +167,7 @@ section.block{padding:48px 0;}
 .settings-row .field{flex:1;min-width:220px;margin-bottom:0;}
 .settings-save-note{font-size:12px;color:var(--teal);margin-top:8px;display:none;}
 .settings-save-note.show{display:block;}
+.settings-save-note.error{color:var(--rust);}
 
 .admin-subnav{display:flex;flex-wrap:wrap;gap:4px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:4px;margin-bottom:20px;}
 .admin-subnav button{flex:1;min-width:130px;background:transparent;border:none;padding:9px 10px;border-radius:6px;font-family:'Fredoka',sans-serif;font-size:12.5px;letter-spacing:0.02em;color:var(--steel);white-space:nowrap;}

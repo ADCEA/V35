@@ -36,9 +36,24 @@ async function api(method, url, body) {
     const err = new Error((data && data.error) || `Erreur ${res.status}`);
     err.status = res.status;
     err.data = data;
+    // Session administrateur arrivée à échéance (inactivité, durée maximale, mot de passe changé ailleurs) :
+    // retour à l'écran de connexion plutôt qu'une série d'erreurs.
+    if (res.status === 401 && data && data.code === 'ADMIN_EXPIRED') onAdminExpired(err.message);
     throw err;
   }
   return data;
+}
+
+let adminExpiredBusy = false;
+async function onAdminExpired(message) {
+  if (adminExpiredBusy) return;
+  adminExpiredBusy = true;
+  try {
+    adminUnlocked = false;
+    document.querySelectorAll('.bl-modal-back').forEach(x => x.remove());   // fenêtres de la Facturation encore ouvertes
+    if (typeof renderAdminGate === 'function') { await renderAdminGate(); showAuthError('err-admin', message); }
+  } catch (_) { /* l'écran de connexion se rouvrira au prochain affichage de l'onglet */ }
+  finally { adminExpiredBusy = false; }
 }
 
 // ---------- catalogue ----------
@@ -1335,6 +1350,24 @@ document.getElementById('btn-save-depot').addEventListener('click', async () => 
     note.textContent = err.message;
     note.classList.add('show');
   }
+});
+document.getElementById('admin-pwd-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const note = document.getElementById('admin-pwd-note');
+  const show = (msg, bad) => { note.classList.toggle('error', Boolean(bad)); note.style.color = ''; note.textContent = msg; note.classList.add('show'); };
+  const current = document.getElementById('settings-pwd-current').value;
+  const next = document.getElementById('settings-pwd-new').value;
+  const next2 = document.getElementById('settings-pwd-new2').value;
+  if (next !== next2) { show('Les deux nouveaux mots de passe ne correspondent pas.', true); return; }
+  if (next.length < 10) { show('Le nouveau mot de passe doit contenir au moins 10 caractères.', true); return; }
+  const btn = document.getElementById('btn-change-admin-pwd'); btn.disabled = true;
+  try {
+    await api('POST', '/api/admin/password', { current, next });
+    ['settings-pwd-current', 'settings-pwd-new', 'settings-pwd-new2'].forEach(id => { document.getElementById(id).value = ''; });
+    show('Mot de passe modifié ✓ — les autres appareils sont déconnectés.');
+  } catch (err) {
+    show(err.message, true);
+  } finally { btn.disabled = false; }
 });
 document.getElementById('btn-save-settings').addEventListener('click', async () => {
   const deliveryEmail = document.getElementById('settings-email').value.trim();

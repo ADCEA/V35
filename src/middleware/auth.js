@@ -1,4 +1,5 @@
 const db = require('../db');
+const security = require('./security');
 
 function requireClient(req, res, next) {
   if (!req.session.clientId) {
@@ -10,6 +11,10 @@ function requireClient(req, res, next) {
 function requireAdmin(req, res, next) {
   if (!req.session.isAdmin) {
     return res.status(401).json({ error: "Accès administration non autorisé." });
+  }
+  // Session expirée (inactivité, durée maximale) ou mot de passe changé depuis : reconnexion demandée.
+  if (!security.adminActive(req.session, Date.now(), { touch: true })) {
+    return res.status(401).json({ error: 'Session administrateur expirée. Reconnectez-vous.', code: 'ADMIN_EXPIRED' });
   }
   next();
 }

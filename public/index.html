@@ -561,6 +561,21 @@
             </div>
             <div class="settings-save-note" id="grouping-strategy-save-note"></div>
           </div>
+
+          <div class="card settings-card">
+            <h4>Sécurité — Mot de passe administrateur</h4>
+            <p>Au moins 10 caractères. Une fois changé, tous les autres appareils connectés à l'administration sont déconnectés. Sans activité pendant 12 heures, ou après 7 jours, il faut se reconnecter.</p>
+            <form id="admin-pwd-form" autocomplete="off" onsubmit="return false;">
+              <input type="text" name="username" autocomplete="username" value="administrateur" hidden readonly tabindex="-1" aria-hidden="true">
+              <div class="settings-row">
+                <div class="field"><label for="settings-pwd-current">Mot de passe actuel</label><input type="password" id="settings-pwd-current" autocomplete="current-password"></div>
+                <div class="field"><label for="settings-pwd-new">Nouveau mot de passe</label><input type="password" id="settings-pwd-new" autocomplete="new-password"></div>
+                <div class="field"><label for="settings-pwd-new2">Nouveau mot de passe, une 2ᵉ fois</label><input type="password" id="settings-pwd-new2" autocomplete="new-password"></div>
+                <button class="btn-secondary" id="btn-change-admin-pwd" type="submit">Changer le mot de passe</button>
+              </div>
+            </form>
+            <div class="settings-save-note" id="admin-pwd-note" role="status"></div>
+          </div>
         </div>
 
         <div id="admin-view-historique" style="display:none;">

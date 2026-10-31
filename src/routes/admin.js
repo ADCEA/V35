@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const db = require('../db');
 const { requireAdmin } = require('../middleware/auth');
+const security = require('../middleware/security');
 const { buildDeliveryNoteText, buildDeliveryNoteHtml } = require('../utils/deliveryNote');
 const { buildDeliveryNotePdf, buildInvoiceAnnexPdf, buildInvoiceSummaryPdf } = require('../utils/pdf');
 const { sendMail, isConfigured } = require('../utils/mailer');
@@ -32,11 +33,19 @@ function getAdminRow() {
   return db.prepare('SELECT * FROM admin WHERE id = 1').get();
 }
 
-// GET /api/admin/status — l'admin existe-t-il déjà ? la session en cours est-elle déverrouillée ?
 router.get('/status', (req, res) => {
   const admin = getAdminRow();
-  res.json({ exists: Boolean(admin), unlocked: Boolean(req.session.isAdmin) });
+  res.json({ exists: Boolean(admin), unlocked: security.adminActive(req.session) });
 });
+
+// Ouvre la session administrateur sur un NOUVEL identifiant de session (contre le vol d'une session préparée à l'avance).
+function startAdminSession(req, res, status = 200) {
+  req.session.regenerate((err) => {
+    if (err) { console.error(err); return res.status(500).json({ error: 'Erreur serveur.' }); }
+    security.openAdminSession(req.session);
+    res.status(status).json({ ok: true });
+  });
+}
 
 // POST /api/admin/setup — définit le mot de passe la toute première fois
 router.post('/setup', (req, res) => {
@@ -49,31 +58,66 @@ router.post('/setup', (req, res) => {
   }
   const hash = bcrypt.hashSync(password, 10);
   db.prepare('INSERT INTO admin (id, password_hash, delivery_email) VALUES (1, ?, NULL)').run(hash);
-  req.session.isAdmin = true;
-  res.status(201).json({ ok: true });
+  startAdminSession(req, res, 201);
 });
 
-// POST /api/admin/login
-router.post('/login', (req, res) => {
+const minutesLabel = (sec) => { const m = Math.ceil(sec / 60); return m <= 1 ? '1 minute' : m < 120 ? `${m} minutes` : `${Math.ceil(m / 60)} heures`; };
+
+// POST /api/admin/login — au plus quelques essais par adresse : au-delà, blocage de plus en plus long (voir middleware/security.js)
+router.post('/login', async (req, res) => {
   const admin = getAdminRow();
   if (!admin) return res.status(409).json({ error: "Aucun mot de passe défini. Passez d'abord par la configuration." });
-  const { password } = req.body || {};
-  if (!password || !bcrypt.compareSync(password, admin.password_hash)) {
-    return res.status(401).json({ error: 'Mot de passe incorrect.' });
+  const ip = req.ip, key = security.loginKey(req);
+  const gate = security.loginCheck(key);
+  if (gate.blocked) {
+    return res.set('Retry-After', String(gate.retryAfterSec)).status(429)
+      .json({ error: `Trop de tentatives. Réessayez dans ${minutesLabel(gate.retryAfterSec)}.`, code: 'TOO_MANY_ATTEMPTS', retryAfterSec: gate.retryAfterSec });
   }
-  req.session.isAdmin = true;
-  res.json({ ok: true });
+  const { password } = req.body || {};
+  if (typeof password !== 'string' || !password || !bcrypt.compareSync(password, admin.password_hash)) {
+    const f = security.loginFail(key);
+    console.warn(`[sécurité] échec de connexion administrateur depuis ${ip} (${key.startsWith('dev:') ? 'navigateur connu' : 'adresse'})`);
+    const delay = security.extraDelayMs(); if (delay) await new Promise(r => setTimeout(r, delay));
+    if (f.blocked) {
+      return res.set('Retry-After', String(f.retryAfterSec)).status(429)
+        .json({ error: `Trop de tentatives. Réessayez dans ${minutesLabel(f.retryAfterSec)}.`, code: 'TOO_MANY_ATTEMPTS', retryAfterSec: f.retryAfterSec });
+    }
+    return res.status(401).json({ error: `Mot de passe incorrect.${f.attemptsLeft <= 2 ? ` ${f.attemptsLeft} essai${f.attemptsLeft > 1 ? 's' : ''} avant blocage temporaire.` : ''}` });
+  }
+  security.loginSuccess(key);
+  startAdminSession(req, res);
 });
 
 // POST /api/admin/logout
 router.post('/logout', (req, res) => {
-  delete req.session.isAdmin;
-  delete req.session.billing; // le déverrouillage de la Facturation ne survit pas à la déconnexion
+  security.closeAdminSession(req.session);
   res.json({ ok: true });
 });
 
 // Tout ce qui suit nécessite une session admin déverrouillée
 router.use(requireAdmin);
+
+// POST /api/admin/password — change le mot de passe administrateur. Demande l'ancien (même si la session est ouverte) ;
+// tous les AUTRES appareils connectés sont déconnectés immédiatement (l'empreinte du mot de passe est vérifiée à chaque requête).
+router.post('/password', (req, res) => {
+  const admin = getAdminRow();
+  const { current, next } = req.body || {};
+  const key = security.loginKey(req);
+  const gate = security.loginCheck(key);
+  if (gate.blocked) return res.set('Retry-After', String(gate.retryAfterSec)).status(429).json({ error: `Trop de tentatives. Réessayez dans ${minutesLabel(gate.retryAfterSec)}.`, code: 'TOO_MANY_ATTEMPTS' });
+  if (typeof current !== 'string' || !bcrypt.compareSync(current, admin.password_hash)) {
+    const f = security.loginFail(key);
+    return res.status(f.blocked ? 429 : 401).json({ error: f.blocked ? `Trop de tentatives. Réessayez dans ${minutesLabel(f.retryAfterSec)}.` : 'Mot de passe actuel incorrect.' });
+  }
+  if (typeof next !== 'string' || next.length < 10) return res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 10 caractères.' });
+  if (next === current) return res.status(400).json({ error: "Le nouveau mot de passe doit être différent de l'actuel." });
+  security.loginSuccess(key);
+  db.prepare('UPDATE admin SET password_hash = ? WHERE id = 1').run(bcrypt.hashSync(next, 10));
+  // Cette session reste ouverte avec la nouvelle empreinte ; toutes les autres sont refusées à leur prochaine requête.
+  req.session.adminPw = security.pwFingerprint(getAdminRow().password_hash);
+  console.warn('[sécurité] mot de passe administrateur modifié.');
+  res.json({ ok: true });
+});
 
 // GET /api/admin/clients — liste des hôtels pour les sélecteurs de la production (nouvelle commande,
 // commandes automatiques…). Volontairement limitée aux coordonnées d'exploitation : SIRET, TVA,

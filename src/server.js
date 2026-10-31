@@ -5,6 +5,7 @@ const express = require('express');
 const session = require('express-session');
 const SqliteSessionStore = require('better-sqlite3-session-store')(session);
 const db = require('./db');
+const security = require('./middleware/security');
 
 const { getServicesForClient, CATEGORIES } = require('./services');
 const clientsRouter = require('./routes/clients');
@@ -33,7 +34,13 @@ if (!process.env.SESSION_SECRET) {
   );
 }
 
+// Derrière le relais de Render : adresse réelle du visiteur (limite d'essais de connexion) et connexion sécurisée (cookie « Secure »).
+// TRUST_PROXY=0 pour un lancement sans relais, ou le nombre de relais si l'hébergement en place plusieurs.
+app.set('trust proxy', process.env.TRUST_PROXY === undefined ? 1 : (Number.isNaN(Number(process.env.TRUST_PROXY)) ? process.env.TRUST_PROXY : Number(process.env.TRUST_PROXY)));
+app.disable('x-powered-by');
+app.use(security.securityHeaders);
 app.use(express.json());
+app.use('/api/admin', security.sameOriginOnly);
 app.use(session({
   name: 'cezanne.sid',
   // Store SQLite persistant — SANS ça, express-session utilise par
@@ -52,6 +59,7 @@ app.use(session({
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
+    secure: 'auto',   // « Secure » dès que la connexion est en https
     maxAge: 1000 * 60 * 60 * 24 * 30, // 30 jours
   },
 }));

@@ -236,9 +236,9 @@ de plateforme.
 
 En production, quel que soit l'hébergeur, pensez à :
 - définir un `SESSION_SECRET` long et aléatoire, différent de celui utilisé en local ;
-- si vous êtes derrière un reverse proxy, ajouter `app.set('trust proxy', 1)`
-  ainsi que `cookie: { secure: true }` dans `src/server.js` pour que les
-  cookies de session fonctionnent correctement en HTTPS.
+- derrière un reverse proxy : c'est déjà géré dans `src/server.js` (`trust proxy` à 1 par défaut,
+  cookie « Secure » automatique dès que la connexion est en HTTPS). Si l'hébergeur place plusieurs relais devant
+  l'application, régler `TRUST_PROXY` (nombre de relais) ; `TRUST_PROXY=0` pour un lancement sans relais.
 
 ## Espace client
 
@@ -651,6 +651,31 @@ Tous les PDF du site partagent une même charte, définie dans `src/utils/pdfKit
 - **changer la mise en page ne change aucune facture émise** : l'empreinte d'intégrité porte sur les données figées, pas sur le fichier ; un PDF régénéré a le même contenu avec la mise en page du moment ;
 - `npm run pdf:samples [dossier]` génère un exemplaire de chaque modèle avec des données fictives (base jetable) pour juger un changement de mise en page ; `test/pdf.test.js` vérifie que chaque modèle se génère avec le bon nombre de pages.
 
+### Protection de l'espace administration
+
+Le mot de passe administrateur ouvre toute la production ; il est maintenant protégé comme suit (`src/middleware/security.js`) :
+
+- **essais limités** : 5 erreurs en 15 minutes → connexion bloquée 15 minutes pour cette adresse, durée doublée à chaque récidive
+  (24 h au plus). Pendant le blocage, même le bon mot de passe est refusé. Le compteur est en mémoire : un redémarrage le remet à zéro.
+  Un navigateur qui a déjà ouvert l'administration avec succès a **son propre compteur** : un inconnu qui rate 5 fois derrière la même
+  adresse (relais d'hébergement) n'enferme donc pas le propriétaire dehors. Si le site est attaqué depuis beaucoup d'adresses à la fois
+  (plus de 30 échecs en une heure), chaque échec est en plus ralenti de 1,5 s — jamais de blocage général ;
+- **la session administrateur expire** : après **12 h sans activité** (`ADMIN_IDLE_MINUTES`) ou **7 jours** après la connexion
+  (`ADMIN_MAX_HOURS`), alors qu'elle durait 30 jours sans condition. L'écran revient alors à la saisie du mot de passe avec un message.
+  Se déconnecter referme aussi le déverrouillage de la Facturation ;
+- **nouvel identifiant de session à chaque connexion** (une session préparée à l'avance par un tiers ne devient pas administratrice) ;
+- **changer le mot de passe** : Réglages → « Sécurité » (ancien mot de passe exigé, 10 caractères minimum). Tous les **autres** appareils
+  connectés sont déconnectés à leur prochaine action. La création initiale reste à 6 caractères minimum ;
+- **requêtes venues d'un autre site refusées** : toute requête de modification vers `/api/admin` dont l'en-tête `Origin` n'est pas ce site est rejetée (403) ;
+- **en-têtes de sécurité** : `X-Content-Type-Options`, `X-Frame-Options` / `frame-ancestors` (l'application ne s'affiche pas dans le cadre d'un autre site),
+  `Referrer-Policy`, HSTS en HTTPS ; cookie de session « Secure » en HTTPS ; en-tête `X-Powered-By` retiré ;
+- les échecs, blocages et changements de mot de passe sont écrits dans le journal du serveur (`[sécurité] …`).
+
+À savoir : au premier déploiement, la session administrateur en cours est refusée une fois (elle n'a pas d'horodatage) : il faut se
+reconnecter. **Mot de passe administrateur oublié** : pas de réinitialisation par l'écran (comme avant) ; elle se fait directement dans
+la base, sur l'hébergeur. Limite connue : un seul mot de passe, sans second facteur ; les codes
+d'accès des hôtels (4 à 8 chiffres) restent un point faible, à traiter à part.
+
 ### Verrou de la Facturation
 
 La session administrateur ouvre tout le logiciel et dure des jours ; la facturation
@@ -820,7 +845,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (274 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (287 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 
