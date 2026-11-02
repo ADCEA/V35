@@ -73,7 +73,7 @@ async function findOrCreateCustomer(cfg, client, opts) {
     ...opts,
     json: {
       name: client.societe, emails: client.email ? [client.email] : [], external_reference: ref,
-      billing_address: { address: addr, postal_code: client.code_postal || '', city: client.ville || '', country: 'FR' },
+      billing_address: { address: addr, postal_code: client.code_postal || '', city: client.ville || '', country: engine.swissUid(client.siret) ? 'CH' : 'FR' },
     },
   });
   if (!created || !created.id) throw new PennylaneError('Pennylane : création du client sans identifiant en réponse.');

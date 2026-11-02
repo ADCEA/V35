@@ -62,9 +62,13 @@ function parseDate(v, fallback, label = 'Date') {
 function billingIssues({ siret, adresse_facturation, adresse, clientType }) {
   const issues = [];
   if (clientType !== 'particulier') {   // un particulier n'a pas de SIREN/SIRET
-    const siren = engine.sirenFrom(siret);
-    if (siren.length !== 9) issues.push('SIREN/SIRET manquant');
-    else if (!engine.luhnOk(siren)) issues.push('SIREN/SIRET invalide');
+    const swiss = engine.parseSwissUid(siret);   // client suisse : n° IDE à la place du SIRET
+    if (swiss) { if (!swiss.valid) issues.push('N° IDE suisse invalide'); }
+    else {
+      const siren = engine.sirenFrom(siret);
+      if (siren.length !== 9) issues.push('SIREN/SIRET manquant');
+      else if (!engine.luhnOk(siren)) issues.push('SIREN/SIRET invalide');
+    }
   }
   // Un particulier n'a pas à donner d'adresse postale : sa facture se fait avec son nom seul.
   if (clientType !== 'particulier' && !(adresse_facturation || adresse)) issues.push('adresse de facturation manquante');
@@ -378,8 +382,12 @@ function cleanClientFields(body, existing) {
   }
   const clientType = has('clientType') ? b.clientType : (existing?.client_type || 'pro');
   if (!['pro', 'particulier'].includes(clientType)) throw new BillingError('Type de client invalide (professionnel ou particulier).');
-  let siret = has('siret') ? (String(b.siret || '').replace(/\s/g, '') || null) : (existing?.siret ?? null);
-  if (siret && !/^\d{14}$/.test(siret)) throw new BillingError('Le SIRET doit comporter exactement 14 chiffres.');
+  let siret = existing?.siret ?? null;
+  if (has('siret')) {   // SIRET français (14 chiffres) ou n° IDE suisse (CHE-123.456.789)
+    const reg = engine.cleanClientRegistry(b.siret);
+    if (reg.error) throw new BillingError(reg.error);
+    siret = reg.value;
+  }
   if (clientType === 'particulier') siret = null;   // un particulier n'a ni SIRET ni n° de TVA
   const level = has('invoiceDetailLevel') ? b.invoiceDetailLevel : (existing?.invoice_detail_level || 'detail');
   if (!['detail', 'per_bl', 'aggregated'].includes(level)) throw new BillingError('Niveau de détail de facture invalide.');

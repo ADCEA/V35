@@ -75,7 +75,10 @@ test('tarif négocié : un nouveau tarif clôt le précédent la veille, sans ch
   assert.equal(price(alpha, drap, '2026-11-01'), 1.1);
   const g = catalog.priceGrid(alpha).articles.find(a => a.id === drap);
   assert.equal(g.catalogPrice, 1.35);
-  assert.ok(g.negotiatedPrice === 1.2 || g.upcoming, 'selon la date du jour : en cours ou à venir');
+  // Ce que la grille montre dépend de la date du jour : avant le 1er novembre 2026 le tarif de 1,20 est en cours et celui de 1,10 à venir ;
+  // à partir du 1er novembre, le tarif de 1,10 est en vigueur.
+  if (engine.todayParis() >= '2026-11-01') assert.equal(g.negotiatedPrice, 1.1, 'le tarif du 1er novembre est entré en vigueur');
+  else assert.ok(g.negotiatedPrice === 1.2 || g.upcoming, 'selon la date du jour : en cours ou à venir');
 });
 
 test('tarif négocié : une date antérieure remplace ce qui commençait après', () => {

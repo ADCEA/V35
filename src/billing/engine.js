@@ -57,8 +57,41 @@ function sha256(text) {
 }
 
 function sirenFrom(siretOrSiren) {
+  // Un n° IDE suisse (CHE-123.456.789) n'est pas un SIREN : ses 9 chiffres ne doivent jamais être pris pour tel.
+  if (/^\s*CHE/i.test(String(siretOrSiren || ''))) return '';
   const digits = String(siretOrSiren || '').replace(/\D/g, '');
   return digits.length >= 9 ? digits.slice(0, 9) : '';
+}
+
+// Identifiant d'entreprise suisse (n° IDE, aussi appelé UID) : CHE-123.456.789, le 9e chiffre étant une clé de contrôle
+// (modulo 11, poids 5-4-3-2-7-6-5-4). Accepte les écritures courantes (CHE123456789, CHE-123.456.789 TVA/MWST/IVA).
+// Renvoie null si la valeur ne commence pas par « CHE » ; sinon { uid: forme normalisée, valid: clé correcte }.
+const SWISS_UID_RE = /^CHE[-.\s]?(\d{3})[-.\s]?(\d{3})[-.\s]?(\d{3})(?:\s*(?:TVA|MWST|IVA|VAT))?$/i;
+function parseSwissUid(value) {
+  const raw = String(value || '').trim();
+  if (!/^CHE/i.test(raw)) return null;
+  const m = SWISS_UID_RE.exec(raw);
+  if (!m) return { uid: '', valid: false };
+  const d = (m[1] + m[2] + m[3]).split('').map(Number);
+  const sum = [5, 4, 3, 2, 7, 6, 5, 4].reduce((acc, w, i) => acc + w * d[i], 0);
+  const check = 11 - (sum % 11);
+  const valid = check !== 10 && (check === 11 ? 0 : check) === d[8];
+  return { uid: `CHE-${m[1]}.${m[2]}.${m[3]}`, valid };
+}
+const swissUid = (value) => { const u = parseSwissUid(value); return u && u.valid ? u.uid : ''; };
+
+/**
+ * Identifiant d'entreprise d'une fiche client : SIRET français (14 chiffres) ou n° IDE suisse.
+ * Renvoie { value } (forme à enregistrer, null si vide) ou { error } (message à montrer).
+ */
+function cleanClientRegistry(raw) {
+  const v = String(raw ?? '').replace(/\s/g, '');
+  if (!v) return { value: null };
+  if (/^CHE/i.test(v)) {
+    const u = parseSwissUid(String(raw));
+    return u && u.valid ? { value: u.uid } : { error: 'N° IDE suisse invalide : format CHE-123.456.789, avec sa clé de contrôle.' };
+  }
+  return /^\d{14}$/.test(v) ? { value: v } : { error: 'Le SIRET doit comporter exactement 14 chiffres (client suisse : son n° IDE, CHE-123.456.789).' };
 }
 
 // Contrôle de Luhn : SIREN/SIRET valides.
@@ -468,18 +501,21 @@ const isParticulier = (client) => Boolean(client) && client.client_type === 'par
 function snapshotBuyer(client) {
   const billingAddress = client.adresse_facturation || client.adresse;
   const part = isParticulier(client);
+  const uid = part ? '' : swissUid(client.siret);
   return {
     clientId: client.id,
     // La clé « type » n'est écrite que pour un particulier : les documents d'un professionnel restent identiques à avant.
     ...(part ? { type: 'particulier' } : {}),
     name: client.societe,
-    siren: part ? '' : sirenFrom(client.siret),
-    siret: part ? '' : String(client.siret || '').replace(/\s/g, ''),
+    siren: part || uid ? '' : sirenFrom(client.siret),
+    siret: part || uid ? '' : String(client.siret || '').replace(/\s/g, ''),
+    // La clé « uid » (n° IDE suisse) n'est écrite que pour un client suisse : les documents des autres clients restent identiques à avant.
+    ...(uid ? { uid } : {}),
     vatNumber: part ? '' : (client.tva_number || ''),
     address: billingAddress,
     postalCode: client.code_postal || '',
     city: client.ville || '',
-    country: 'FR',
+    country: uid ? 'CH' : 'FR',
     // Adresse de livraison (nouvelle mention obligatoire si différente).
     deliveryAddress: client.adresse && client.adresse !== billingAddress ? client.adresse : null,
   };
@@ -522,7 +558,8 @@ function missingMentions(seller, buyer, inv, issueDate) {
   // L'adresse postale est facultative pour un particulier (facture au nom seul) ; elle reste exigée d'un professionnel.
   if (buyer.type !== 'particulier') need(buyer.address, "Client : adresse de facturation manquante.");
   // Le SIREN du client devient obligatoire sur les factures B2B émises depuis le 1er septembre 2026 ; un particulier n'en a pas.
-  if (buyer.type !== 'particulier') {
+  // Un client suisse est identifié par son n° IDE (vérifié à la saisie de la fiche), pas par un SIREN.
+  if (buyer.type !== 'particulier' && !buyer.uid) {
     need(buyer.siren.length === 9, `Client « ${buyer.name} » : SIREN/SIRET manquant (fiche client) — obligatoire sur les factures depuis le 1er septembre 2026.`);
     if (buyer.siren.length === 9) need(luhnOk(buyer.siren), `Client « ${buyer.name} » : SIREN/SIRET invalide (contrôle de clé).`);
   }
@@ -808,7 +845,7 @@ function previewDraft(invoiceId, issueDateOverride) {
 module.exports = {
   snapshotSeller, snapshotBuyer, snapshotTerms,
   previewDraft, logEvent, createDraftFromLines, estimateOrdersHtCents, sanitizeLines, isIsoDate, sha256,
-  BillingError, todayParis, addDays, lineCents, computeTotals, sirenFrom, luhnOk, isParticulier,
+  BillingError, todayParis, addDays, lineCents, computeTotals, sirenFrom, luhnOk, isParticulier, parseSwissUid, swissUid, cleanClientRegistry,
   getSettings, loadInvoice, listInvoiceableOrders,
   createDraftFromOrders, updateDraft, deleteDraft, createCreditNoteDraft, issueInvoice,
   recordPayment, paidCents, cashCents, discountSums, escompteStatus, creditedCents, balanceCents, paymentStatus, verifyIntegrity,

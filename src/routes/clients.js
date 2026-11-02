@@ -128,11 +128,10 @@ router.put('/me/billing', requireClient, (req, res) => {
   if ((tvaNumber || '').length > 40 || (adresseFacturation || '').length > 300 || (siret || '').length > 40) return res.status(400).json({ error: 'Une des informations est trop longue.' });
   const cur = db.prepare('SELECT client_type FROM clients WHERE id = ?').get(req.session.clientId);
   const particulier = cur && cur.client_type === 'particulier'; // un particulier n'a ni SIRET ni n° de TVA
-  if (!particulier && siret && !/^\d{14}$/.test(siret.replace(/\s/g, ''))) {
-    return res.status(400).json({ error: 'Le SIRET doit comporter exactement 14 chiffres.' });
-  }
+  const reg = particulier ? { value: null } : require('../billing/engine').cleanClientRegistry(siret);   // SIRET français ou n° IDE suisse
+  if (reg.error) return res.status(400).json({ error: reg.error });
   db.prepare('UPDATE clients SET siret = ?, tva_number = ?, adresse_facturation = ? WHERE id = ?')
-    .run(!particulier && siret ? siret.replace(/\s/g, '') : null, !particulier && tvaNumber ? tvaNumber : null, adresseFacturation || null, req.session.clientId);
+    .run(reg.value, !particulier && tvaNumber ? tvaNumber : null, adresseFacturation || null, req.session.clientId);
   const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(req.session.clientId);
   res.json({ client: publicClient(client) });
 });

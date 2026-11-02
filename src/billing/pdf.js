@@ -53,6 +53,8 @@ async function buildInvoicePdf(inv, preview = null, extra = {}) {
   const buyerLines = [
     buyer.address,
     [buyer.postalCode, buyer.city].filter(Boolean).join(' '),
+    buyer.country === 'CH' ? 'Suisse' : '',
+    buyer.uid ? `N° IDE ${buyer.uid}` : '',
     buyer.siren ? `SIREN ${buyer.siren}` : '',
     buyer.vatNumber ? `TVA ${buyer.vatNumber}` : '',
   ];

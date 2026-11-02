@@ -499,6 +499,19 @@ dans la fiche, section « Facturation » ; colonne facultative `type` à l'impor
   n'est pas placée dans les tournées (elle apparaît parmi les adresses non localisées).
 - Les factures déjà émises ne changent jamais : changer le type d'une fiche n'a d'effet que sur les documents suivants.
 
+### Clients suisses (n° IDE à la place du SIRET)
+
+Dans le champ « SIRET » de la fiche (et de l'espace client), une entreprise suisse saisit son **n° IDE** (aussi appelé UID) : `CHE-123.456.789`.
+Les écritures courantes sont acceptées (`CHE123456789`, `che 123 456 789`, suffixe `TVA` / `MWST` / `IVA`) et enregistrées sous la forme
+`CHE-123.456.789`. Sa **clé de contrôle** (9e chiffre, modulo 11) est vérifiée : un numéro faux est refusé à la saisie.
+
+- La fiche n'est plus « à compléter » pour un SIRET, et l'émission d'une facture n'exige pas de SIREN : ses 9 chiffres ne sont jamais pris
+  pour un SIREN français. Un professionnel sans aucun identifiant reste refusé.
+- La facture figée porte `buyer.uid` et `buyer.country = "CH"` (clés écrites seulement pour un client suisse : les documents des autres clients
+  restent identiques) ; le PDF ajoute « Suisse » et « N° IDE CHE-… » sous l'adresse, sans ligne SIREN. Pennylane reçoit le pays `CH`.
+- **Rien d'autre ne change pour l'étranger** : la TVA reste calculée comme pour un client français (20 %) et l'indemnité de 40 € reste mentionnée.
+  Le traitement de la TVA d'un client suisse est à valider avec l'expert-comptable.
+
 ### Export FEC sur une période
 
 Facturation → Contrôle et FEC : choisir *Année en cours*, *Année précédente*, *Mois en cours*, *Mois dernier* ou *Dates au choix*
@@ -902,7 +915,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (319 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (324 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 
