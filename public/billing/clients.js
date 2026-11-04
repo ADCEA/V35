@@ -156,6 +156,7 @@
         <div class="bl-panel"><div class="bl-panel-h"><h3>Coordonnées</h3></div><div class="bl-panel-b">
           <div class="bl-row2"><div class="bl-field"><label for="i-s">Nom</label><input id="i-s" value="${v('societe')}"></div><div class="bl-field"><label for="i-c">Contact</label><input id="i-c" value="${v('contact')}"></div></div>
           <div class="bl-row2"><div class="bl-field"><label for="i-t">Téléphone</label><input id="i-t" inputmode="tel" value="${v('tel')}"></div><div class="bl-field"><label for="i-m">E-mail</label><input id="i-m" type="email" value="${v('email')}"><div class="bl-hint" id="i-m-hint">Sert aussi à l'envoi des factures et à l'accès à l'espace client.</div></div></div>
+          <div class="bl-field"><label for="i-m2">2e destinataire (facultatif)</label><input id="i-m2" type="email" value="${v('email2')}" placeholder="comptabilite@hotel.fr"><div class="bl-hint">Une adresse de plus, proposée avec la première à l'envoi des factures, devis, bons de livraison et relances. Elle ne donne pas accès à l'espace client.</div></div>
           <div class="bl-field"><label for="i-a">Adresse</label><input id="i-a" value="${v('adresse')}"><div class="bl-hint" id="i-a-hint"></div></div>
           <div class="bl-row2"><div class="bl-field"><label for="i-p">Code postal</label><input id="i-p" inputmode="numeric" value="${v('codePostal')}"><div class="bl-hint">Indispensable pour localiser l'hôtel dans les tournées.</div></div><div class="bl-field"><label for="i-v">Ville</label><input id="i-v" value="${v('ville')}"></div></div>
         </div></div>
@@ -188,7 +189,7 @@
         const btn = ev.currentTarget; const errEl = box.querySelector('#i-err'); errEl.textContent = ''; btn.disabled = true;
         const q = (s) => box.querySelector(s).value;
         try {
-          await Bill.put('/catalog/clients/' + id, { societe: q('#i-s'), contact: q('#i-c'), tel: q('#i-t'), email: q('#i-m'), adresse: q('#i-a'), codePostal: q('#i-p'), ville: q('#i-v'),
+          await Bill.put('/catalog/clients/' + id, { societe: q('#i-s'), contact: q('#i-c'), tel: q('#i-t'), email: q('#i-m'), email2: q('#i-m2'), adresse: q('#i-a'), codePostal: q('#i-p'), ville: q('#i-v'),
             siret: q('#i-siret'), tvaNumber: q('#i-tva'), adresseFacturation: q('#i-af'), invoiceDetailLevel: q('#i-lv'), escompte: q('#i-esc'), clientType: q('#i-ty') });
           changed = true; Bill.toast('Informations enregistrées'); await refresh();
         } catch (err) { btn.disabled = false; Bill.fail(err, errEl); }

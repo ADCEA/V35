@@ -28,6 +28,11 @@ function parseRecipients(raw) {
   return list;
 }
 
+/** Adresses proposées à l'envoi pour un client : e-mail de la fiche + 2e destinataire, séparés par une virgule. */
+function clientRecipients(client) {
+  return [client && client.email, client && client.email2].filter(Boolean).join(', ');
+}
+
 function signature(settings) {
   return ['Cordialement,', settings.legal_name || 'Blanchisserie Cézanne', [settings.phone, settings.email].filter(Boolean).join(' — ')].filter(Boolean).join('\n');
 }
@@ -228,7 +233,7 @@ function suggestLevel(d, today = engine.todayParis()) {
 /** Factures échues avec le niveau de relance conseillé (null = rien à faire pour l'instant). */
 function remindersOverview(today = engine.todayParis()) {
   const { invoices } = queries.listInvoices({ tab: 'overdue', sort: 'due', dir: 'asc', limit: 500 }, today);
-  const emails = new Map(db.prepare('SELECT id, email FROM clients').all().map(c => [c.id, c.email]));
+  const emails = new Map(db.prepare('SELECT id, email, email2 FROM clients').all().map(c => [c.id, clientRecipients(c)]));
   return invoices.map(d => ({
     ...d, email: emails.get(d.clientId) || '',
     suggestedLevel: suggestLevel(d, today),
@@ -236,4 +241,4 @@ function remindersOverview(today = engine.todayParis()) {
   }));
 }
 
-module.exports = { render, renderQuote, renderDeliveryNote, loadDeliveryNote, sendDeliveryNote, outlookState, sendInvoice, sendReminder, sendQuote, remindersOverview, suggestLevel, parseRecipients };
+module.exports = { render, renderQuote, renderDeliveryNote, loadDeliveryNote, sendDeliveryNote, outlookState, sendInvoice, sendReminder, sendQuote, remindersOverview, suggestLevel, parseRecipients, clientRecipients };

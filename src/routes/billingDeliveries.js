@@ -69,8 +69,8 @@ router.put('/deliveries/:id/quantities', wrap((req, res) => {
 // Envoi d'un bon par Outlook, PDF joint : même fenêtre d'envoi que les factures (destinataire = e-mail de l'hôtel).
 router.get('/deliveries/:id/mail-preview', wrap((req, res) => {
   const d = deliveries.getDelivery(parseInt(req.params.id, 10));
-  const client = d.client.id ? db.prepare('SELECT email FROM clients WHERE id = ?').get(d.client.id) : null;
-  res.json({ ...mail.renderDeliveryNote(d.order), to: (client && client.email) || '', smtp: false, outlook: mail.outlookState() });
+  const client = d.client.id ? db.prepare('SELECT email, email2 FROM clients WHERE id = ?').get(d.client.id) : null;
+  res.json({ ...mail.renderDeliveryNote(d.order), to: mail.clientRecipients(client), smtp: false, outlook: mail.outlookState() });
 }));
 
 router.post('/deliveries/:id/send', wrap(async (req, res) => {

@@ -499,6 +499,17 @@ dans la fiche, section « Facturation » ; colonne facultative `type` à l'impor
   n'est pas placée dans les tournées (elle apparaît parmi les adresses non localisées).
 - Les factures déjà émises ne changent jamais : changer le type d'une fiche n'a d'effet que sur les documents suivants.
 
+### 2e destinataire des envois
+
+La fiche client porte un seul **e-mail** : c'est l'identifiant de connexion à l'espace client, il est unique et ne peut contenir qu'une adresse.
+Un champ facultatif **« 2e destinataire »** permet d'ajouter une adresse de plus (comptabilité, direction…) :
+
+- elle est proposée avec la première dans la fenêtre d'envoi des factures, devis, bons de livraison et relances (« adresse1, adresse2 »),
+  que l'on peut toujours modifier avant d'envoyer (jusqu'à 5 destinataires par envoi) ;
+- elle ne donne **pas** accès à l'espace client et peut être la même pour plusieurs fiches ;
+- une seule adresse valide, différente de l'e-mail principal, et seulement si l'e-mail principal est renseigné ;
+- Pennylane et Odoo ne reçoivent que l'e-mail principal ; l'import CSV ne gère pas ce champ.
+
 ### Clients suisses (n° IDE à la place du SIRET)
 
 Dans le champ « SIRET » de la fiche (et de l'espace client), une entreprise suisse saisit son **n° IDE** (aussi appelé UID) : `CHE-123.456.789`.
@@ -915,7 +926,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (324 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (327 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

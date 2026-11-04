@@ -132,9 +132,9 @@ router.get('/invoices/:id', wrap((req, res) => {
   const inv = engine.loadInvoice(Number(req.params.id));
   if (!inv) throw new engine.BillingError('Facture introuvable.', 404);
   const out = present(inv);
-  const client = db.prepare('SELECT societe, email FROM clients WHERE id = ?').get(inv.client_id);
+  const client = db.prepare('SELECT societe, email, email2 FROM clients WHERE id = ?').get(inv.client_id);
   out.buyerName = out.buyerName || client?.societe || '—';
-  out.clientEmail = client?.email || '';
+  out.clientEmail = mail.clientRecipients(client);
   if (inv.status === 'draft') out.preview = engine.previewDraft(inv.id);
   if (inv.status === 'issued' && inv.kind === 'invoice') {
     out.payments = db.prepare('SELECT id, paid_on AS paidOn, amount_cents AS amountCents, method, reference FROM native_payments WHERE invoice_id = ? ORDER BY paid_on, id').all(inv.id);
@@ -220,8 +220,8 @@ router.get('/invoices/:id/mail-preview', wrap((req, res) => {
   if (!inv) throw new engine.BillingError('Facture introuvable.', 404);
   if (inv.status !== 'issued') throw new engine.BillingError("Seul un document émis peut être envoyé.");
   const kind = ['invoice', 'reminder-1', 'reminder-2', 'reminder-3'].includes(req.query.kind) ? req.query.kind : 'invoice';
-  const client = db.prepare('SELECT societe, email FROM clients WHERE id = ?').get(inv.client_id);
-  res.json({ ...mail.render(kind, inv, client?.societe), to: client?.email || '', smtp: require('../utils/mailer').isConfigured(), outlook: outlookState() });
+  const client = db.prepare('SELECT societe, email, email2 FROM clients WHERE id = ?').get(inv.client_id);
+  res.json({ ...mail.render(kind, inv, client?.societe), to: mail.clientRecipients(client), smtp: require('../utils/mailer').isConfigured(), outlook: outlookState() });
 }));
 
 router.post('/invoices/:id/send', wrap(async (req, res) => {

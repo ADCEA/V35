@@ -333,7 +333,7 @@ function importArticles(csvText, { apply = false } = {}) {
 function listClients() {
   const today = todayParis();
   const rows = db.prepare(`
-    SELECT c.id, c.societe, c.contact, c.tel, c.email, c.adresse, c.code_postal AS codePostal, c.ville, c.siret,
+    SELECT c.id, c.societe, c.contact, c.tel, c.email, c.email2, c.adresse, c.code_postal AS codePostal, c.ville, c.siret,
            c.tva_number AS tvaNumber, c.adresse_facturation AS adresseFacturation, c.invoice_detail_level AS invoiceDetailLevel, c.escompte,
            c.client_type AS clientType, c.created_at AS createdAt,
            (SELECT COUNT(*) FROM client_prices cp WHERE cp.client_id = c.id AND cp.date_debut <= @t AND (cp.date_fin IS NULL OR cp.date_fin >= @t)) AS negotiatedCount,
@@ -353,7 +353,7 @@ function listClients() {
 
 function getClient(id) {
   const c = db.prepare(`
-    SELECT id, societe, contact, tel, email, adresse, code_postal AS codePostal, ville, siret, tva_number AS tvaNumber,
+    SELECT id, societe, contact, tel, email, email2, adresse, code_postal AS codePostal, ville, siret, tva_number AS tvaNumber,
            adresse_facturation AS adresseFacturation, invoice_detail_level AS invoiceDetailLevel, escompte, client_type AS clientType, created_at AS createdAt,
            webhook_url AS webhookUrl, webhook_secret AS webhookSecret
     FROM clients WHERE id = ?
@@ -380,6 +380,13 @@ function cleanClientFields(body, existing) {
     const taken = db.prepare('SELECT id FROM clients WHERE email = ? AND id != ?').get(email, existing?.id ?? 0);
     if (taken) throw new BillingError('Cet email est déjà utilisé par un autre compte.', 409);
   }
+  // 2e destinataire : une adresse de plus pour l'envoi des factures, devis, bons et relances (pas d'accès à l'espace client).
+  const email2 = has('email2') ? (String(b.email2 || '').trim().toLowerCase() || null) : (existing?.email2 ?? null);
+  if (email2) {
+    if (!EMAIL_RE.test(email2)) throw new BillingError('Adresse du 2e destinataire invalide (une seule adresse).');
+    if (!email) throw new BillingError("Renseignez d'abord l'e-mail principal avant d'ajouter un 2e destinataire.");
+    if (email2 === email) throw new BillingError("Le 2e destinataire est identique à l'e-mail principal.");
+  }
   const clientType = has('clientType') ? b.clientType : (existing?.client_type || 'pro');
   if (!['pro', 'particulier'].includes(clientType)) throw new BillingError('Type de client invalide (professionnel ou particulier).');
   let siret = existing?.siret ?? null;
@@ -395,7 +402,7 @@ function cleanClientFields(body, existing) {
   const esc = has('escompte') ? (b.escompte === '' || b.escompte === null ? null : b.escompte) : (existing?.escompte ?? null);
   if (esc !== null && !['on', 'off'].includes(esc)) throw new BillingError("Option d'escompte invalide.");
   return {
-    societe, email, siret, escompte: esc, clientType,
+    societe, email, email2, siret, escompte: esc, clientType,
     contact: str('contact', existing?.contact),
     tel: str('tel', existing?.tel),
     adresse: str('adresse', existing?.adresse),
@@ -420,22 +427,22 @@ function createClient(body) {
   let id;
   db.transaction(() => {
     id = db.prepare(`
-      INSERT INTO clients (email, societe, contact, tel, adresse, code_postal, ville, code_hash, siret, tva_number, adresse_facturation, invoice_detail_level, escompte, client_type)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(f.email, f.societe, f.contact, f.tel, f.adresse, f.codePostal, f.ville, hash, f.siret, f.tvaNumber, f.adresseFacturation, f.invoiceDetailLevel, f.escompte, f.clientType).lastInsertRowid;
+      INSERT INTO clients (email, email2, societe, contact, tel, adresse, code_postal, ville, code_hash, siret, tva_number, adresse_facturation, invoice_detail_level, escompte, client_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(f.email, f.email2, f.societe, f.contact, f.tel, f.adresse, f.codePostal, f.ville, hash, f.siret, f.tvaNumber, f.adresseFacturation, f.invoiceDetailLevel, f.escompte, f.clientType).lastInsertRowid;
     log('client_created', { clientId: Number(id), client: f.societe });
   })();
   return getClient(Number(id));
 }
 
-const CLIENT_FIELD_LABELS = { societe: 'nom', contact: 'contact', tel: 'téléphone', email: 'e-mail', adresse: 'adresse', codePostal: 'code postal', ville: 'ville', siret: 'SIRET', tvaNumber: 'n° TVA', adresseFacturation: 'adresse de facturation', invoiceDetailLevel: 'détail des factures', escompte: 'escompte', clientType: 'type de client' };
+const CLIENT_FIELD_LABELS = { societe: 'nom', contact: 'contact', tel: 'téléphone', email: 'e-mail', email2: '2e destinataire', adresse: 'adresse', codePostal: 'code postal', ville: 'ville', siret: 'SIRET', tvaNumber: 'n° TVA', adresseFacturation: 'adresse de facturation', invoiceDetailLevel: 'détail des factures', escompte: 'escompte', clientType: 'type de client' };
 
 function updateClient(id, body) {
   const existing = db.prepare('SELECT * FROM clients WHERE id = ?').get(id);
   if (!existing) throw new BillingError('Hôtel introuvable.', 404);
   const f = cleanClientFields(body, existing);
   const before = {
-    societe: existing.societe, contact: existing.contact ?? '', tel: existing.tel ?? '', email: existing.email, adresse: existing.adresse ?? '',
+    societe: existing.societe, contact: existing.contact ?? '', tel: existing.tel ?? '', email: existing.email, email2: existing.email2 ?? null, adresse: existing.adresse ?? '',
     codePostal: existing.code_postal, ville: existing.ville, siret: existing.siret, tvaNumber: existing.tva_number,
     adresseFacturation: existing.adresse_facturation, invoiceDetailLevel: existing.invoice_detail_level || 'detail', escompte: existing.escompte ?? null,
     clientType: existing.client_type || 'pro',
@@ -443,8 +450,8 @@ function updateClient(id, body) {
   const changed = Object.keys(CLIENT_FIELD_LABELS).filter(k => (f[k] ?? null) !== (before[k] ?? null));
   db.transaction(() => {
     db.prepare(`
-      UPDATE clients SET societe=?, contact=?, tel=?, adresse=?, code_postal=?, ville=?, email=?, siret=?, tva_number=?, adresse_facturation=?, invoice_detail_level=?, escompte=?, client_type=? WHERE id=?
-    `).run(f.societe, f.contact, f.tel, f.adresse, f.codePostal, f.ville, f.email, f.siret, f.tvaNumber, f.adresseFacturation, f.invoiceDetailLevel, f.escompte, f.clientType, id);
+      UPDATE clients SET societe=?, contact=?, tel=?, adresse=?, code_postal=?, ville=?, email=?, email2=?, siret=?, tva_number=?, adresse_facturation=?, invoice_detail_level=?, escompte=?, client_type=? WHERE id=?
+    `).run(f.societe, f.contact, f.tel, f.adresse, f.codePostal, f.ville, f.email, f.email2, f.siret, f.tvaNumber, f.adresseFacturation, f.invoiceDetailLevel, f.escompte, f.clientType, id);
     if (changed.length) log('client_updated', { clientId: id, client: f.societe, fields: changed.map(k => CLIENT_FIELD_LABELS[k]) });
   })();
   return getClient(id);

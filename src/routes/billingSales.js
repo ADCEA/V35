@@ -87,9 +87,9 @@ function quoteOut(id) {
   const q = quotes.loadQuote(id);
   if (!q) throw new engine.BillingError('Devis introuvable.', 404);
   const out = presentQuote(q);
-  const client = db.prepare('SELECT societe, email FROM clients WHERE id = ?').get(q.client_id);
+  const client = db.prepare('SELECT societe, email, email2 FROM clients WHERE id = ?').get(q.client_id);
   out.buyerName = out.buyerName || client?.societe || '—';
-  out.clientEmail = client?.email || '';
+  out.clientEmail = mail.clientRecipients(client);
   if (q.status === 'draft') out.preview = quotes.previewQuote(q.id);
   if (q.invoice_id) out.invoiceNumber = db.prepare('SELECT number FROM native_invoices WHERE id = ?').get(q.invoice_id)?.number || null;
   out.mails = db.prepare("SELECT sent_at AS sentAt, to_email AS toEmail, status, error FROM native_mail_log WHERE quote_id = ? ORDER BY id").all(q.id);
@@ -132,9 +132,9 @@ router.get('/quotes/:id/mail-preview', wrap((req, res) => {
   const q = quotes.loadQuote(Number(req.params.id));
   if (!q) throw new engine.BillingError('Devis introuvable.', 404);
   if (q.status === 'draft') throw new engine.BillingError('Finalisez le devis avant de l\'envoyer.');
-  const client = db.prepare('SELECT email FROM clients WHERE id = ?').get(q.client_id);
+  const client = db.prepare('SELECT email, email2 FROM clients WHERE id = ?').get(q.client_id);
   const ol = require('../billing/outlook').status();
-  res.json({ ...mail.renderQuote(q), to: client?.email || '', smtp: require('../utils/mailer').isConfigured(), outlook: { configured: ol.configured, connected: ol.connected, needsReconnect: ol.needsReconnect, account: ol.account && ol.account.email } });
+  res.json({ ...mail.renderQuote(q), to: mail.clientRecipients(client), smtp: require('../utils/mailer').isConfigured(), outlook: { configured: ol.configured, connected: ol.connected, needsReconnect: ol.needsReconnect, account: ol.account && ol.account.email } });
 }));
 
 router.post('/quotes/:id/send', wrap(async (req, res) => {

@@ -268,6 +268,12 @@ if (clientsColumns.length > 0 && !clientsColumns.includes('client_type')) {
   db.exec(`ALTER TABLE clients ADD COLUMN client_type TEXT NOT NULL DEFAULT 'pro' CHECK (client_type IN ('pro','particulier'));`);
 }
 
+// 2e destinataire des envois (factures, devis, bons, relances) : simple adresse en plus, sans lien avec la connexion à
+// l'espace client (qui reste sur clients.email, unique).
+if (clientsColumns.length > 0 && !clientsColumns.includes('email2')) {
+  db.exec(`ALTER TABLE clients ADD COLUMN email2 TEXT;`);
+}
+
 // L'email client devient facultatif (fiche créée avec le seul nom). SQLite
 // ne sait pas retirer un NOT NULL : on recrée la table à l'identique, sans
 // cette contrainte. Les clés étrangères sont désactivées le temps de
