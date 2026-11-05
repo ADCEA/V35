@@ -123,9 +123,9 @@ test('détail d’un BL', () => {
 
 test('exports : CSV Excel et ensemble de BL pour le PDF groupé', () => {
   const csv = deliveries.deliveriesCsv({ clientId: beta });
-  assert.ok(csv.startsWith('﻿bl;date_livraison;hotel;references;pieces;montant_ht;facturation;facture;paiement\r\n'));
-  assert.match(csv, /BL-B1;2026-10-15;Beta Resort;1;10;13,50;Facturé \(ancien circuit\);;\r\n/);
-  assert.match(csv, /BL-B2;2026-10-20;Beta Resort;1;5;10,00;À facturer;;\r\n/);
+  assert.ok(csv.startsWith('﻿bl;date_livraison;hotel;references;pieces;montant_ht;facturation;facture;paiement;format_facture\r\n'));
+  assert.match(csv, /BL-B1;2026-10-15;Beta Resort;1;10;13,50;Facturé \(ancien circuit\);;;\r\n/);
+  assert.match(csv, /BL-B2;2026-10-20;Beta Resort;1;5;10,00;À facturer;;;Détaillé \(article par article\)\r\n/);
   assert.ok(csv.indexOf('BL-B1') < csv.indexOf('BL-B2'), 'du plus ancien au plus récent');
 
   const set = deliveries.exportSet({ from: '2026-10-15', to: '2026-10-15' });

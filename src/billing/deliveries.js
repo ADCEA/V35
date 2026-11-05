@@ -30,12 +30,17 @@ function parseFilters(f = {}) {
   const payment = (Array.isArray(f.payment) ? f.payment : String(f.payment || '').split(',')).map(x => String(x).trim()).filter(Boolean);
   if (payment.some(x => !PAYMENTS.includes(x))) throw new BillingError('Statut de paiement invalide.');
   const q = String(f.q || '').trim().slice(0, 80);
-  return { from, to, clientId, status, payment: [...new Set(payment)], q };
+  // Sélection ligne par ligne (cases cochées) : liste d'identifiants de BL, qui remplace les autres filtres côté interface.
+  const ids = [...new Set((Array.isArray(f.ids) ? f.ids : String(f.ids || '').split(',')).map(x => String(x).trim()).filter(Boolean).map(Number))];
+  if (ids.some(n => !Number.isInteger(n) || n <= 0)) throw new BillingError('Sélection invalide.');
+  if (ids.length > MAX_EXPORT) throw new BillingError(`Trop de bons à la fois (${ids.length}). Maximum ${MAX_EXPORT} : cochez-en moins.`);
+  return { from, to, clientId, status, payment: [...new Set(payment)], q, ids };
 }
 
 /** Clause WHERE commune aux requêtes (BL livrés, filtrés par date, hôtel et recherche). */
-function where({ from, to, clientId, q }) {
+function where({ from, to, clientId, q, ids = [] }) {
   const sql = ["o.status = 'livree'"]; const args = [];
+  if (ids.length) { sql.push(`o.id IN (${ids.map(() => '?').join(',')})`); args.push(...ids); }
   if (from) { sql.push(`${DATE_SQL} >= ?`); args.push(from); }
   if (to) { sql.push(`${DATE_SQL} <= ?`); args.push(to); }
   if (clientId) { sql.push('o.client_id = ?'); args.push(clientId); }
@@ -49,7 +54,7 @@ function where({ from, to, clientId, q }) {
 
 /** Facture « active » de chaque BL : une facture annulée par un avoir total remet le BL à facturer. */
 const activeInvoiceSql = `
-  SELECT no.order_id AS orderId, ni.id AS invoiceId, ni.status AS invoiceStatus, ni.number AS number, ni.issue_date AS issueDate,
+  SELECT no.order_id AS orderId, ni.id AS invoiceId, ni.status AS invoiceStatus, ni.number AS number, ni.issue_date AS issueDate, ni.detail_level AS detailLevel,
          ni.due_date AS dueDate, ni.total_ttc_cents AS totalCents,
          COALESCE((SELECT SUM(p.amount_cents) FROM native_payments p WHERE p.invoice_id = ni.id), 0) AS paidCents,
          COALESCE((SELECT SUM(cn.total_ttc_cents) FROM native_invoices cn WHERE cn.credits_invoice_id = ni.id AND cn.kind = 'credit_note' AND cn.status = 'issued'), 0) AS creditedCents
@@ -70,8 +75,8 @@ function billingOf(orderId, invoices, legacy, today = engine.todayParis()) {
   const inv = invoices.get(orderId);
   if (inv) {
     return inv.invoiceStatus === 'issued'
-      ? { status: 'invoiced', invoiceId: inv.invoiceId, invoiceNumber: inv.number, invoiceDate: inv.issueDate, legacy: false, payment: paymentOf(inv, today), dueDate: inv.dueDate }
-      : { status: 'draft', invoiceId: inv.invoiceId, invoiceNumber: null, invoiceDate: null, legacy: false, payment: null, dueDate: null };
+      ? { status: 'invoiced', invoiceId: inv.invoiceId, invoiceNumber: inv.number, invoiceDate: inv.issueDate, legacy: false, payment: paymentOf(inv, today), dueDate: inv.dueDate, detailLevel: inv.detailLevel }
+      : { status: 'draft', invoiceId: inv.invoiceId, invoiceNumber: null, invoiceDate: null, legacy: false, payment: null, dueDate: null, detailLevel: inv.detailLevel };
   }
   // Facturé dans l'ancien circuit : le paiement n'y est pas suivi.
   if (legacy.has(orderId)) return { status: 'invoiced', invoiceId: null, invoiceNumber: null, invoiceDate: null, legacy: true, payment: null, dueDate: null };
@@ -103,7 +108,7 @@ function listDeliveries(filters) {
   const w = where(f);
   const rows = db.prepare(`
     SELECT o.id, o.ticket, o.client_id AS clientId, COALESCE(c.societe, o.societe) AS clientName, o.adresse,
-           ${DATE_SQL} AS date, o.created_at AS createdAt
+           ${DATE_SQL} AS date, o.created_at AS createdAt, c.invoice_detail_level AS clientDetailLevel
     FROM orders o LEFT JOIN clients c ON c.id = o.client_id
     WHERE ${w.sql}
     ORDER BY date DESC, o.id DESC
@@ -122,7 +127,13 @@ function listDeliveries(filters) {
 
   const { invoices, legacy } = loadBilling();
   const today = engine.todayParis();
-  const all = rows.map(r => ({ ...r, ...(amounts.get(r.id) || { refs: 0, pieces: 0, htCents: 0 }), billing: billingOf(r.id, invoices, legacy, today) }));
+  const all = rows.map(({ clientDetailLevel, ...r }) => {
+    const billing = billingOf(r.id, invoices, legacy, today);
+    // Format de la facture : celui de la facture (brouillon ou émise) quand le BL y figure, sinon celui de la fiche de l'hôtel
+    // (le format qui sera appliqué). Inconnu pour l'ancien circuit (Odoo), où la facture n'est plus dans ce logiciel.
+    const level = billing.legacy ? null : (billing.detailLevel || clientDetailLevel || 'detail');
+    return { ...r, ...(amounts.get(r.id) || { refs: 0, pieces: 0, htCents: 0 }), billing, invoiceFormat: level };
+  });
   const byStatus = (list) => (f.status ? list.filter(r => r.billing.status === f.status) : list);
   const byPayment = (list) => (f.payment.length ? list.filter(r => f.payment.includes(r.billing.payment)) : list);
   const kept = byPayment(byStatus(all));
@@ -175,6 +186,7 @@ function exportSet(filters) {
   return [...list.deliveries].reverse().map(d => ({ ...orderStmt.get(d.id), items: itemsStmt.all(d.id) }));
 }
 
+const LEVEL_LABEL = { detail: 'Détaillé (article par article)', per_bl: 'Une ligne par BL', aggregated: 'Regroupé (un article, toute la période)' };
 const STATUS_LABEL = { to_invoice: 'À facturer', draft: 'Dans un brouillon', invoiced: 'Facturé' };
 const PAYMENT_LABEL = { unpaid: 'À encaisser', overdue: 'En retard', partial: 'Partielle', paid: 'Payée' };
 const csvCell = (v) => { const s = String(v ?? ''); return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -183,14 +195,14 @@ const fr = (cents) => (cents / 100).toFixed(2).replace('.', ',');
 /** Liste des BL filtrés en CSV (« ; », virgule décimale, BOM : s'ouvre directement dans Excel). */
 function deliveriesCsv(filters) {
   const list = listDeliveries({ ...filters });
-  const head = ['bl', 'date_livraison', 'hotel', 'references', 'pieces', 'montant_ht', 'facturation', 'facture', 'paiement'];
+  const head = ['bl', 'date_livraison', 'hotel', 'references', 'pieces', 'montant_ht', 'facturation', 'facture', 'paiement', 'format_facture'];
   const lines = [head.join(';')];
   for (const d of [...list.deliveries].reverse()) {
     const b = d.billing;
     lines.push([d.ticket, d.date, d.clientName, d.refs, d.pieces, fr(d.htCents),
-      STATUS_LABEL[b.status] + (b.legacy ? ' (ancien circuit)' : ''), b.invoiceNumber || '', PAYMENT_LABEL[b.payment] || ''].map(csvCell).join(';'));
+      STATUS_LABEL[b.status] + (b.legacy ? ' (ancien circuit)' : ''), b.invoiceNumber || '', PAYMENT_LABEL[b.payment] || '', LEVEL_LABEL[d.invoiceFormat] || ''].map(csvCell).join(';'));
   }
   return '﻿' + lines.join('\r\n') + '\r\n';
 }
 
-module.exports = { listDeliveries, getDelivery, billingOfOrder, billedOrderIds, exportSet, deliveriesCsv, STATUSES, PAYMENTS, MAX_EXPORT, MAX_LIST };
+module.exports = { listDeliveries, getDelivery, billingOfOrder, billedOrderIds, exportSet, deliveriesCsv, LEVEL_LABEL, STATUSES, PAYMENTS, MAX_EXPORT, MAX_LIST };

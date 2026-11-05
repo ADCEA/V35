@@ -7,6 +7,9 @@
   const PAY = [['unpaid', 'À encaisser'], ['overdue', 'En retard'], ['partial', 'Partielles'], ['paid', 'Payés']];
   const S = { status: '', pay: new Set(), q: '', clientId: '', from: '', to: '', sort: 'date', dir: 'desc' };
   let R = null;   // dernière réponse du serveur
+  const picked = new Set();   // BL cochés (ligne par ligne)
+  // Format de la facture (niveau de détail) : celui de la facture quand le BL y figure, sinon celui de la fiche de l'hôtel.
+  const FORMATS = { detail: ['Détaillé', 'Une ligne par article et par bon de livraison'], per_bl: ['Par BL', 'Une ligne par bon de livraison'], aggregated: ['Regroupé', 'Une ligne par article sur toute la période'] };
 
   // ---------- périodes rapides ----------
   const iso = (d) => d.toISOString().slice(0, 10);
@@ -48,15 +51,24 @@
     return `<th class="sortable ${cls}" data-sort="${key}" ${on ? `aria-sort="${S.dir === 'asc' ? 'ascending' : 'descending'}"` : ''}>${label}${arrow}</th>`;
   };
 
+  function fmtTag(d) {
+    const f = FORMATS[d.invoiceFormat];
+    if (!f) return '<span class="bl-muted" title="Facturé dans l\'ancien circuit : format non suivi ici">—</span>';
+    const why = d.billing.status === 'to_invoice' ? ' — format de la fiche de l\'hôtel, appliqué à la prochaine facture' : '';
+    return `<span class="bl-fmt" title="${e(f[1] + why)}">${f[0]}</span>`;
+  }
+
   function rowHtml(d) {
-    return `<tr class="bl-row" tabindex="0" data-id="${d.id}">
+    return `<tr class="bl-row ${picked.has(d.id) ? 'picked' : ''}" tabindex="0" data-id="${d.id}">
+      <td class="bl-chk"><input type="checkbox" class="dl-pick" data-id="${d.id}" ${picked.has(d.id) ? 'checked' : ''} aria-label="Sélectionner le bon ${e(d.ticket)}"></td>
       <td class="bl-num"><b style="font-weight:600">${e(d.ticket)}</b></td>
       <td class="bl-num">${dFr(d.date)}</td>
       <td class="client">${e(d.clientName)}</td>
       <td class="bl-muted">${plural(d.refs, 'référence', 'références')} · ${plural(d.pieces, 'pièce', 'pièces')}</td>
       <td class="r bl-num">${eur(d.htCents)}</td>
       <td>${billingTag(d.billing)}</td>
-      <td>${payTag(d.billing) || '<span class="bl-muted">—</span>'}</td></tr>`;
+      <td>${payTag(d.billing) || '<span class="bl-muted">—</span>'}</td>
+      <td>${fmtTag(d)}</td></tr>`;
   }
 
   function summary() {
@@ -80,18 +92,22 @@
     main.querySelector('#dl-sum').innerHTML = summary();
     paintUnlinked(main);
 
+    // On n'exporte que ce qu'on voit : un BL coché qui sort de la liste (filtre, recherche) est décoché.
+    const shown = new Set(R.deliveries.map(d => d.id));
+    for (const id of [...picked]) if (!shown.has(id)) picked.delete(id);
     const pdf = main.querySelector('#dl-pdf'); const csv = main.querySelector('#dl-csv');
     pdf.disabled = !R.total || R.total > MAX_PDF; csv.disabled = !R.total;
     pdf.textContent = R.total ? `Télécharger ${plural(R.total, 'BL', 'BL')} (PDF)` : 'Télécharger les BL (PDF)';
     pdf.title = R.total > MAX_PDF ? `Un PDF contient ${MAX_PDF} BL au plus : resserrez la période ou choisissez un hôtel.` : 'Un seul PDF, un bon par page, du plus ancien au plus récent';
 
     if (!R.deliveries.length) {
+      paintBar(main, []);
       const filtered = S.q || S.clientId || S.from || S.to || S.status || S.pay.size;
       box.innerHTML = `<div class="bl-empty"><b>${filtered ? 'Aucun bon de livraison' : 'Aucune livraison pour le moment'}</b>${filtered ? 'Aucun BL ne correspond à ces filtres : élargissez la période, changez d\'hôtel ou de statut.' : 'Un bon de livraison apparaît ici dès qu\'une commande est marquée « Livrée ».'}</div>`;
       return;
     }
     const rows = [...R.deliveries].sort(SORTERS[S.sort]); if (S.dir === 'desc') rows.reverse();
-    box.innerHTML = `<div class="bl-tablewrap"><table class="bl-table"><thead><tr>${sortTh('ticket', 'Bon')}${sortTh('date', 'Livré le')}${sortTh('client', 'Hôtel')}<th>Contenu</th>${sortTh('amount', 'Montant HT', 'r')}<th>Facturation</th><th>Paiement</th></tr></thead>
+    box.innerHTML = `<div class="bl-tablewrap"><table class="bl-table"><thead><tr><th class="bl-chk"><input type="checkbox" id="dl-all" aria-label="Cocher tous les bons de la liste"></th>${sortTh('ticket', 'Bon')}${sortTh('date', 'Livré le')}${sortTh('client', 'Hôtel')}<th>Contenu</th>${sortTh('amount', 'Montant HT', 'r')}<th>Facturation</th><th>Paiement</th><th title="Niveau de détail de la facture">Format facture</th></tr></thead>
       <tbody>${rows.map(rowHtml).join('')}</tbody></table></div>
       ${R.truncated ? `<p class="bl-hint" style="padding:10px 14px">Les ${R.deliveries.length} plus récents sont affichés sur ${R.total}. Resserrez la période pour voir les autres.</p>` : ''}`;
     box.querySelectorAll('[data-sort]').forEach(th => th.onclick = () => {
@@ -99,8 +115,39 @@
     });
     box.querySelectorAll('tr.bl-row').forEach(tr => {
       const open = () => openDelivery(Number(tr.dataset.id), () => load(main));
-      tr.onclick = open; tr.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); } };
+      tr.onclick = open; tr.onkeydown = (ev) => { if (ev.target === tr && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); open(); } };
+      // La case et sa cellule ne doivent pas ouvrir le bon : un clic dans la cellule coche la case.
+      const cell = tr.querySelector('td.bl-chk'); const cb = tr.querySelector('.dl-pick');
+      cell.onclick = (ev) => { ev.stopPropagation(); if (ev.target !== cb) cb.click(); };
+      cb.onchange = () => { if (cb.checked) picked.add(Number(cb.dataset.id)); else picked.delete(Number(cb.dataset.id)); tr.classList.toggle('picked', cb.checked); paintBar(main, rows); };
     });
+    const all = box.querySelector('#dl-all');
+    all.parentElement.onclick = (ev) => { ev.stopPropagation(); if (ev.target !== all) all.click(); };
+    all.onchange = () => {
+      box.querySelectorAll('tr.bl-row').forEach(tr => {
+        const cb = tr.querySelector('.dl-pick'); cb.checked = all.checked; tr.classList.toggle('picked', all.checked);
+        if (all.checked) picked.add(Number(cb.dataset.id)); else picked.delete(Number(cb.dataset.id));
+      });
+      paintBar(main, rows);
+    };
+    paintBar(main, rows);
+  }
+
+  // Barre de sélection : export de ces seuls BL (PDF groupé ou Excel), quels que soient les filtres.
+  function paintBar(main, rows) {
+    const bar = main.querySelector('#dl-bar'); const all = main.querySelector('#dl-all');
+    const n = picked.size;
+    if (all) { all.checked = n > 0 && n === rows.length; all.indeterminate = n > 0 && n < rows.length; all.disabled = !rows.length; }
+    if (!n) { bar.innerHTML = ''; return; }
+    const ht = rows.filter(d => picked.has(d.id)).reduce((s, d) => s + d.htCents, 0);
+    const tooMany = n > MAX_PDF;
+    bar.innerHTML = `<div class="bl-selbar" role="status"><b>${plural(n, 'bon sélectionné', 'bons sélectionnés')}</b><span class="bl-muted">${eur(ht)} HT</span>
+      <span class="bl-selbar-actions"><button class="bl-btn small" id="dl-sel-csv">Exporter la sélection (Excel)</button><button class="bl-btn primary small" id="dl-sel-pdf" ${tooMany ? 'disabled' : ''} title="${tooMany ? `${MAX_PDF} BL au plus dans un PDF : décochez-en.` : 'Un seul PDF, un bon par page, du plus ancien au plus récent'}">Télécharger la sélection (PDF)</button><button class="bl-btn link small" id="dl-unpick">Tout décocher</button></span></div>`;
+    const ids = () => [...picked].join(',');
+    bar.querySelector('#dl-unpick').onclick = () => { picked.clear(); main.querySelectorAll('.dl-pick').forEach(cb => { cb.checked = false; cb.closest('tr').classList.remove('picked'); }); paintBar(main, rows); };
+    bar.querySelector('#dl-sel-csv').onclick = async () => { try { await Bill.download('/deliveries/export.csv?ids=' + ids(), 'bons-livraison.csv'); } catch (err) { Bill.fail(err); } };
+    const pdf = bar.querySelector('#dl-sel-pdf');
+    pdf.onclick = async () => { pdf.disabled = true; try { await Bill.download('/deliveries/export.pdf?ids=' + ids(), 'bons-livraison.pdf'); } catch (err) { Bill.fail(err); } finally { pdf.disabled = n > MAX_PDF; } };
   }
 
   // ---------- BL dont le nom d'hôtel a été saisi librement ----------
@@ -215,6 +262,7 @@
 
   Bill.register('deliveries', {
     async render(main, params = {}) {
+      picked.clear();
       if (params.clientId !== undefined) { S.clientId = String(params.clientId || ''); S.status = ''; S.pay.clear(); S.q = ''; }
       const clients = await Bill.clients();
       main.innerHTML = `<div class="bl-head"><div><h2>Bons de livraison</h2><p>Les commandes livrées, par période et par hôtel, avec leur état de facturation. Cliquez sur un bon pour voir son détail ou télécharger son PDF.</p></div>
@@ -229,7 +277,7 @@
           <div class="bl-field"><label for="dl-t">au</label><input id="dl-t" type="date" value="${e(S.to)}"></div>
         </div>
         <div class="bl-presets" role="group" aria-label="Périodes rapides">${PRESETS.map(([k, l]) => `<button type="button" class="bl-btn link small" data-preset="${k}">${l}</button>`).join('')}<span class="bl-muted" id="dl-sum"></span></div>
-        <div id="dl-table"><div class="bl-spin">Chargement…</div></div></div>`;
+        <div id="dl-bar"></div><div id="dl-table"><div class="bl-spin">Chargement…</div></div></div>`;
       let timer;
       const q = (s) => main.querySelector(s);
       q('#dl-q').oninput = (ev) => { clearTimeout(timer); timer = setTimeout(() => { S.q = ev.target.value.trim(); load(main); }, 250); };

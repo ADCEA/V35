@@ -16,7 +16,7 @@ const db = require('../db');
 const { wrap } = require('../billing/http');
 
 const router = express.Router();
-const filtersOf = (q) => ({ from: q.from, to: q.to, clientId: q.clientId, status: q.status, payment: q.payment, q: q.q });
+const filtersOf = (q) => ({ from: q.from, to: q.to, clientId: q.clientId, status: q.status, payment: q.payment, q: q.q, ids: q.ids });
 const safe = (s) => String(s).replace(/[^\w.-]+/g, '-');
 
 router.get('/deliveries', wrap((req, res) => {

@@ -15,6 +15,8 @@
     d90: ['Plus de 90 jours de retard', d => d.overdueDays > 90],
   };
   const S = { sel: new Set(), q: '', clientId: '', from: '', to: '', sort: 'date', dir: 'desc', limit: 100, bucket: null };
+  // Lignes cochées (S.sel, plus haut, est la sélection des puces de statut). Seuls les documents émis ont un PDF définitif.
+  const picked = new Set(); const MAX_ZIP = 200; const exportable = (d) => d.status === 'issued';
 
   // ---------- liste ----------
   function qs() {
@@ -51,7 +53,8 @@
 
   function rowHtml(d) {
     const isCn = d.kind === 'credit_note';
-    return `<tr class="bl-row" tabindex="0" data-id="${d.id}">
+    return `<tr class="bl-row ${picked.has(d.id) ? 'picked' : ''}" tabindex="0" data-id="${d.id}">
+      <td class="bl-chk"><input type="checkbox" class="il-pick" data-id="${d.id}" ${picked.has(d.id) ? 'checked' : ''} ${exportable(d) ? '' : 'disabled title="Brouillon : pas encore de PDF définitif"'} aria-label="Sélectionner ${e(titleOf(d))}"></td>
       <td>${Bill.pill(d.display)}${d.overdueDays ? `<span class="bl-late-days" title="${plural(d.overdueDays, 'jour', 'jours')} de retard">${d.overdueDays} j</span>` : ''}</td>
       <td class="bl-num"><b style="font-weight:600">${e(titleOf(d))}</b></td>
       <td class="client" title="${e(d.clientName)}${d.reference ? ' — ' + e(d.reference) : ''}">${e(d.clientName)}${d.reference ? `<span class="sub">${e(d.reference)}</span>` : ''}</td>
@@ -73,6 +76,9 @@
     try { r = await Bill.get('/invoices?' + qs()); } catch (err) { return Bill.fail(err, box); }
     let rows = r.invoices;
     if (S.bucket) rows = rows.filter(d => d.balanceCents > 0 && BUCKETS[S.bucket][1](d));
+    // On n'exporte que ce qu'on voit : une ligne cochée qui sort de la liste (filtre, recherche) est décochée.
+    const shown = new Map(rows.map(d => [d.id, d]));
+    for (const id of [...picked]) if (!shown.has(id) || !exportable(shown.get(id))) picked.delete(id);
     const sumOf = (k, kind) => (kind === 'balance' || kind === 'total') && r.counts[k] ? `<small>${eur0(r.sums[k])}</small>` : '';
     main.querySelector('#il-tabs').innerHTML = `<button class="bl-chipf ${S.sel.size ? '' : 'on'}" data-st="all" aria-pressed="${S.sel.size ? 'false' : 'true'}">Toutes <b>${r.counts.all}</b></button>`
       + CHIPS.map(([k, label, cls, kind]) => `<button class="bl-chipf ${S.sel.has(k) ? 'on' : ''} ${k === 'overdue' && r.counts[k] ? 'late' : ''}" data-st="${k}" aria-pressed="${S.sel.has(k)}"><i class="bl-dot ${cls}"></i>${label} <b>${r.counts[k]}</b>${sumOf(k, kind)}</button>`).join('');
@@ -88,23 +94,62 @@
 
     if (!rows.length) {
       const filtered = S.q || S.clientId || S.from || S.to || S.bucket;
+      paintBar(main, []);
       box.innerHTML = `<div class="bl-empty"><b>${filtered ? 'Aucun résultat' : 'Aucune facture ici'}</b>${filtered ? 'Essayez d\'élargir la recherche ou les dates.' : (!S.sel.size ? 'Créez une première facture avec « Nouvelle facture », ou facturez le mois d\'un coup.' : 'Aucune facture avec ces statuts pour le moment.')}</div>`;
       return;
     }
-    box.innerHTML = `<div class="bl-tablewrap inv"><table class="bl-table inv"><thead><tr><th>Statut</th>${sortTh('number', 'Numéro')}${sortTh('client', 'Hôtel')}${sortTh('date', 'Émise le')}${sortTh('due', 'Échéance')}${sortTh('amount', 'Total TTC', 'r')}${sortTh('balance', 'Reste dû', 'r')}<th>Suivi</th></tr></thead>
+    box.innerHTML = `<div class="bl-tablewrap inv"><table class="bl-table inv"><thead><tr><th class="bl-chk"><input type="checkbox" id="il-all" aria-label="Cocher tous les documents émis de la liste"></th><th>Statut</th>${sortTh('number', 'Numéro')}${sortTh('client', 'Hôtel')}${sortTh('date', 'Émise le')}${sortTh('due', 'Échéance')}${sortTh('amount', 'Total TTC', 'r')}${sortTh('balance', 'Reste dû', 'r')}<th>Suivi</th></tr></thead>
       <tbody>${rows.map(rowHtml).join('')}</tbody></table></div>
       ${!S.bucket && r.total > rows.length ? `<div class="bl-more"><button class="bl-btn" id="il-more">Afficher la suite (${r.total - rows.length} de plus)</button></div>` : ''}`;
     box.querySelectorAll('[data-sort]').forEach(th => th.onclick = () => { const k = th.dataset.sort; if (S.sort === k) S.dir = S.dir === 'asc' ? 'desc' : 'asc'; else { S.sort = k; S.dir = (k === 'client' || k === 'number' || k === 'due') ? 'asc' : 'desc'; } load(main); });
     box.querySelectorAll('tr.bl-row').forEach(tr => {
       const open = () => Bill.openInvoice(Number(tr.dataset.id), () => load(main));
-      tr.onclick = open; tr.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); } };
+      tr.onclick = open; tr.onkeydown = (ev) => { if (ev.target === tr && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); open(); } };
+      // La case et sa cellule ne doivent pas ouvrir la facture : un clic dans la cellule coche la case.
+      const cell = tr.querySelector('td.bl-chk'); const cb = tr.querySelector('.il-pick');
+      cell.onclick = (ev) => { ev.stopPropagation(); if (ev.target !== cb && !cb.disabled) cb.click(); };
+      cb.onchange = () => { if (cb.checked) picked.add(Number(cb.dataset.id)); else picked.delete(Number(cb.dataset.id)); tr.classList.toggle('picked', cb.checked); paintBar(main, rows); };
     });
+    const all = box.querySelector('#il-all');
+    all.parentElement.onclick = (ev) => { ev.stopPropagation(); if (ev.target !== all && !all.disabled) all.click(); };
+    all.onchange = () => {
+      box.querySelectorAll('tr.bl-row').forEach(tr => {
+        const cb = tr.querySelector('.il-pick'); if (cb.disabled) return;
+        cb.checked = all.checked; tr.classList.toggle('picked', all.checked);
+        if (all.checked) picked.add(Number(cb.dataset.id)); else picked.delete(Number(cb.dataset.id));
+      });
+      paintBar(main, rows);
+    };
+    paintBar(main, rows);
     const more = box.querySelector('#il-more'); if (more) more.onclick = () => { S.limit += 100; load(main); };
     fit(main, false);
   }
 
+  // Barre de sélection : nombre de documents cochés, montant, export (une archive ZIP avec un PDF par document).
+  function paintBar(main, rows) {
+    const bar = main.querySelector('#il-bar'); const all = main.querySelector('#il-all');
+    const n = picked.size; const ok = rows.filter(exportable);
+    if (all) { all.checked = n > 0 && n === ok.length; all.indeterminate = n > 0 && n < ok.length; all.disabled = !ok.length; }
+    if (!n) { bar.innerHTML = ''; return; }
+    const total = rows.filter(d => picked.has(d.id)).reduce((s, d) => s + (d.kind === 'credit_note' ? -d.totalTtcCents : d.totalTtcCents), 0);
+    const tooMany = n > MAX_ZIP;
+    bar.innerHTML = `<div class="bl-selbar" role="status"><b>${plural(n, 'document sélectionné', 'documents sélectionnés')}</b><span class="bl-muted">${eur(total)} TTC</span>
+      <span class="bl-selbar-actions"><button class="bl-btn primary small" id="il-export" ${tooMany ? 'disabled' : ''} title="${tooMany ? `${MAX_ZIP} documents au plus par export : décochez-en.` : 'Une archive ZIP contenant un PDF par facture ou avoir'}">Exporter en PDF (un par facture)</button><button class="bl-btn link small" id="il-unpick">Tout décocher</button></span></div>`;
+    bar.querySelector('#il-unpick').onclick = () => { picked.clear(); main.querySelectorAll('.il-pick').forEach(cb => { cb.checked = false; cb.closest('tr').classList.remove('picked'); }); paintBar(main, rows); };
+    const exp = bar.querySelector('#il-export');
+    exp.onclick = async () => {
+      exp.disabled = true;
+      try {
+        const r = await Bill.download('/invoices/export.zip?ids=' + [...picked].join(','), 'factures.zip');
+        const count = Number(r.headers.get('X-Document-Count')) || n;
+        Bill.toast(`${plural(count, 'PDF enregistré', 'PDF enregistrés')} dans ${r.name}.`);
+      } catch (err) { Bill.fail(err); } finally { exp.disabled = false; }
+    };
+  }
+
   Bill.register('invoices', {
     async render(main, params = {}) {
+      picked.clear();
       if (params.tab) { setTab(params.tab); S.limit = 100; }
       if (params.clientId !== undefined) { S.clientId = String(params.clientId || ''); setTab(params.tab || 'all'); S.q = ''; S.limit = 100; }
       S.bucket = params.bucket || null;
@@ -117,7 +162,7 @@
           <div class="bl-field"><label for="il-c" class="bl-sr">Hôtel</label><select id="il-c"><option value="">Tous les hôtels</option>${clients.map(c => `<option value="${c.id}" ${String(S.clientId) === String(c.id) ? 'selected' : ''}>${e(c.societe)}</option>`).join('')}</select></div>
           <div class="bl-field dates"><label for="il-f">Du</label><input id="il-f" type="date" value="${e(S.from)}"><label for="il-t">au</label><input id="il-t" type="date" value="${e(S.to)}"></div>
           <div id="il-chip"></div>
-        </div><div id="il-table"><div class="bl-spin">Chargement…</div></div></div>`;
+        </div><div id="il-bar"></div><div id="il-table"><div class="bl-spin">Chargement…</div></div></div>`;
       let timer;
       main.querySelector('#il-q').oninput = (ev) => { clearTimeout(timer); timer = setTimeout(() => { S.q = ev.target.value.trim(); S.limit = 100; load(main); }, 250); };
       main.querySelector('#il-c').onchange = (ev) => { S.clientId = ev.target.value; S.limit = 100; load(main); };

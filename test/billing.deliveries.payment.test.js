@@ -106,10 +106,10 @@ test('un règlement ou un avoir change le BL de catégorie', () => {
 
 test('export CSV : colonne « paiement »', () => {
   const csv = deliveries.deliveriesCsv({ payment: 'overdue' });
-  assert.ok(csv.startsWith('﻿bl;date_livraison;hotel;references;pieces;montant_ht;facturation;facture;paiement\r\n'));
-  assert.match(csv, /BL-RETARD-PARTIEL;[^\r]*;Facturé;FA-[^;]*;En retard\r\n/);
+  assert.ok(csv.startsWith('﻿bl;date_livraison;hotel;references;pieces;montant_ht;facturation;facture;paiement;format_facture\r\n'));
+  assert.match(csv, /BL-RETARD-PARTIEL;[^\r]*;Facturé;FA-[^;]*;En retard;[^;\r]*\r\n/);
   assert.ok(!csv.includes('BL-PAYE'), 'le filtre s\'applique aussi à l\'export');
   const all = deliveries.deliveriesCsv({});
-  assert.match(all, /BL-PAYE;[^\r]*;Payée\r\n/);
-  assert.match(all, /BL-NEUF;[^\r]*;À facturer;;\r\n/);
+  assert.match(all, /BL-PAYE;[^\r]*;Payée;[^;\r]*\r\n/);
+  assert.match(all, /BL-NEUF;[^\r]*;À facturer;;;Détaillé \(article par article\)\r\n/);
 });

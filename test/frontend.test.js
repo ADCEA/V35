@@ -66,3 +66,13 @@ test('« Nouvel avoir » : bouton sur la liste des factures et sur le tableau de
   assert.ok(inv.includes('opts.credit') && inv.includes('ACTIONS.credit()'));
   assert.ok(dash.includes('data-act="credit">Nouvel avoir') && dash.includes('newCreditNote: true') && inv.includes('params.newCreditNote'));
 });
+
+test('cases à cocher : listes des factures et des BL, barre de sélection, export ZIP, colonne « Format facture »', () => {
+  const read = (f) => fs.readFileSync(path.join(PUBLIC, 'billing', f), 'utf8');
+  const inv = read('invoices.js'); const bl = read('deliveries.js'); const css = read('billing.css');
+  assert.ok(inv.includes('class="il-pick"') && inv.includes('id="il-all"') && inv.includes('/invoices/export.zip?ids='));
+  assert.ok(inv.includes('id="il-bar"') && inv.includes('Exporter en PDF (un par facture)'));
+  assert.ok(bl.includes('class="dl-pick"') && bl.includes('id="dl-all"') && bl.includes('/deliveries/export.pdf?ids=') && bl.includes('/deliveries/export.csv?ids='));
+  assert.ok(bl.includes('Format facture') && bl.includes('fmtTag(d)'));
+  assert.ok(css.includes('.bl-selbar') && css.includes('.bl-fmt'));
+});

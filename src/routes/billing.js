@@ -8,6 +8,7 @@ const db = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const engine = require('../billing/engine');
 const { buildInvoicePdf } = require('../billing/pdf');
+const { createZip } = require('../utils/zip');
 const { buildFec, previewFec, resolvePeriod } = require('../billing/fec');
 const lock = require('../billing/lock');
 const backup = require('../backup');
@@ -126,6 +127,32 @@ router.get('/invoices', wrap((req, res) => {
     from: engine.isIsoDate(q.from) ? q.from : undefined, to: engine.isIsoDate(q.to) ? q.to : undefined,
     sort: q.sort, dir: q.dir, limit: q.limit, offset: q.offset,
   }));
+}));
+
+// Export des factures cochées : une archive ZIP avec un PDF par document émis (factures et avoirs), nommé par son numéro.
+// Les brouillons n'ont pas de PDF définitif : ils sont ignorés (leur nombre est renvoyé dans X-Skipped-Drafts).
+const MAX_ZIP = 200;
+router.get('/invoices/export.zip', wrap(async (req, res) => {
+  const ids = [...new Set(String(req.query.ids || '').split(',').map(x => x.trim()).filter(Boolean).map(Number))];
+  if (!ids.length) throw new engine.BillingError('Cochez au moins une facture.');
+  if (ids.some(n => !Number.isInteger(n) || n <= 0)) throw new engine.BillingError('Sélection invalide.');
+  if (ids.length > MAX_ZIP) throw new engine.BillingError(`Trop de documents à la fois (${ids.length}). Maximum ${MAX_ZIP} : exportez en plusieurs fois.`);
+  const files = []; let drafts = 0;
+  for (const id of ids) {
+    const inv = engine.loadInvoice(id);
+    if (!inv) throw new engine.BillingError(`Facture ${id} introuvable.`, 404);
+    if (inv.status !== 'issued') { drafts += 1; continue; }
+    const { buffer, filename } = await docs.invoicePdf(id);
+    files.push({ name: filename, data: buffer });
+  }
+  if (!files.length) throw new engine.BillingError('Aucun document émis dans la sélection : un brouillon n\'a pas de PDF définitif.', 422);
+  engine.logEvent('invoices_exported', null, { count: files.length, skippedDrafts: drafts });
+  res.set({
+    'Content-Type': 'application/zip',
+    'Content-Disposition': `attachment; filename="factures-${engine.todayParis()}.zip"`,
+    'X-Document-Count': String(files.length), 'X-Skipped-Drafts': String(drafts),
+  });
+  res.send(createZip(files));
 }));
 
 router.get('/invoices/:id', wrap((req, res) => {

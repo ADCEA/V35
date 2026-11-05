@@ -14,6 +14,7 @@
     const blob = await res.blob(); const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = m ? m[1] : fallbackName; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
+    return { name: m ? m[1] : fallbackName, headers: res.headers };
   };
 
   // ================= Émetteur =================

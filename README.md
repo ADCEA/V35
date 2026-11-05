@@ -461,6 +461,13 @@ Brouillons, À encaisser (émise, rien reçu, pas échue), En retard, Partielles
 La recherche, l'hôtel et les dates se combinent avec les statuts, et une ligne de synthèse donne le nombre de factures, le total TTC
 et le reste à encaisser de la sélection. L'API accepte `GET /invoices?status=overdue,partial` (l'ancien `tab=` fonctionne encore).
 
+**Cases à cocher et export** : chaque ligne de la liste a une case (la case de l'en-tête coche toutes les lignes affichées). Une barre
+indique le nombre de documents cochés et leur total TTC, avec **« Exporter en PDF (un par facture) »** : le navigateur télécharge une archive
+ZIP (`factures-AAAA-MM-JJ.zip`) qui contient un PDF par facture ou avoir, nommé par son numéro (`FA-2026-000012.pdf`), identique au PDF
+téléchargé depuis la facture. Seuls les documents **émis** se cochent (un brouillon n'a pas de PDF définitif) ; 200 documents au plus par export ;
+une ligne cochée qui disparaît de la liste (recherche, filtre) est décochée : on n'exporte que ce que l'on voit. L'export est inscrit au journal
+de facturation (`invoices_exported`). API : `GET /invoices/export.zip?ids=1,2,3`.
+
 **Nouvel avoir** : un bouton en haut de la liste des factures (et sur le tableau de bord) fait choisir l'hôtel puis, parmi ses factures émises
 non entièrement créditées, celle à créditer ; la fenêtre habituelle « Créer un avoir » s'ouvre alors (motif, avoir total ou partiel par
 quantités, confirmation par le code de la Facturation). L'avoir est créé en **brouillon**, vérifié puis émis comme une facture. Le même
@@ -574,6 +581,15 @@ Une remise accordée à l'hôtel qui paie vite (par exemple **1,5 % pour un règ
   en journal **OD** : débit 665000 *Escomptes accordés* (HT) et TVA collectée, crédit du compte client (TTC) ; le journal de banque ne
   compte que l'argent reçu. Comptes à valider avec votre expert-comptable (`ACCOUNTS.discountGranted` dans `src/billing/fec.js`).
 - **Statistiques** : l'escompte n'est jamais compté comme encaissé (tableau de bord, journée, liste des règlements : il est affiché à part).
+
+### Bons de livraison : sélection et format de facture
+
+Chaque ligne de la liste des BL a une **case à cocher** (la case de l'en-tête coche toute la liste affichée). Une barre propose alors
+**« Télécharger la sélection (PDF) »** (un seul PDF, un bon par page) et **« Exporter la sélection (Excel) »** pour ces seuls BL, quels que soient
+les filtres (`GET /deliveries/export.pdf?ids=…` et `export.csv?ids=…`, 500 BL au plus). La colonne **Format facture** donne le niveau de détail de
+la facture : *Détaillé* (une ligne par article et par BL), *Par BL* (une ligne par bon) ou *Regroupé* (une ligne par article sur la période). C'est
+le format de la **facture** (brouillon ou émise) quand le BL y figure, sinon celui de la **fiche de l'hôtel** (appliqué à la prochaine facture) ;
+« — » pour un BL facturé dans l'ancien circuit. L'export Excel gagne une colonne `format_facture`.
 
 ### Regrouper les bons de livraison à nom de client libre
 
@@ -931,7 +947,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (328 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (333 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 
