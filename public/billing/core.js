@@ -142,6 +142,22 @@
 
   // ---------- pages et navigation ----------
   Bill.register = (key, def) => { Bill.pages[key] = def; };
+
+  // Liste qui occupe la hauteur de l'écran (ordinateur) : le défilement se fait dans le tableau, l'en-tête reste visible.
+  // `sel` désigne le conteneur du tableau (classe « inv »), `reserve` la hauteur à laisser sous lui (barre de total…).
+  // Les pages qui s'y adaptent déclarent `refit(main)` : elle est rappelée quand la fenêtre change de taille.
+  Bill.fitList = function (main, sel, opts = {}) {
+    const wrap = main.querySelector(sel); if (!wrap) return;
+    if (window.innerWidth <= 900) { wrap.style.maxHeight = ''; return; }
+    const mainTop = main.getBoundingClientRect().top + window.scrollY;
+    if (opts.scroll) window.scrollTo({ top: Math.max(0, mainTop - 92) });
+    const off = wrap.getBoundingClientRect().top + window.scrollY - mainTop;
+    wrap.style.maxHeight = Math.max(opts.min || 240, window.innerHeight - 92 - off - 16 - (opts.reserve || 0)) + 'px';
+  };
+  window.addEventListener('resize', () => {
+    const m = document.getElementById('bl-main'); const p = Bill.pages[Bill.state.page];
+    if (m && p && p.refit) p.refit(m);
+  });
   const NAV = [
     { key: 'dashboard', label: 'Tableau de bord' },
     { group: 'Ventes' },

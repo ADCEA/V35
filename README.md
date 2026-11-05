@@ -586,10 +586,24 @@ Une remise accordée à l'hôtel qui paie vite (par exemple **1,5 % pour un règ
 
 Chaque ligne de la liste des BL a une **case à cocher** (la case de l'en-tête coche toute la liste affichée). Une barre propose alors
 **« Télécharger la sélection (PDF) »** (un seul PDF, un bon par page) et **« Exporter la sélection (Excel) »** pour ces seuls BL, quels que soient
-les filtres (`GET /deliveries/export.pdf?ids=…` et `export.csv?ids=…`, 500 BL au plus). La colonne **Format facture** donne le niveau de détail de
+les filtres (`GET /deliveries/export.pdf?ids=…` et `export.csv?ids=…`, 500 BL au plus). La colonne **Format** donne le niveau de détail de
 la facture : *Détaillé* (une ligne par article et par BL), *Par BL* (une ligne par bon) ou *Regroupé* (une ligne par article sur la période). C'est
 le format de la **facture** (brouillon ou émise) quand le BL y figure, sinon celui de la **fiche de l'hôtel** (appliqué à la prochaine facture) ;
 « — » pour un BL facturé dans l'ancien circuit. L'export Excel gagne une colonne `format_facture`.
+
+### Présentation compacte des listes (factures, bons de livraison, Facturer le mois)
+
+Ces trois écrans partagent la même présentation : lignes serrées (une ligne par document, nom d'hôtel tronqué avec infobulle), en-tête de
+tableau toujours visible, **défilement dans le tableau** qui occupe la hauteur de l'écran sur ordinateur (sur téléphone, la liste défile avec la
+page), puces de filtre et filtres sur une seule ligne. La hauteur est calculée par `Bill.fitList` (`public/billing/core.js`) ; une page qui
+s'y adapte déclare `refit(main)` et se réajuste quand la fenêtre change de taille ou quand la barre de sélection apparaît.
+- **Bons de livraison** : l'état de facturation (Tous, À facturer, Dans un brouillon, Facturés) et le paiement de la facture sont des puces
+  comme dans la liste des factures ; les dates et les périodes rapides tiennent sur la même ligne que la recherche et l'hôtel.
+- **Facturer le mois** : le tableau des hôtels prend la hauteur de l'écran, avec la barre de total (« 27 hôtels sélectionnés · environ … HT »)
+  juste dessous. Un clic sur une ligne coche ou décoche l'hôtel (les lignes cochées sont surlignées ; la case de l'en-tête coche tout et passe en
+  état intermédiaire quand la sélection est partielle). Les brouillons à émettre sont sous la liste : un bouton **« N brouillons à émettre »**
+  en haut de page y descend, et la page y descend toute seule après « Préparer les brouillons ». Dans ce second tableau, un clic sur la case
+  coche, un clic ailleurs sur la ligne (ou « Vérifier ») ouvre le brouillon.
 
 ### Regrouper les bons de livraison à nom de client libre
 
@@ -947,7 +961,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (333 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (334 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

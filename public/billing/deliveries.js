@@ -1,7 +1,8 @@
 // Bons de livraison : les commandes livrées, filtrables par période, par hôtel et par état de facturation.
 (function () {
   const { e, eur, dFr, today, plural } = Bill;
-  const TABS = [['', 'Tous'], ['to_invoice', 'À facturer'], ['draft', 'Dans un brouillon'], ['invoiced', 'Facturés']];
+  // [valeur, libellé, couleur de la pastille] : les couleurs sont celles des étiquettes de la colonne « Facturation ».
+  const TABS = [['', 'Tous', ''], ['to_invoice', 'À facturer', 'unpaid'], ['draft', 'Dans un brouillon', 'partial'], ['invoiced', 'Facturés', 'paid']];
   const MAX_PDF = 500;
   // Paiement de la facture d'un BL facturé : mêmes libellés et mêmes pastilles que la liste des factures.
   const PAY = [['unpaid', 'À encaisser'], ['overdue', 'En retard'], ['partial', 'Partielles'], ['paid', 'Payés']];
@@ -63,8 +64,8 @@
       <td class="bl-chk"><input type="checkbox" class="dl-pick" data-id="${d.id}" ${picked.has(d.id) ? 'checked' : ''} aria-label="Sélectionner le bon ${e(d.ticket)}"></td>
       <td class="bl-num"><b style="font-weight:600">${e(d.ticket)}</b></td>
       <td class="bl-num">${dFr(d.date)}</td>
-      <td class="client">${e(d.clientName)}</td>
-      <td class="bl-muted">${plural(d.refs, 'référence', 'références')} · ${plural(d.pieces, 'pièce', 'pièces')}</td>
+      <td class="client" title="${e(d.clientName)}">${e(d.clientName)}</td>
+      <td class="bl-muted bl-nowrap" title="${plural(d.refs, 'référence', 'références')} · ${plural(d.pieces, 'pièce', 'pièces')}">${d.refs} réf. · ${plural(d.pieces, 'pièce', 'pièces')}</td>
       <td class="r bl-num">${eur(d.htCents)}</td>
       <td>${billingTag(d.billing)}</td>
       <td>${payTag(d.billing) || '<span class="bl-muted">—</span>'}</td>
@@ -81,8 +82,8 @@
 
   function paint(main) {
     const box = main.querySelector('#dl-table');
-    main.querySelector('#dl-tabs').innerHTML = TABS.map(([k, label]) =>
-      `<button class="bl-tab ${S.status === k ? 'active' : ''}" data-tab="${k}">${label}<small>${R.counts[k || 'all']}</small></button>`).join('');
+    main.querySelector('#dl-tabs').innerHTML = TABS.map(([k, label, dot]) =>
+      `<button type="button" class="bl-chipf ${S.status === k ? 'on' : ''}" data-tab="${k}" aria-pressed="${S.status === k}">${dot ? `<i class="bl-dot ${dot}"></i>` : ''}${label} <b>${R.counts[k || 'all']}</b></button>`).join('');
     main.querySelectorAll('#dl-tabs [data-tab]').forEach(b => b.onclick = () => { S.status = b.dataset.tab; load(main); });
     main.querySelector('#dl-pay').innerHTML = `<span class="bl-muted">Paiement</span>`
       + PAY.map(([k, label]) => `<button type="button" class="bl-chipf ${S.pay.has(k) ? 'on' : ''} ${k === 'overdue' && R.counts.payments[k] ? 'late' : ''}" data-pay="${k}" aria-pressed="${S.pay.has(k)}"><i class="bl-dot ${k}"></i>${label} <b>${R.counts.payments[k]}</b></button>`).join('')
@@ -107,7 +108,7 @@
       return;
     }
     const rows = [...R.deliveries].sort(SORTERS[S.sort]); if (S.dir === 'desc') rows.reverse();
-    box.innerHTML = `<div class="bl-tablewrap"><table class="bl-table"><thead><tr><th class="bl-chk"><input type="checkbox" id="dl-all" aria-label="Cocher tous les bons de la liste"></th>${sortTh('ticket', 'Bon')}${sortTh('date', 'Livré le')}${sortTh('client', 'Hôtel')}<th>Contenu</th>${sortTh('amount', 'Montant HT', 'r')}<th>Facturation</th><th>Paiement</th><th title="Niveau de détail de la facture">Format facture</th></tr></thead>
+    box.innerHTML = `<div class="bl-tablewrap inv"><table class="bl-table inv dl"><thead><tr><th class="bl-chk"><input type="checkbox" id="dl-all" aria-label="Cocher tous les bons de la liste"></th>${sortTh('ticket', 'Bon')}${sortTh('date', 'Livré le')}${sortTh('client', 'Hôtel')}<th>Contenu</th>${sortTh('amount', 'Montant HT', 'r')}<th>Facturation</th><th>Paiement</th><th title="Format de la facture : niveau de détail des lignes">Format</th></tr></thead>
       <tbody>${rows.map(rowHtml).join('')}</tbody></table></div>
       ${R.truncated ? `<p class="bl-hint" style="padding:10px 14px">Les ${R.deliveries.length} plus récents sont affichés sur ${R.total}. Resserrez la période pour voir les autres.</p>` : ''}`;
     box.querySelectorAll('[data-sort]').forEach(th => th.onclick = () => {
@@ -131,14 +132,18 @@
       paintBar(main, rows);
     };
     paintBar(main, rows);
+    fit(main, false);
   }
+
+  // Sur ordinateur, la liste occupe toute la hauteur de l'écran (défilement dans le tableau, en-tête toujours visible).
+  const fit = (main, scroll) => Bill.fitList(main, '.bl-tablewrap.inv', { scroll });
 
   // Barre de sélection : export de ces seuls BL (PDF groupé ou Excel), quels que soient les filtres.
   function paintBar(main, rows) {
     const bar = main.querySelector('#dl-bar'); const all = main.querySelector('#dl-all');
     const n = picked.size;
     if (all) { all.checked = n > 0 && n === rows.length; all.indeterminate = n > 0 && n < rows.length; all.disabled = !rows.length; }
-    if (!n) { bar.innerHTML = ''; return; }
+    if (!n) { bar.innerHTML = ''; fit(main, false); return; }
     const ht = rows.filter(d => picked.has(d.id)).reduce((s, d) => s + d.htCents, 0);
     const tooMany = n > MAX_PDF;
     bar.innerHTML = `<div class="bl-selbar" role="status"><b>${plural(n, 'bon sélectionné', 'bons sélectionnés')}</b><span class="bl-muted">${eur(ht)} HT</span>
@@ -148,6 +153,7 @@
     bar.querySelector('#dl-sel-csv').onclick = async () => { try { await Bill.download('/deliveries/export.csv?ids=' + ids(), 'bons-livraison.csv'); } catch (err) { Bill.fail(err); } };
     const pdf = bar.querySelector('#dl-sel-pdf');
     pdf.onclick = async () => { pdf.disabled = true; try { await Bill.download('/deliveries/export.pdf?ids=' + ids(), 'bons-livraison.pdf'); } catch (err) { Bill.fail(err); } finally { pdf.disabled = n > MAX_PDF; } };
+    fit(main, false);   // la barre pousse le tableau vers le bas : on lui retire sa hauteur
   }
 
   // ---------- BL dont le nom d'hôtel a été saisi librement ----------
@@ -265,19 +271,16 @@
       picked.clear();
       if (params.clientId !== undefined) { S.clientId = String(params.clientId || ''); S.status = ''; S.pay.clear(); S.q = ''; }
       const clients = await Bill.clients();
-      main.innerHTML = `<div class="bl-head"><div><h2>Bons de livraison</h2><p>Les commandes livrées, par période et par hôtel, avec leur état de facturation. Cliquez sur un bon pour voir son détail ou télécharger son PDF.</p></div>
+      main.innerHTML = `<div class="bl-head tight"><div><h2>Bons de livraison</h2><p>Les commandes livrées, par période et par hôtel, avec leur état de facturation. Cliquez sur un bon pour voir son détail ou télécharger son PDF.</p></div>
         <div class="bl-actions"><button class="bl-btn" id="dl-csv" disabled>Exporter (Excel)</button><button class="bl-btn primary" id="dl-pdf" disabled>Télécharger les BL (PDF)</button></div></div>
         <div id="dl-unlinked"></div>
-        <div class="bl-panel"><div class="bl-tabs" id="dl-tabs" role="tablist"></div>
-        <div class="bl-statusbar" role="group" aria-label="Filtrer par paiement de la facture"><div class="bl-chipsrow" id="dl-pay"></div></div>
-        <div class="bl-filters">
-          <div class="bl-field grow"><label for="dl-q">Rechercher</label><input id="dl-q" type="search" value="${e(S.q)}" placeholder="N° de bon ou nom d'hôtel"></div>
-          <div class="bl-field"><label for="dl-c">Hôtel</label><select id="dl-c"><option value="">Tous</option>${clients.map(c => `<option value="${c.id}" ${String(S.clientId) === String(c.id) ? 'selected' : ''}>${e(c.societe)}</option>`).join('')}</select></div>
-          <div class="bl-field"><label for="dl-f">Livrés du</label><input id="dl-f" type="date" value="${e(S.from)}"></div>
-          <div class="bl-field"><label for="dl-t">au</label><input id="dl-t" type="date" value="${e(S.to)}"></div>
-        </div>
-        <div class="bl-presets" role="group" aria-label="Périodes rapides">${PRESETS.map(([k, l]) => `<button type="button" class="bl-btn link small" data-preset="${k}">${l}</button>`).join('')}<span class="bl-muted" id="dl-sum"></span></div>
-        <div id="dl-bar"></div><div id="dl-table"><div class="bl-spin">Chargement…</div></div></div>`;
+        <div class="bl-panel"><div class="bl-statusbar"><div class="bl-chipsrow" id="dl-tabs" role="group" aria-label="Filtrer par état de facturation"></div><div class="bl-chipsrow pay" id="dl-pay" role="group" aria-label="Filtrer par paiement de la facture"></div><div class="bl-listsum" id="dl-sum" aria-live="polite"></div></div>
+        <div class="bl-filters inline">
+          <div class="bl-field grow"><label for="dl-q" class="bl-sr">Rechercher</label><input id="dl-q" type="search" value="${e(S.q)}" placeholder="Rechercher : n° de bon ou nom d'hôtel"></div>
+          <div class="bl-field"><label for="dl-c" class="bl-sr">Hôtel</label><select id="dl-c"><option value="">Tous les hôtels</option>${clients.map(c => `<option value="${c.id}" ${String(S.clientId) === String(c.id) ? 'selected' : ''}>${e(c.societe)}</option>`).join('')}</select></div>
+          <div class="bl-field dates"><label for="dl-f">Livrés du</label><input id="dl-f" type="date" value="${e(S.from)}"><label for="dl-t">au</label><input id="dl-t" type="date" value="${e(S.to)}"></div>
+          <div class="bl-field presets" role="group" aria-label="Périodes rapides">${PRESETS.map(([k, l]) => `<button type="button" class="bl-btn link small" data-preset="${k}">${l}</button>`).join('')}</div>
+        </div><div id="dl-bar"></div><div id="dl-table"><div class="bl-spin">Chargement…</div></div></div>`;
       let timer;
       const q = (s) => main.querySelector(s);
       q('#dl-q').oninput = (ev) => { clearTimeout(timer); timer = setTimeout(() => { S.q = ev.target.value.trim(); load(main); }, 250); };
@@ -291,8 +294,10 @@
       };
       q('#dl-csv').onclick = async () => { try { await Bill.download('/deliveries/export.csv?' + qs(), 'bons-livraison.csv'); } catch (err) { Bill.fail(err); } };
       await load(main);
+      fit(main, true);
       if (params.openId) openDelivery(Number(params.openId), () => load(main));
     },
+    refit(main) { fit(main, false); },
   });
 
   // ---------- détail d'un bon ----------

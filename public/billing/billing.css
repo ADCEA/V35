@@ -412,3 +412,15 @@ table.bl-table.inv{font-size:13px; line-height:1.25;}
 .bl-selbar .bl-muted{color:#0B3F73; opacity:.8;}
 .bl-selbar-actions{margin-left:auto; display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
 .bl-fmt{display:inline-block; padding:2px 9px; border-radius:11px; font-size:12.5px; white-space:nowrap; background:var(--bl-draft-bg); color:var(--bl-draft);}
+
+/* Listes « compactes » des bons de livraison et de Facturer le mois : mêmes lignes que la liste des factures */
+.bl-chipsrow.pay{align-items:center; margin-left:6px;}
+.bl-chipsrow.pay > .bl-muted{font-size:12.5px; margin-right:2px;}
+.bl-filters.inline .presets{flex-wrap:wrap; gap:0 2px;}
+.bl-table.inv .bl-tag,.bl-table.inv .bl-fmt{padding:1px 8px; font-size:12px;}
+.bl-table.inv td .sub.bl-num{display:inline;}
+.bl-nowrap{white-space:nowrap;}
+.bl-table.inv.dl td.client{max-width:175px;}
+.bl-table.inv.dl th,.bl-table.inv.dl td{padding-left:8px; padding-right:8px;}
+@media (min-width: 901px){ .bl-tablewrap.inv.hug{min-height:0; max-height:calc(100vh - 360px);} }
+.bl-table.inv .bl-btn.small{padding:1px 6px; line-height:1.25;}

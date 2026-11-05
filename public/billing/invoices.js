@@ -27,15 +27,7 @@
   }
 
   // Sur ordinateur, la liste occupe toute la hauteur de l'écran (défilement dans le tableau, en-tête toujours visible) : un maximum de lignes d'un coup.
-  function fit(main, scroll) {
-    const wrap = main.querySelector('.bl-tablewrap.inv'); if (!wrap) return;
-    if (window.innerWidth <= 900) { wrap.style.maxHeight = ''; return; }
-    const mainTop = main.getBoundingClientRect().top + window.scrollY;
-    if (scroll) window.scrollTo({ top: Math.max(0, mainTop - 92) });
-    const off = wrap.getBoundingClientRect().top + window.scrollY - mainTop;
-    wrap.style.maxHeight = Math.max(240, window.innerHeight - 92 - off - 16) + 'px';
-  }
-  let fitBound = false;
+  const fit = (main, scroll) => Bill.fitList(main, '.bl-tablewrap.inv', { scroll });
 
   function titleOf(d) {
     if (d.status === 'draft') return d.kind === 'credit_note' ? "Brouillon d'avoir" : 'Brouillon';
@@ -130,7 +122,7 @@
     const bar = main.querySelector('#il-bar'); const all = main.querySelector('#il-all');
     const n = picked.size; const ok = rows.filter(exportable);
     if (all) { all.checked = n > 0 && n === ok.length; all.indeterminate = n > 0 && n < ok.length; all.disabled = !ok.length; }
-    if (!n) { bar.innerHTML = ''; return; }
+    if (!n) { bar.innerHTML = ''; fit(main, false); return; }
     const total = rows.filter(d => picked.has(d.id)).reduce((s, d) => s + (d.kind === 'credit_note' ? -d.totalTtcCents : d.totalTtcCents), 0);
     const tooMany = n > MAX_ZIP;
     bar.innerHTML = `<div class="bl-selbar" role="status"><b>${plural(n, 'document sélectionné', 'documents sélectionnés')}</b><span class="bl-muted">${eur(total)} TTC</span>
@@ -145,6 +137,7 @@
         Bill.toast(`${plural(count, 'PDF enregistré', 'PDF enregistrés')} dans ${r.name}.`);
       } catch (err) { Bill.fail(err); } finally { exp.disabled = false; }
     };
+    fit(main, false);   // la barre pousse le tableau vers le bas : on lui retire sa hauteur
   }
 
   Bill.register('invoices', {
@@ -173,11 +166,11 @@
       main.querySelector('#il-month').onclick = () => Bill.go('month');
       await load(main);
       fit(main, true);
-      if (!fitBound) { fitBound = true; window.addEventListener('resize', () => { const m = document.getElementById('bl-main'); if (m && Bill.state.page === 'invoices') fit(m, false); }); }
       if (params.newInvoice) newInvoice(() => load(main));
       if (params.newCreditNote) newCreditNote(() => load(main));
       if (params.openId) Bill.openInvoice(params.openId, () => load(main));
     },
+    refit(main) { fit(main, false); },
   });
 
   // ---------- nouvelle facture ----------

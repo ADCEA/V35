@@ -67,12 +67,33 @@ test('« Nouvel avoir » : bouton sur la liste des factures et sur le tableau de
   assert.ok(dash.includes('data-act="credit">Nouvel avoir') && dash.includes('newCreditNote: true') && inv.includes('params.newCreditNote'));
 });
 
-test('cases à cocher : listes des factures et des BL, barre de sélection, export ZIP, colonne « Format facture »', () => {
+test('cases à cocher : listes des factures et des BL, barre de sélection, export ZIP, colonne « Format » (de la facture)', () => {
   const read = (f) => fs.readFileSync(path.join(PUBLIC, 'billing', f), 'utf8');
   const inv = read('invoices.js'); const bl = read('deliveries.js'); const css = read('billing.css');
   assert.ok(inv.includes('class="il-pick"') && inv.includes('id="il-all"') && inv.includes('/invoices/export.zip?ids='));
   assert.ok(inv.includes('id="il-bar"') && inv.includes('Exporter en PDF (un par facture)'));
   assert.ok(bl.includes('class="dl-pick"') && bl.includes('id="dl-all"') && bl.includes('/deliveries/export.pdf?ids=') && bl.includes('/deliveries/export.csv?ids='));
-  assert.ok(bl.includes('Format facture') && bl.includes('fmtTag(d)'));
+  assert.ok(bl.includes('>Format</th>') && bl.includes('fmtTag(d)'));
   assert.ok(css.includes('.bl-selbar') && css.includes('.bl-fmt'));
+});
+
+test('présentation compacte : bons de livraison et « Facturer le mois » reprennent la liste des factures (lignes serrées, hauteur d\'écran, en-tête fixe)', () => {
+  const read = (f) => fs.readFileSync(path.join(PUBLIC, 'billing', f), 'utf8');
+  const core = read('core.js'); const inv = read('invoices.js'); const bl = read('deliveries.js'); const mo = read('month.js'); const css = read('billing.css');
+  // une seule fonction d'ajustement à la hauteur de l'écran, partagée, rappelée au redimensionnement
+  assert.ok(core.includes('Bill.fitList = function') && core.includes("window.addEventListener('resize'") && core.includes('p.refit(m)'));
+  assert.ok(inv.includes("Bill.fitList(main, '.bl-tablewrap.inv'") && inv.includes('refit(main)') && !inv.includes('fitBound'));
+  // BL : tableau compact, puces de filtre comme les factures, barre de sélection qui retire sa hauteur au tableau
+  assert.ok(bl.includes('<div class="bl-tablewrap inv"><table class="bl-table inv dl">') && bl.includes("Bill.fitList(main, '.bl-tablewrap.inv'") && bl.includes('refit(main)'));
+  assert.ok(bl.includes('class="bl-head tight"') && bl.includes('class="bl-filters inline"') && bl.includes('class="bl-chipf ') && !bl.includes('class="bl-tab '));
+  assert.ok(bl.includes('<td class="client" title="'));
+  assert.ok((bl.match(/fit\(main, false\)/g) || []).length >= 3, 'la barre de sélection (affichée ou retirée) réajuste le tableau');
+  assert.ok(inv.includes('la barre pousse le tableau vers le bas'));
+  // Facturer le mois : les deux tableaux sont compacts, la ligne coche/ouvre, les brouillons sont atteignables sous la liste pleine hauteur
+  assert.equal((mo.match(/<div class="bl-tablewrap inv hug"><table class="bl-table inv">/g) || []).length, 2);
+  assert.ok(mo.includes("Bill.fitList(main, '#mo-prev .bl-tablewrap'") && mo.includes('refit(main)') && mo.includes('function goDrafts'));
+  assert.ok(mo.includes('id="mo-goto"') && mo.includes('id="mo-p2"'));
+  assert.ok(mo.includes('id="mo-all"') && mo.includes('class="mo-c"') && mo.includes('id="md-all"') && mo.includes('class="md-c"'), 'les cases existantes sont conservées');
+  // styles
+  assert.ok(css.includes('.bl-table.inv.dl td.client') && css.includes('.bl-tablewrap.inv.hug') && css.includes('.bl-chipsrow.pay'));
 });
