@@ -81,7 +81,7 @@
       const d = await Bill.get('/dashboard');
       Bill.state.dash = d;
       main.innerHTML = `<div class="bl-head"><div><h2>Tableau de bord</h2><p>Où en est l'argent, et ce qu'il reste à faire aujourd'hui.</p></div>
-        <div class="bl-actions"><button class="bl-btn" data-act="quote">Nouveau devis</button><button class="bl-btn primary" data-act="invoice">Nouvelle facture</button></div></div>
+        <div class="bl-actions"><button class="bl-btn" data-act="quote">Nouveau devis</button><button class="bl-btn" data-act="credit">Nouvel avoir</button><button class="bl-btn primary" data-act="invoice">Nouvelle facture</button></div></div>
         ${ribbon(d)}
         <div class="bl-grid2"><div>${todo(d)}</div><div>${chart(d)}${debtors(d)}</div></div>`;
       const tabFor = { notDue: 'open', d1_30: 'overdue', d31_60: 'overdue', d61_90: 'overdue', d90: 'overdue' };
@@ -89,6 +89,7 @@
       main.querySelectorAll('.bl-figure[data-go]').forEach(b => b.onclick = () => Bill.go(b.dataset.go, b.dataset.tab ? { tab: b.dataset.tab } : {}));
       main.querySelector('[data-act="invoice"]').onclick = () => Bill.go('invoices', { newInvoice: true });
       main.querySelector('[data-act="quote"]').onclick = () => Bill.go('quotes', { newQuote: true });
+      main.querySelector('[data-act="credit"]').onclick = () => Bill.go('invoices', { newCreditNote: true });
       // Les actions « À faire » sont reconstruites dans le même ordre que l'affichage.
       const acts = [];
       if (d.toInvoice.orders) acts.push(['month', {}]);

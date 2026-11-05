@@ -110,7 +110,7 @@
       S.bucket = params.bucket || null;
       const clients = await Bill.clients();
       main.innerHTML = `<div class="bl-head tight"><div><h2>Factures</h2><p>Toutes vos factures et avoirs. Cliquez sur une ligne pour l'ouvrir, l'envoyer ou enregistrer un règlement.</p></div>
-        <div class="bl-actions"><button class="bl-btn" id="il-month">Facturer le mois</button><button class="bl-btn primary" id="il-new">Nouvelle facture</button></div></div>
+        <div class="bl-actions"><button class="bl-btn" id="il-month">Facturer le mois</button><button class="bl-btn" id="il-credit">Nouvel avoir</button><button class="bl-btn primary" id="il-new">Nouvelle facture</button></div></div>
         <div class="bl-panel"><div class="bl-statusbar"><div class="bl-chipsrow" id="il-tabs" role="group" aria-label="Filtrer par statut"></div><div class="bl-listsum" id="il-sum" aria-live="polite"></div></div>
         <div class="bl-filters inline">
           <div class="bl-field grow"><label for="il-q" class="bl-sr">Rechercher</label><input id="il-q" type="search" value="${e(S.q)}" placeholder="Rechercher : numéro, hôtel, référence ou montant"></div>
@@ -124,11 +124,13 @@
       main.querySelector('#il-f').onchange = (ev) => { S.from = ev.target.value; load(main); };
       main.querySelector('#il-t').onchange = (ev) => { S.to = ev.target.value; load(main); };
       main.querySelector('#il-new').onclick = () => newInvoice(() => load(main));
+      main.querySelector('#il-credit').onclick = () => newCreditNote(() => load(main));
       main.querySelector('#il-month').onclick = () => Bill.go('month');
       await load(main);
       fit(main, true);
       if (!fitBound) { fitBound = true; window.addEventListener('resize', () => { const m = document.getElementById('bl-main'); if (m && Bill.state.page === 'invoices') fit(m, false); }); }
       if (params.newInvoice) newInvoice(() => load(main));
+      if (params.newCreditNote) newCreditNote(() => load(main));
       if (params.openId) Bill.openInvoice(params.openId, () => load(main));
     },
   });
@@ -187,8 +189,47 @@
   }
   Bill.newInvoice = newInvoice;
 
+  // ---------- nouvel avoir (depuis la liste) ----------
+  // Un avoir se rattache toujours à une facture émise : on choisit l'hôtel puis la facture, et le parcours habituel prend le relais
+  // (motif, avoir total ou partiel, brouillon, émission avec le code).
+  async function newCreditNote(done) {
+    const clients = await Bill.clients();
+    const m = Bill.modal({
+      title: 'Nouvel avoir',
+      body: `<p class="bl-note">Un avoir annule tout ou partie d'une facture émise. Choisissez l'hôtel puis la facture à créditer ; vous indiquerez ensuite le motif et les quantités.</p>
+        <div class="bl-field"><label for="cx-c">Hôtel</label><select id="cx-c">${Bill.clientOptions(clients, S.clientId)}</select></div>
+        <div class="bl-field"><label for="cx-i">Facture à créditer</label><select id="cx-i" disabled><option value="">Choisissez d'abord un hôtel…</option></select><div class="bl-hint" id="cx-hint"></div></div>`,
+      buttons: [
+        { label: 'Annuler', onClick: async () => {} },
+        { label: 'Continuer', primary: true, onClick: async (mm) => {
+          const invId = Number(mm.$('#cx-i').value);
+          if (!invId) throw new Error('Choisissez la facture à créditer.');
+          Bill.openInvoice(invId, done, { credit: true });
+        } },
+      ],
+    });
+    const sel = m.$('#cx-i'); const hint = m.$('#cx-hint');
+    async function loadInvoices() {
+      const cid = Number(m.$('#cx-c').value);
+      hint.textContent = ''; m.err('');
+      if (!cid) { sel.disabled = true; sel.innerHTML = '<option value="">Choisissez d\'abord un hôtel…</option>'; return; }
+      sel.disabled = true; sel.innerHTML = '<option value="">Chargement…</option>';
+      let list;
+      try { list = (await Bill.get(`/invoices?clientId=${cid}&sort=date&dir=desc&limit=500`)).invoices; } catch (err) { return Bill.fail(err, m.$('.bl-err')); }
+      list = list.filter(d => d.kind === 'invoice' && d.status === 'issued' && d.display !== 'credited');
+      if (!list.length) { sel.innerHTML = '<option value="">Aucune facture à créditer</option>'; hint.textContent = 'Cet hôtel n\'a aucune facture émise qui puisse encore être créditée.'; return; }
+      sel.innerHTML = (list.length > 1 ? '<option value="">Choisir une facture…</option>' : '') + list.map(d =>
+        `<option value="${d.id}">${e(d.number)} · ${dFr(d.issueDate)} · ${e(eur(d.totalTtcCents))} TTC${d.creditedCents ? ` (déjà crédité ${e(eur(d.creditedCents))})` : ''}${d.reference ? ' · ' + e(d.reference) : ''}</option>`).join('');
+      sel.disabled = false;
+    }
+    m.$('#cx-c').onchange = loadInvoices;
+    if (m.$('#cx-c').value) loadInvoices();
+  }
+  Bill.newCreditNote = newCreditNote;
+
   // ---------- tiroir de détail ----------
-  Bill.openInvoice = async function (id, onChange) {
+  // opts.credit : ouvre directement la fenêtre « Créer un avoir » une fois la facture chargée (bouton « Nouvel avoir » de la liste).
+  Bill.openInvoice = async function (id, onChange, opts = {}) {
     let changed = false; let inv; let view = null; let editing = false; let pdfTick = Date.now();
     const d = Bill.drawer({ onClose: () => { if (changed && onChange) onChange(); } });
     d.body.innerHTML = '<div class="bl-spin">Chargement…</div>';
@@ -444,6 +485,6 @@
       });
     }
 
-    reload();
+    reload().then(() => { if (opts.credit && inv && inv.status === 'issued' && inv.kind === 'invoice') ACTIONS.credit(); });
   };
 })();

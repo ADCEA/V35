@@ -461,6 +461,11 @@ Brouillons, À encaisser (émise, rien reçu, pas échue), En retard, Partielles
 La recherche, l'hôtel et les dates se combinent avec les statuts, et une ligne de synthèse donne le nombre de factures, le total TTC
 et le reste à encaisser de la sélection. L'API accepte `GET /invoices?status=overdue,partial` (l'ancien `tab=` fonctionne encore).
 
+**Nouvel avoir** : un bouton en haut de la liste des factures (et sur le tableau de bord) fait choisir l'hôtel puis, parmi ses factures émises
+non entièrement créditées, celle à créditer ; la fenêtre habituelle « Créer un avoir » s'ouvre alors (motif, avoir total ou partiel par
+quantités, confirmation par le code de la Facturation). L'avoir est créé en **brouillon**, vérifié puis émis comme une facture. Le même
+parcours reste disponible dans le tiroir de chaque facture (« Créer un avoir… »). Un avoir se rattache toujours à une facture émise.
+
 Pour afficher un maximum de factures : lignes sur une seule ligne en police 13 px, tableau qui occupe toute la hauteur de l'écran
 (en-têtes fixes, défilement dans le tableau), bandeau « File de production » réduit dans la Facturation.
 Le menu **Bons de livraison** est masqué par défaut ; le lien discret « Afficher les bons de livraison » sous le menu le
@@ -926,7 +931,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (327 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (328 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

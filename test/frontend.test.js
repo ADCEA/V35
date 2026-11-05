@@ -57,3 +57,12 @@ test("l'espace client à onglets : espace.js est chargé avant app.js, valide, e
   // (les éléments que les scripts fabriquent eux-mêmes, comme la carte NPS, n'ont pas à figurer dans la page)
   for (const id of ids) assert.ok(html.includes(`id="${id}"`) || src.includes(`id="${id}"`) || app.includes(`id="${id}"`), `#${id} absent de index.html`);
 });
+
+test('« Nouvel avoir » : bouton sur la liste des factures et sur le tableau de bord, qui ouvre la fenêtre de création d\'avoir', () => {
+  const read = (f) => fs.readFileSync(path.join(PUBLIC, 'billing', f), 'utf8');
+  const inv = read('invoices.js'); const dash = read('dashboard.js');
+  assert.ok(inv.includes('id="il-credit">Nouvel avoir</button>') && inv.includes("#il-credit').onclick"));
+  assert.ok(inv.includes('Bill.openInvoice(invId, done, { credit: true })'), 'le choix de la facture ouvre le parcours d\'avoir existant');
+  assert.ok(inv.includes('opts.credit') && inv.includes('ACTIONS.credit()'));
+  assert.ok(dash.includes('data-act="credit">Nouvel avoir') && dash.includes('newCreditNote: true') && inv.includes('params.newCreditNote'));
+});
