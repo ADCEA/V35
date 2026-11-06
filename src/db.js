@@ -450,6 +450,16 @@ if (driversWithoutToken.length > 0) {
 // Ligne unique pour le compteur de tickets, si absente
 db.prepare(`INSERT OR IGNORE INTO order_seq (id, value) VALUES (1, 0)`).run();
 
+// Parc de machines de départ (RH → Machines) : posé une seule fois, tant que l'équipe n'a encore rien saisi.
+// Modifiable ensuite depuis l'administration (noms, capacités, ajout, retrait).
+if (!db.prepare('SELECT 1 FROM machines LIMIT 1').get() && !db.prepare('SELECT 1 FROM employees LIMIT 1').get()) {
+  const ins = db.prepare('INSERT INTO machines (name, bu, capacity_kg, sort_order) VALUES (?, ?, ?, ?)');
+  [['Laveuse 1', 'lavage', 27], ['Laveuse 2', 'lavage', 27], ['Laveuse 3', 'lavage', 33],
+   ['Séchoir 1', 'sechage', 18], ['Séchoir 2', 'sechage', 18],
+   ['Calandre 320 cm', 'finition', null], ['Calandre 250 cm', 'finition', null]]
+    .forEach(([n, b, c], i) => ins.run(n, b, c, i + 1));
+}
+
 // Facturation intégrée (tables native_*, triggers d'inaltérabilité, réglages).
 require('./billing/schema')(db);
 

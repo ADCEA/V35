@@ -67,6 +67,7 @@ complète (accueil, commande, suivi, espace personnel, administration).
 - **order_items** — les articles d'une commande (catégorie de linge, quantité), liés à `orders` par `order_id`.
 - **admin** — une seule ligne (mot de passe haché + email de réception des bons de livraison).
 - **order_seq** — compteur utilisé pour générer les numéros de ticket (`CZ-AAMMJJ-XXXX`).
+- **machines**, **employees**, **time_entries**, **badge_terminals** — la partie Équipe (voir « Équipe (RH) et badgeuse »).
 
 ### Consulter la base directement
 
@@ -125,6 +126,8 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
 - **Logistique livraison** — gérez vos chauffeurs (nom + véhicule optionnel),
   puis glissez les commandes "prêtes" vers le chauffeur qui les livrera.
   Une colonne "Non assigné" regroupe celles pas encore prises en charge.
+- **Équipe** — collaborateurs rattachés à une BU ou à une machine, badgeuse de l'atelier, présence en direct et heures
+  pointées par poste (voir « Équipe (RH) et badgeuse »).
 - **Statistiques** — un seul filtre de dates en haut de page pilote tout :
   activité jour par jour, chiffres clés (commandes reçues et livrées, articles,
   hôtels actifs, poids, km), NPS, répartition par statut, top hôtels et
@@ -591,6 +594,44 @@ la facture : *Détaillé* (une ligne par article et par BL), *Par BL* (une ligne
 le format de la **facture** (brouillon ou émise) quand le BL y figure, sinon celui de la **fiche de l'hôtel** (appliqué à la prochaine facture) ;
 « — » pour un BL facturé dans l'ancien circuit. L'export Excel gagne une colonne `format_facture`.
 
+### Équipe (RH) et badgeuse
+
+Administration → **Équipe** (fichiers : `src/routes/rh.js`, `src/routes/badgeuse.js`, `src/utils/rh.js`, `src/utils/rhStore.js`, `public/rh.js`,
+`public/badgeuse.*`). Cinq onglets :
+
+- **Présence** — qui est là en ce moment, rangé par BU puis par machine (se rafraîchit toutes les 30 s). Une pastille rouge sur
+  **Heures** signale les pointages à corriger.
+- **Collaborateurs** — fiche : prénom, nom, fonction, contrat, heures par semaine, coût horaire chargé (facultatif),
+  **rattachement** (une machine, qui impose sa BU, ou une BU entière), code personnel (4 à 6 chiffres) et badge. Un collaborateur
+  n'est jamais effacé (ses heures font partie de l'historique) : il est **archivé** et peut être réactivé.
+- **Heures** — période (semaine, mois ou dates libres) : total, répartition par BU, grille collaborateur × jour, heures au-delà du
+  contrat (par semaine, lundi → dimanche) et alerte au-delà de 48 h, heures et coût de main-d'œuvre **par machine**, liste des
+  pointages (ajout, correction, suppression). Exports CSV pour Excel (`;`, BOM, virgule décimale) : récapitulatif par
+  collaborateur et détail des pointages. Les cellules qui ressembleraient à une formule sont neutralisées.
+- **Machines** — nom, BU, capacité. Parc de départ posé une seule fois (3 laveuses 27/27/33 kg, 2 séchoirs 18 kg, 2 calandres) tant que
+  l'équipe est vide. Une machine déjà utilisée est retirée sans effacer l'historique ; changer sa BU déplace ceux qui y sont rattachés.
+- **Badgeuses** — une tablette = un jeton (64 caractères, **montré une seule fois**, seule son empreinte est conservée), révocable.
+
+BU : Lavage, Séchage, Finition, Logistique, Administratif (liste dans `src/utils/rh.js`). Un « poste » est une machine ou une BU entière.
+
+**Tablette de l'atelier** (`/badgeuse`, plein écran, gros boutons) : créer la tablette dans Équipe → Badgeuses, ouvrir le **lien
+d'activation** sur la tablette (le jeton est dans la partie « # » de l'adresse, qui n'est jamais envoyée au serveur, puis effacée de
+l'adresse). On touche son prénom, on saisit son code, puis **Arrivée** (au poste de son rattachement ou ailleurs), **Changer de
+poste**, **Pause** ou **Départ**. Un lecteur de badge USB « clavier » fonctionne sans réglage (le numéro est lu comme une frappe
+rapide terminée par Entrée ; seule son empreinte est stockée). L'écran revient à l'accueil après 25 s sans action.
+
+Règles :
+- l'heure fait foi côté serveur ; chaque changement de poste ferme un tronçon et en ouvre un autre (`time_entries`, instants en UTC,
+  jours et semaines calculés à l'heure de Paris) ;
+- code faux : 5 essais puis blocage de 15 min (doublé à chaque récidive), **par collaborateur** (pas par adresse), journalisé dans
+  le journal de sécurité ; l'administrateur débloque depuis la fiche ;
+- **badge oublié** : un tronçon resté ouvert depuis la veille (ou plus de 16 h) ne compte pas comme du temps travaillé ; au pointage
+  suivant il est refermé pour une durée nulle, signalé « à corriger » et le collaborateur peut pointer normalement ; l'administrateur
+  renseigne l'heure de fin dans Heures ;
+- les pointages saisis ou corrigés à la main sont marqués « Manuelle » / « corrigé » ; ils ne peuvent ni chevaucher un autre pointage
+  du même collaborateur ni se situer dans le futur ;
+- aucune donnée de salaire n'est exposée à la tablette ; le coût horaire n'apparaît que dans l'administration.
+
 ### Présentation compacte des listes (factures, bons de livraison, Facturer le mois)
 
 Ces trois écrans partagent la même présentation : lignes serrées (une ligne par document, nom d'hôtel tronqué avec infobulle), en-tête de
@@ -961,7 +1002,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (334 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (347 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

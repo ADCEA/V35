@@ -477,3 +477,62 @@ CREATE TABLE IF NOT EXISTS claude_access_log (
   status   INTEGER,
   ip       TEXT
 );
+
+-- ---------- RH : équipe, postes et badgeuse ----------
+-- Un « poste » = une machine (laveuse, séchoir, calandre…) ou, à défaut, une unité (BU) entière (logistique, administratif…).
+-- BU : lavage, sechage, finition, logistique, admin.
+CREATE TABLE IF NOT EXISTS machines (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL,
+  bu          TEXT NOT NULL,
+  capacity_kg REAL,
+  active      INTEGER NOT NULL DEFAULT 1,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+-- Un collaborateur : rattaché à une BU et, si besoin, à une machine habituelle (son poste par défaut à la badgeuse).
+-- Le code personnel (PIN) n'est jamais conservé en clair ; le badge (UID du lecteur) est facultatif.
+CREATE TABLE IF NOT EXISTS employees (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  first_name       TEXT NOT NULL,
+  last_name        TEXT NOT NULL DEFAULT '',
+  job_title        TEXT,
+  contract         TEXT NOT NULL DEFAULT 'autre',
+  weekly_hours     REAL NOT NULL DEFAULT 39,
+  hourly_cost_cents INTEGER,
+  bu               TEXT NOT NULL,
+  machine_id       INTEGER REFERENCES machines(id) ON DELETE SET NULL,
+  pin_hash         TEXT,
+  badge_uid_hash   TEXT UNIQUE,
+  badge_hint       TEXT,
+  active           INTEGER NOT NULL DEFAULT 1,
+  notes            TEXT,
+  created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  archived_at      TEXT
+);
+-- Un pointage = un tronçon de présence à un poste. Changer de poste ferme le tronçon et en ouvre un autre ;
+-- un tronçon sans ended_at est en cours. Instants en UTC (ISO 8601).
+CREATE TABLE IF NOT EXISTS time_entries (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  started_at  TEXT NOT NULL,
+  ended_at    TEXT,
+  end_reason  TEXT,
+  bu          TEXT NOT NULL,
+  machine_id  INTEGER REFERENCES machines(id) ON DELETE SET NULL,
+  source      TEXT NOT NULL DEFAULT 'badgeuse',
+  terminal_id INTEGER,
+  note        TEXT,
+  edited_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_time_entries_emp ON time_entries(employee_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_time_entries_start ON time_entries(started_at);
+-- Tablettes de l'atelier autorisées à pointer : jeton conservé uniquement sous forme d'empreinte.
+CREATE TABLE IF NOT EXISTS badge_terminals (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  label        TEXT NOT NULL,
+  token_hash   TEXT NOT NULL UNIQUE,
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  last_seen_at TEXT,
+  revoked_at   TEXT
+);

@@ -97,3 +97,32 @@ test('présentation compacte : bons de livraison et « Facturer le mois » repre
   // styles
   assert.ok(css.includes('.bl-table.inv.dl td.client') && css.includes('.bl-tablewrap.inv.hug') && css.includes('.bl-chipsrow.pay'));
 });
+
+test('Équipe (RH) : onglet branché dans l\'administration, scripts valides, page de pointage sans script en ligne', () => {
+  const app = fs.readFileSync(path.join(PUBLIC, 'app.js'), 'utf8');
+  // onglet de l'administration
+  assert.ok(html.includes('data-admin-view="rh"') && html.includes('id="admin-view-rh"') && html.includes('id="rh-root"'));
+  assert.ok(/const ADMIN_VIEWS = \[[^\]]*'rh'/.test(app) && app.includes("if (view === 'rh') renderRhView()"));
+  assert.ok(html.includes('<link rel="stylesheet" href="/rh.css">') && html.includes('<script src="/rh.js"></script>'));
+  assert.ok(html.indexOf('/billing/core.js') < html.indexOf('/rh.js') && html.indexOf('/app.js') < html.indexOf('/rh.js'), 'rh.js utilise Bill, api() et escHtml()');
+  for (const f of ['rh.js', 'rh.css', 'badgeuse.js', 'badgeuse.css', 'badgeuse.html']) assert.ok(fs.existsSync(path.join(PUBLIC, f)), `${f} manquant`);
+  for (const f of ['rh.js', 'badgeuse.js']) assert.doesNotThrow(() => new vm.Script(fs.readFileSync(path.join(PUBLIC, f), 'utf8'), { filename: f }), f);
+
+  // tablette : la politique de sécurité interdit les scripts en ligne, donc la page ne doit en contenir aucun
+  const kiosk = fs.readFileSync(path.join(PUBLIC, 'badgeuse.html'), 'utf8');
+  assert.deepEqual([...kiosk.matchAll(/<script\b[^>]*>/g)].map(m => m[0]), ['<script src="/badgeuse.js">']);
+  assert.ok(!/\son(click|load|error|submit|change)=/i.test(kiosk), 'aucun gestionnaire en ligne');
+  assert.ok(kiosk.includes('<link rel="stylesheet" href="/badgeuse.css">') && kiosk.includes('noindex'));
+
+  // textes saisis (noms, notes, machines) : toujours échappés avant d'être placés dans la page
+  const rh = fs.readFileSync(path.join(PUBLIC, 'rh.js'), 'utf8');
+  const kjs = fs.readFileSync(path.join(PUBLIC, 'badgeuse.js'), 'utf8');
+  // (les deux seules interpolations directes de `x.name` de rh.js sont le titre et le texte des fenêtres Bill, qui échappent eux-mêmes)
+  for (const [name, src, allowed] of [['rh.js', rh, 2], ['badgeuse.js', kjs, 0]]) {
+    assert.ok(/const e(sc)? = /.test(src), `${name} : fonction d'échappement`);
+    const bare = [...src.matchAll(/\$\{\s*[a-z]\w*\.(?:name|firstName|lastName|jobTitle|machineName|note|notes|label|poste)\s*\}/g)].map(m => m[0]);
+    assert.equal(bare.length, allowed, `${name} : texte saisi placé sans échappement : ${bare.join(', ')}`);
+  }
+  // le jeton de tablette ne reste ni dans l'adresse ni ailleurs que dans le stockage local
+  assert.ok(kjs.includes("history.replaceState(null, '', location.pathname)") && kjs.includes("'x-terminal-token'"));
+});

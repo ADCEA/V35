@@ -14,6 +14,8 @@ const adminRouter = require('./routes/admin');
 const webhooksRouter = require('./routes/webhooks');
 const roomTypesRouter = require('./routes/roomTypes');
 const productionRouter = require('./routes/production');
+const rhRouter = require('./routes/rh');
+const badgeuseRouter = require('./routes/badgeuse');
 const logisticsRouter = require('./routes/logistics');
 const statsRouter = require('./routes/stats');
 const articlesRouter = require('./routes/articles');
@@ -93,6 +95,8 @@ app.use('/api/admin', adminRouter);
 app.use('/api/webhooks', webhooksRouter);
 app.use('/api/admin/room-types', roomTypesRouter);
 app.use('/api/admin/production', productionRouter);
+app.use('/api/admin/rh', rhRouter);
+app.use('/api/badgeuse', badgeuseRouter);
 app.use('/api/admin/logistics', logisticsRouter);
 app.use('/api/admin/stats', statsRouter);
 app.use('/api/admin/articles', articlesRouter);
@@ -104,6 +108,12 @@ app.use('/api/backup-pull', backupPullRouter);
 app.use('/api/claude/v1', claudeApiRouter);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// Page de la tablette de pointage (l'adresse d'activation porte le jeton après le « # », qui ne part jamais vers le serveur).
+app.get('/badgeuse', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, '..', 'public', 'badgeuse.html'));
+});
 
 // Toute route non-API renvoie l'app (single page)
 app.get(/^(?!\/api\/).*/, (req, res) => {

@@ -1,0 +1,86 @@
+/* Tablette de pointage — gros boutons, lisible à bout de bras, aucun survol nécessaire. */
+:root{--ink:#16324F;--steel:#566B7F;--line:#DEE6EE;--bg:#F5F8FC;--paper:#fff;--brand:#0F6FCB;--brand-soft:#E5F1FE;--brand-line:#9FC4EC;--ok:#17735A;--ok-soft:#E4F5EE;--bad:#B02A21;--bad-soft:#FDECEA}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 'IBM Plex Sans',system-ui,sans-serif;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
+.bk{min-height:100%;display:flex;flex-direction:column}
+.bk-top{flex:none;display:flex;align-items:center;gap:24px;padding:12px 28px;background:var(--paper);border-bottom:1px solid var(--line);min-height:72px}
+.bk-title{font:600 26px/1.1 'Fredoka',sans-serif}
+.bk-date{font-size:14px;color:var(--steel)}
+.bk-date::first-letter{text-transform:uppercase}
+.bk-clock{font:600 34px/1 'Fredoka',sans-serif;font-variant-numeric:tabular-nums;margin-left:auto}
+.bk-count{font-size:14px;color:var(--steel);text-align:right;min-width:120px}
+.bk-count b{display:block;font-size:18px;color:var(--ink)}
+.bk-banner{margin:0;padding:10px 28px;background:var(--bad-soft);color:var(--bad);font-weight:600;border-bottom:1px solid #D9A19B}
+.bk-main{flex:1;min-height:0;padding:22px 28px 28px;display:flex;flex-direction:column}
+.bk-h{font:600 24px/1.2 'Fredoka',sans-serif;margin:0 0 4px}
+.bk-sub{color:var(--steel);margin:0 0 16px;font-size:15px}
+.bk-hint{margin-top:auto;padding-top:18px;color:var(--steel);font-size:14px;text-align:center}
+
+/* accueil : un bouton par collaborateur, regroupés par unité */
+.bk-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px 18px;align-items:start}
+.bk-group{margin-bottom:6px}
+.bk-groups .bk-grid{grid-template-columns:minmax(0,1fr)}
+.bk-group{min-width:0}
+.bk-group h2{font:600 16px/1.2 'IBM Plex Sans',sans-serif;margin:0 0 8px;color:var(--steel)}
+.bk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.bk-person{min-height:76px;text-align:left;background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;justify-content:center;gap:2px}
+.bk-person:active{background:var(--brand-soft);border-color:var(--brand)}
+.bk-person .n{font-size:18px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bk-person .s{font-size:14px;color:var(--steel);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bk-person.here{border-color:#8CCDB4;background:#F4FBF8}
+.bk-person.here .s{color:var(--ok);font-weight:500}
+.bk-person.nopin{opacity:.55}
+
+/* code personnel */
+.bk-pin{max-width:380px;margin:0 auto;width:100%;display:flex;flex-direction:column;align-items:stretch}
+.bk-dots{display:flex;justify-content:center;gap:14px;height:34px;margin:6px 0 16px}
+.bk-dots i{width:20px;height:20px;border-radius:50%;border:2px solid var(--brand-line);background:transparent;align-self:center}
+.bk-dots i.on{background:var(--brand);border-color:var(--brand)}
+.bk-err{min-height:24px;text-align:center;color:var(--bad);font-weight:600;margin-bottom:8px}
+.bk-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.bk-key{height:72px;border-radius:14px;border:1px solid #C5D3E0;background:var(--paper);font:600 30px/1 'Fredoka',sans-serif}
+.bk-key:active{background:var(--brand-soft);border-color:var(--brand)}
+.bk-key.fn{font:500 16px/1.1 'IBM Plex Sans',sans-serif;color:var(--steel)}
+.bk-key.go{background:var(--brand);border-color:var(--brand);color:#fff;font:600 18px/1 'IBM Plex Sans',sans-serif}
+.bk-key:disabled{opacity:.45}
+
+/* actions */
+.bk-status{align-self:flex-start;display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--brand-soft);border-radius:10px;padding:10px 16px;margin:0 0 20px;font-size:16px}
+.bk-status.out{background:#EEF2F6;color:var(--steel)}
+.bk-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;max-width:900px}
+.bk-btn{min-height:84px;border-radius:14px;border:1px solid #C5D3E0;background:var(--paper);padding:10px 20px;font:600 20px/1.2 'IBM Plex Sans',sans-serif;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;text-align:left}
+.bk-btn small{font:400 15px/1.2 'IBM Plex Sans',sans-serif;color:var(--steel)}
+.bk-btn.main{background:var(--brand);border-color:var(--brand);color:#fff}
+.bk-btn.main small{color:#DCEBFA}
+.bk-btn.stop{border-color:#D9A19B;color:var(--bad)}
+.bk-btn:active{filter:brightness(.94)}
+.bk-btn:disabled{opacity:.5}
+.bk-back{align-self:flex-start;margin-top:22px;min-height:52px;padding:0 22px;border-radius:12px;border:1px solid #C5D3E0;background:var(--paper);font-weight:500;font-size:17px}
+
+/* choix du poste */
+.bk-poste{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.bk-poste .bk-btn{min-height:68px;font-size:18px}
+.bk-poste .bk-btn.cur{border-color:var(--brand);background:var(--brand-soft)}
+
+/* confirmation */
+.bk-done{margin:auto;text-align:center;max-width:620px}
+.bk-done .ic{width:96px;height:96px;border-radius:50%;background:var(--ok-soft);color:var(--ok);display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:56px;font-weight:700}
+.bk-done .big{font:600 32px/1.2 'Fredoka',sans-serif;margin:0 0 8px}
+.bk-done p{font-size:19px;margin:0 0 6px}
+.bk-done .bk-btn{margin:22px auto 0;min-width:260px;align-items:center;text-align:center}
+
+/* activation */
+.bk-setup{max-width:520px;margin:auto;width:100%}
+.bk-setup input{width:100%;height:56px;border:1px solid #C5D3E0;border-radius:12px;padding:0 14px;font:500 15px 'IBM Plex Sans',monospace;user-select:text;-webkit-user-select:text}
+.bk-setup .bk-btn{margin-top:14px;min-height:60px}
+.bk-empty{margin:auto;text-align:center;color:var(--steel)}
+
+@media (max-width:700px){
+  .bk-top{padding:10px 16px;gap:12px}.bk-main{padding:16px}.bk-clock{font-size:26px}.bk-count{display:none}
+  .bk-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
+}
+@media (prefers-reduced-motion:no-preference){.bk-main>*{animation:bk-in .12s ease-out}}
+@keyframes bk-in{from{opacity:.6}to{opacity:1}}

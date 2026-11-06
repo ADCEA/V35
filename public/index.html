@@ -20,6 +20,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="/billing/billing.css">
+<link rel="stylesheet" href="/rh.css">
 <script src="/vendor/jspdf.umd.min.js"></script>
 </head>
 <body>
@@ -341,6 +342,7 @@
           <button data-admin-view="production" class="active">Production</button>
           <button data-admin-view="kanban">Préparation de commande</button>
           <button data-admin-view="logistics">Logistique livraison</button>
+          <button data-admin-view="rh">Équipe</button>
           <div class="admin-subnav-more">
             <button id="admin-more-toggle" type="button">Plus ▾</button>
             <div class="admin-subnav-more-menu" id="admin-more-menu">
@@ -454,6 +456,10 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <div id="admin-view-rh" class="admin-subview" style="display:none;">
+          <div id="rh-root"><p class="empty-note">Chargement…</p></div>
         </div>
 
         <div id="admin-view-garage" class="admin-subview" style="display:none;">
@@ -668,5 +674,6 @@
 <script src="/billing/articles.js"></script>
 <script src="/billing/prices.js"></script>
 <script src="/billing/clients.js"></script>
+<script src="/rh.js"></script>
 </body>
 </html>
