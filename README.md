@@ -632,6 +632,52 @@ Règles :
   du même collaborateur ni se situer dans le futur ;
 - aucune donnée de salaire n'est exposée à la tablette ; le coût horaire n'apparaît que dans l'administration.
 
+### Atelier (production : lots, machines, heures, coût au kilo)
+
+Administration → **Atelier** (fichiers : `src/utils/prodStore.js`, `src/routes/prod.js`, `src/routes/atelier.js`, `src/utils/rhAuth.js`,
+`public/prod.*`, `public/atelier.*`). Il suit chaque **lot** de linge de la réception à la finition, machine par machine.
+
+**Un lot** a un code `L-MMDD-NN` (numéroté par jour, heure de Paris), un type de linge, un statut (en cours, terminé, annulé) et passe
+par trois étapes : **lavage → séchage → finition**. Chaque passage note la machine, le programme, le poids et les heures de début / fin
+prévue / fin réelle. Les clients d'un lot : un seul (cas courant) ou **plusieurs** (lot mélangé, kilos par client facultatifs), chacun
+pouvant être relié à une commande. Remarques, relavages et problèmes se rattachent au lot ; les pannes de machine sont à part.
+
+**Tablette de l'atelier** (`/atelier`, même tablette et même jeton que la badgeuse : un lien d'activation `/atelier#<jeton>`, ou la tablette
+déjà activée pour `/badgeuse`). Colonnes Lavage / Séchage / Finition avec les machines (en marche avec avancement et heure de fin
+prévue, libre, en panne), « À reprendre » (lots attendant l'étape suivante) et « Lots du jour ». Créer un lot, lancer ou terminer
+un passage, signaler une panne, ajouter une remarque : chaque action demande le **code personnel** du collaborateur (ou son badge),
+gardé 90 s en mémoire du navigateur seulement ; 5 mauvais codes bloquent (même règle que la badgeuse).
+
+**Onglets de l'administration** : *Aujourd'hui* (machines du jour, lots à reprendre, saisie manuelle d'un lot a posteriori),
+*Lots* (recherche par période, statut, client), *Machines* (30 jours : passages, kilos, charge moyenne, utilisation, cadence réelle,
+arrêts), *Heures* (par BU et par poste : heures, kilos, kg/h, coût, coût au kilo), *Tableau de bord* (coût au kilo comparé à
+l'objectif, kilos par jour, main-d'œuvre par étape, utilisation, kilos par type de linge et par client), *Réglages* (objectif, prix
+de l'eau et de l'énergie, tolérance de poids, horaires d'ouverture, programmes de lavage, types de linge). La cadence (kg/h) des
+calandres se règle dans Équipe → Machines (départ : 45 kg/h pour 320 cm, 35 kg/h pour 250 cm).
+
+Règles :
+- une machine doit appartenir à l'étape (laveuse → lavage…), le poids ne dépasse pas sa capacité, et deux passages ne peuvent pas se
+  chevaucher sur la même machine (ni une panne) ; un lot annulé libère ses machines ;
+- fin prévue d'un lavage = durée du programme ; séchage et finition = poids ÷ cadence de la machine ;
+- **passage oublié** : un passage resté ouvert depuis la veille (ou plus de 14 h) n'est pas considéré comme en marche ; quand la machine
+  est réutilisée il est refermé et une note « problème » est ajoutée au lot ;
+- un lot à un seul client sans poids explicite prend le poids du lot ; sur la fiche, le **poids attendu** (commande × poids d'article)
+  est comparé au poids pesé, avec la tolérance réglée ;
+- les saisies manuelles (jour passé) ne peuvent pas chevaucher un autre passage ni se situer dans le futur ;
+- remarques et noms sont stockés bruts et **échappés à l'affichage** ; la tablette n'a accès à aucune donnée de salaire.
+
+**Coût : ce qui est calculé et ce qui ne l'est pas.** Aucun chiffre n'est inventé : le coût d'un lavage = eau (litres du programme × prix
+du m³) + énergie (kWh × prix du kWh) + lessive (programme) ; tant que le prix ou la consommation n'est pas renseigné, la ligne affiche
+« à renseigner ». La main-d'œuvre vient des pointages : heures de chaque BU × coût horaire chargé, divisées par les kilos de l'étape
+(collaborateurs sans coût horaire signalés). Le **coût au kilo** du tableau de bord = main-d'œuvre + consommables des lavages, comparé
+à l'objectif (1,30 €/kg par défaut, modifiable). **Les consommations des séchoirs et des calandres ne sont pas incluses** (pas de
+données) : le chiffre est donc un minimum, pas un coût complet. Période maximale d'un calcul : 92 jours.
+
+API : tablette `/api/atelier/*` (jeton de tablette + code ou badge par action) ; administration `/api/admin/atelier/*`
+(`overview`, `lots`, `steps`, `incidents`, `reference`, `settings`, `hours`, `stats`). Migrations : tables `lots`, `lot_clients`,
+`lot_steps`, `lot_notes`, `machine_incidents`, `wash_programs`, `linen_types`, `prod_settings` et colonne `machines.throughput_kgh`,
+créées au démarrage sans toucher aux données existantes ; aucun programme ni prix n'est pré-rempli.
+
 ### Présentation compacte des listes (factures, bons de livraison, Facturer le mois)
 
 Ces trois écrans partagent la même présentation : lignes serrées (une ligne par document, nom d'hôtel tronqué avec infobulle), en-tête de
@@ -1002,7 +1048,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (347 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (361 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

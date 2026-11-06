@@ -450,6 +450,20 @@ if (driversWithoutToken.length > 0) {
 // Ligne unique pour le compteur de tickets, si absente
 db.prepare(`INSERT OR IGNORE INTO order_seq (id, value) VALUES (1, 0)`).run();
 
+// Cadence de la machine (kg/h) : colonne ajoutée après la première version de la table `machines`.
+if (!db.prepare('PRAGMA table_info(machines)').all().some(c => c.name === 'throughput_kgh')) {
+  db.exec('ALTER TABLE machines ADD COLUMN throughput_kgh REAL;');
+}
+
+// Types de linge de départ (Production) : modifiables ensuite depuis l'administration.
+if (!db.prepare('SELECT 1 FROM linen_types LIMIT 1').get()) {
+  const ins = db.prepare('INSERT INTO linen_types (label, sort_order) VALUES (?, ?)');
+  ['Grand plat', 'Petit plat', 'Éponge', 'Spa', 'Tenues'].forEach((l, i) => ins.run(l, i + 1));
+}
+// Objectif de coût (1,30 €/kg) et horaires d'ouverture (5 h – 21 h) ; les prix de l'eau et de l'énergie sont à saisir.
+const setDefault = db.prepare('INSERT OR IGNORE INTO prod_settings (key, value) VALUES (?, ?)');
+setDefault.run('target_cost_cents_per_kg', '130'); setDefault.run('open_from', '05:00'); setDefault.run('open_to', '21:00');
+
 // Parc de machines de départ (RH → Machines) : posé une seule fois, tant que l'équipe n'a encore rien saisi.
 // Modifiable ensuite depuis l'administration (noms, capacités, ajout, retrait).
 if (!db.prepare('SELECT 1 FROM machines LIMIT 1').get() && !db.prepare('SELECT 1 FROM employees LIMIT 1').get()) {
@@ -458,6 +472,13 @@ if (!db.prepare('SELECT 1 FROM machines LIMIT 1').get() && !db.prepare('SELECT 1
    ['Séchoir 1', 'sechage', 18], ['Séchoir 2', 'sechage', 18],
    ['Calandre 320 cm', 'finition', null], ['Calandre 250 cm', 'finition', null]]
     .forEach(([n, b, c], i) => ins.run(n, b, c, i + 1));
+}
+
+// Cadences réelles des deux calandres (kg/h), indiquées par l'atelier : posées une seule fois, modifiables ensuite (Équipe → Machines).
+if (!db.prepare("SELECT 1 FROM prod_settings WHERE key = 'seed_calender_throughput'").get()) {
+  db.prepare("UPDATE machines SET throughput_kgh = 45 WHERE name = 'Calandre 320 cm' AND throughput_kgh IS NULL").run();
+  db.prepare("UPDATE machines SET throughput_kgh = 35 WHERE name = 'Calandre 250 cm' AND throughput_kgh IS NULL").run();
+  db.prepare("INSERT INTO prod_settings (key, value) VALUES ('seed_calender_throughput', '1')").run();
 }
 
 // Facturation intégrée (tables native_*, triggers d'inaltérabilité, réglages).

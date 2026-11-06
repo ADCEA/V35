@@ -2876,7 +2876,7 @@ async function submitManualOrder(context) {
 document.getElementById('btn-new-manual-order').addEventListener('click', () => openManualOrderModal('kanban'));
 document.getElementById('btn-new-manual-production').addEventListener('click', () => openManualOrderModal('production'));
 
-const ADMIN_VIEWS = ['production', 'kanban', 'logistics', 'rh', 'stats', 'historique', 'equipment', 'garage', 'facture', 'billing', 'settings'];
+const ADMIN_VIEWS = ['production', 'atelier', 'kanban', 'logistics', 'rh', 'stats', 'historique', 'equipment', 'garage', 'facture', 'billing', 'settings'];
 
 function switchAdminView(view) {
   const allButtons = document.querySelectorAll('.admin-subnav > button, .admin-subnav-more-menu button');
@@ -2890,6 +2890,7 @@ function switchAdminView(view) {
   if (view === 'production') renderProductionKanban();
   if (view === 'kanban') refreshAdmin();
   if (view === 'logistics') renderLogisticsView();
+  if (view === 'atelier') renderAtelierView().catch(err => { document.getElementById('atelier-root').innerHTML = `<p style="color:var(--rust);font-size:12.5px;">${escHtml(err.message)}</p>`; });
   if (view === 'rh') renderRhView().catch(err => { document.getElementById('rh-root').innerHTML = `<p style="color:var(--rust);font-size:12.5px;">${escHtml(err.message)}</p>`; });
   if (view === 'stats') renderStats();
   if (view === 'historique') renderHistoryView();

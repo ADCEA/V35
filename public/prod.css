@@ -1,0 +1,53 @@
+/* Administration → Atelier (préfixe .pr-). Réutilise les composants de la Facturation (.bl-*) et de l'Équipe (.rh-*). */
+.pr-sub{font-size:12.5px;color:var(--steel);font-weight:400;}
+.pr-sub.late{color:var(--bl-late);font-weight:600;}
+.pr-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:0 0 16px;}
+.pr-kpis .rh-kpi small{display:block;margin-top:2px;}
+.pr-target{margin-top:6px;font-size:12.5px;font-weight:600;border-radius:6px;padding:3px 8px;display:inline-block;}
+.pr-target.ok{background:var(--bl-ok-bg);color:var(--bl-ok);}
+.pr-target.late{background:#FDECEA;color:var(--bl-late);}
+
+/* machines du jour */
+.pr-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;align-items:start;margin:0 0 6px;}
+.pr-m{background:var(--paper);border:1px solid var(--line);border-left:5px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:10px;display:flex;flex-direction:column;gap:5px;}
+.pr-m.run{border-left-color:var(--brand);}
+.pr-m.down{border-left-color:var(--bl-late);background:#FFF9F8;}
+.pr-mh{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.pr-mh b{font-size:14.5px;}
+.pr-why{color:var(--bl-late);font-weight:600;font-size:13.5px;}
+.pr-kg{font-family:'Fredoka',sans-serif;font-size:20px;font-weight:600;line-height:1.1;}
+.pr-kg small{font:400 12.5px 'IBM Plex Sans',sans-serif;color:var(--steel);margin-left:6px;}
+.pr-bar{height:6px;border-radius:3px;background:#E7EEF5;overflow:hidden;}
+.pr-bar i{display:block;height:100%;background:var(--brand);}
+.pr-m .bl-btn{align-self:flex-start;}
+.pr-code{font:500 12.5px 'IBM Plex Mono',monospace;color:var(--brand);background:#E5F1FE;border:0;border-radius:5px;padding:3px 7px;cursor:pointer;}
+.pr-lotchip{display:inline-flex;flex-direction:column;align-items:flex-start;gap:1px;text-align:left;background:var(--paper);border:1px solid #8CCDB4;border-radius:8px;padding:7px 12px;font-size:13.5px;cursor:pointer;}
+.pr-lotchip small{font-size:12px;color:var(--steel);}
+.pr-lotchip.off{border-color:#C5D3E0;color:#8C9DAE;}
+.pr-pill{display:inline-block;font-size:11.5px;border-radius:10px;padding:2px 8px;margin-right:4px;border:1px solid #C5D3E0;color:#8C9DAE;}
+.pr-pill.done{background:var(--bl-ok-bg);border-color:#8CCDB4;color:var(--bl-ok);}
+.pr-pill.run{background:#E5F1FE;border-color:#9FC4EC;color:var(--brand);font-weight:600;}
+
+/* fiche d'un lot */
+.pr-lothead{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 6px;font-size:14px;}
+.pr-two{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:22px;}
+.pr-dl{display:grid;grid-template-columns:110px minmax(0,1fr);gap:6px 12px;margin:0;font-size:13.5px;}
+.pr-dl dt{color:var(--steel);}
+.pr-dl dd{margin:0;}
+.pr-order{margin:0 0 10px;font-size:13.5px;}
+.pr-notes{list-style:none;margin:0 0 10px;padding:0;}
+.pr-note{padding:7px 10px;border-radius:6px;border:1px solid var(--line);background:var(--paper);margin-bottom:6px;font-size:13.5px;}
+.pr-note.relavage,.pr-note.probleme{border-color:#D9A19B;background:#FFF9F8;}
+.pr-note small{display:block;color:var(--steel);font-size:12px;}
+.pr-crow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 6px;}
+.pr-crow select,.pr-crow input{height:34px;border:1px solid #C5D3E0;border-radius:6px;padding:0 8px;background:#fff;color:var(--ink);font-size:13.5px;font-family:inherit;}
+.pr-crow select{min-width:200px;max-width:320px;}
+
+/* tableau de bord */
+.pr-chart{display:flex;align-items:flex-end;gap:3px;height:170px;border-bottom:1px solid var(--line);padding:0 2px;margin:0 0 4px;}
+.pr-colw{flex:1;min-width:4px;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;position:relative;}
+.pr-col{width:100%;max-width:34px;background:var(--brand);border-radius:3px 3px 0 0;min-height:1px;}
+.pr-colw span{position:absolute;bottom:-18px;font-size:10.5px;color:var(--steel);white-space:nowrap;}
+.pr-chart{margin-bottom:24px;}
+.pr-set{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:0 0 12px;}
+@media (max-width:760px){.pr-dl{grid-template-columns:90px minmax(0,1fr);}.pr-crow select{min-width:0;max-width:none;width:100%;}}

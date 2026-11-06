@@ -5,6 +5,7 @@ const db = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const rh = require('../utils/rh');
 const store = require('../utils/rhStore');
+const { buildHours } = require('../utils/rhHours');
 const loginGuard = require('../utils/loginGuard');
 const securityLog = require('../utils/securityLog');
 
@@ -36,7 +37,7 @@ function employeeOut(r, openByEmp, machines, nowMs) {
     present,
   };
 }
-const machineOut = (m) => ({ id: m.id, name: m.name, bu: m.bu, capacityKg: m.capacity_kg, active: !!m.active, sortOrder: m.sort_order });
+const machineOut = (m) => ({ id: m.id, name: m.name, bu: m.bu, capacityKg: m.capacity_kg, throughputKgh: m.throughput_kgh, active: !!m.active, sortOrder: m.sort_order });
 
 function loadAll() {
   const nowMs = Date.now();
@@ -72,16 +73,19 @@ function readMachine(body, current) {
   let cap = body.capacityKg !== undefined ? body.capacityKg : current && current.capacity_kg;
   if (cap === '' || cap == null) cap = null;
   else { cap = Number(String(cap).replace(',', '.')); if (!Number.isFinite(cap) || cap <= 0 || cap > 1000) return { error: 'Capacité en kg invalide.' }; }
+  let tph = body.throughputKgh !== undefined ? body.throughputKgh : current && current.throughput_kgh;
+  if (tph === '' || tph == null) tph = null;
+  else { tph = Number(String(tph).replace(',', '.')); if (!Number.isFinite(tph) || tph <= 0 || tph > 5000) return { error: 'Cadence en kg/h invalide.' }; }
   const sort = body.sortOrder !== undefined ? Math.trunc(Number(body.sortOrder)) || 0 : (current ? current.sort_order : 0);
   const active = body.active !== undefined ? (body.active ? 1 : 0) : (current ? current.active : 1);
-  return { name, bu, cap, sort, active };
+  return { name, bu, cap, tph, sort, active };
 }
 
 router.post('/machines', (req, res) => {
   const v = readMachine(req.body || {}, null);
   if (v.error) return bad(res, v.error);
   const next = db.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 n FROM machines').get().n;
-  const info = db.prepare('INSERT INTO machines (name, bu, capacity_kg, sort_order) VALUES (?, ?, ?, ?)').run(v.name, v.bu, v.cap, req.body.sortOrder !== undefined ? v.sort : next);
+  const info = db.prepare('INSERT INTO machines (name, bu, capacity_kg, throughput_kgh, sort_order) VALUES (?, ?, ?, ?, ?)').run(v.name, v.bu, v.cap, v.tph, req.body.sortOrder !== undefined ? v.sort : next);
   res.status(201).json({ machine: machineOut(store.machineById.get(info.lastInsertRowid)) });
 });
 
@@ -91,7 +95,7 @@ router.put('/machines/:id', (req, res) => {
   const v = readMachine(req.body || {}, cur);
   if (v.error) return bad(res, v.error);
   db.transaction(() => {
-    db.prepare('UPDATE machines SET name = ?, bu = ?, capacity_kg = ?, sort_order = ?, active = ? WHERE id = ?').run(v.name, v.bu, v.cap, v.sort, v.active, cur.id);
+    db.prepare('UPDATE machines SET name = ?, bu = ?, capacity_kg = ?, throughput_kgh = ?, sort_order = ?, active = ? WHERE id = ?').run(v.name, v.bu, v.cap, v.tph, v.sort, v.active, cur.id);
     // Les collaborateurs rattachés à la machine suivent son unité.
     if (v.bu !== cur.bu) db.prepare('UPDATE employees SET bu = ? WHERE machine_id = ?').run(v.bu, cur.id);
   })();
@@ -102,7 +106,8 @@ router.put('/machines/:id', (req, res) => {
 router.delete('/machines/:id', (req, res) => {
   const cur = store.machineById.get(Number(req.params.id));
   if (!cur) return bad(res, 'Machine introuvable.', 404);
-  const used = db.prepare('SELECT (SELECT COUNT(*) FROM employees WHERE machine_id = ?) + (SELECT COUNT(*) FROM time_entries WHERE machine_id = ?) n').get(cur.id, cur.id).n;
+  const used = db.prepare(`SELECT (SELECT COUNT(*) FROM employees WHERE machine_id = ?) + (SELECT COUNT(*) FROM time_entries WHERE machine_id = ?)
+    + (SELECT COUNT(*) FROM lot_steps WHERE machine_id = ?) + (SELECT COUNT(*) FROM machine_incidents WHERE machine_id = ?) n`).get(cur.id, cur.id, cur.id, cur.id).n;
   if (used) {
     db.transaction(() => {
       db.prepare('UPDATE machines SET active = 0 WHERE id = ?').run(cur.id);
@@ -367,64 +372,6 @@ router.delete('/entries/:id', (req, res) => {
 });
 
 // ---------- heures ----------
-function buildHours(from, to, nowMs) {
-  const weekFrom = rh.weekStart(from);
-  const weekTo = rh.addDays(rh.weekStart(to), 6);
-  const fromIso = new Date(rh.parisMidnightMs(weekFrom)).toISOString();
-  const toIso = new Date(rh.parisMidnightMs(rh.addDays(weekTo, 1))).toISOString();
-  const raw = db.prepare('SELECT * FROM time_entries WHERE started_at < ? AND (ended_at IS NULL OR ended_at > ?)').all(toIso, fromIso);
-  const rows = rh.accumulate(store.effectiveEntries(raw, nowMs), weekFrom, weekTo, nowMs);
-  const staleIds = new Set(raw.filter(e => store.isStale(e, nowMs)).map(e => e.employee_id));
-  const liveIds = new Set(raw.filter(e => !e.ended_at && !store.isStale(e, nowMs)).map(e => e.employee_id));
-
-  const machines = new Map(db.prepare('SELECT * FROM machines').all().map(m => [m.id, m]));
-  const emps = db.prepare('SELECT * FROM employees').all();
-  const empById = new Map(emps.map(e => [e.id, e]));
-  const days = []; for (let d = from; d <= to; d = rh.addDays(d, 1)) days.push(d);
-  const weeks = []; for (let w = weekFrom; w <= rh.weekStart(to); w = rh.addDays(w, 7)) weeks.push(w);
-
-  const per = new Map();   // employeeId -> cumul
-  const getP = (id) => {
-    if (!per.has(id)) per.set(id, { days: {}, total: 0, weekMin: {}, byBu: {} });
-    return per.get(id);
-  };
-  const byBu = new Map(), byMachine = new Map();
-  let total = 0, totalCost = 0;
-  for (const r of rows) {
-    const p = getP(r.employeeId);
-    const w = rh.weekStart(r.date);
-    p.weekMin[w] = (p.weekMin[w] || 0) + r.min;
-    if (r.date < from || r.date > to) continue;   // jours de semaines incomplètes : comptés pour la semaine seulement
-    p.days[r.date] = (p.days[r.date] || 0) + r.min;
-    p.total += r.min;
-    p.byBu[r.bu] = (p.byBu[r.bu] || 0) + r.min;
-    const emp = empById.get(r.employeeId);
-    const cost = emp && emp.hourly_cost_cents != null ? Math.round(r.min * emp.hourly_cost_cents / 60) : 0;
-    total += r.min; totalCost += cost;
-    const b = byBu.get(r.bu) || { bu: r.bu, min: 0, costCents: 0 }; b.min += r.min; b.costCents += cost; byBu.set(r.bu, b);
-    // Une ligne par machine ; les heures pointées sur une unité seule forment une ligne « unité entière ».
-    const mk = r.machineId ? 'm:' + r.machineId : 'bu:' + r.bu;
-    const mm = byMachine.get(mk) || { machineId: r.machineId, name: r.machineId ? ((machines.get(r.machineId) || {}).name || 'Machine retirée') : null, bu: r.bu, min: 0, costCents: 0 };
-    mm.min += r.min; mm.costCents += cost; byMachine.set(mk, mm);
-  }
-  const employees = emps
-    .filter(e => e.active || (per.get(e.id) && per.get(e.id).total))
-    .map(e => {
-      const p = per.get(e.id) || { days: {}, total: 0, weekMin: {}, byBu: {} };
-      return {
-        id: e.id, name: `${e.first_name} ${e.last_name}`.trim(), bu: e.bu, contract: e.contract, weeklyHours: e.weekly_hours, active: !!e.active,
-        days: p.days, total: p.total, open: liveIds.has(e.id), forgotten: staleIds.has(e.id),
-        weeks: weeks.map(w => ({ start: w, min: p.weekMin[w] || 0 })),
-        costCents: e.hourly_cost_cents == null ? null : Math.round(p.total * e.hourly_cost_cents / 60),
-      };
-    });
-  return {
-    from, to, days, weeks, employees, total, costCents: totalCost,
-    byBu: rh.BU_IDS.map(id => byBu.get(id) || { bu: id, min: 0, costCents: 0 }),
-    byMachine: [...byMachine.values()].sort((a, b) => rh.BU_IDS.indexOf(a.bu) - rh.BU_IDS.indexOf(b.bu) || (a.name || '').localeCompare(b.name || '', 'fr')),
-  };
-}
-
 router.get('/hours', (req, res) => {
   const range = readRange(req);
   if (range.error) return bad(res, range.error);

@@ -16,6 +16,8 @@ const roomTypesRouter = require('./routes/roomTypes');
 const productionRouter = require('./routes/production');
 const rhRouter = require('./routes/rh');
 const badgeuseRouter = require('./routes/badgeuse');
+const prodRouter = require('./routes/prod');
+const atelierRouter = require('./routes/atelier');
 const logisticsRouter = require('./routes/logistics');
 const statsRouter = require('./routes/stats');
 const articlesRouter = require('./routes/articles');
@@ -97,6 +99,8 @@ app.use('/api/admin/room-types', roomTypesRouter);
 app.use('/api/admin/production', productionRouter);
 app.use('/api/admin/rh', rhRouter);
 app.use('/api/badgeuse', badgeuseRouter);
+app.use('/api/admin/atelier', prodRouter);
+app.use('/api/atelier', atelierRouter);
 app.use('/api/admin/logistics', logisticsRouter);
 app.use('/api/admin/stats', statsRouter);
 app.use('/api/admin/articles', articlesRouter);
@@ -113,6 +117,12 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('/badgeuse', (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, '..', 'public', 'badgeuse.html'));
+});
+
+// Écran de la tablette de l'atelier (machines, lots) : même activation par jeton que la badgeuse.
+app.get('/atelier', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, '..', 'public', 'atelier.html'));
 });
 
 // Toute route non-API renvoie l'app (single page)

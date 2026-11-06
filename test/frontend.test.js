@@ -126,3 +126,33 @@ test('Équipe (RH) : onglet branché dans l\'administration, scripts valides, pa
   // le jeton de tablette ne reste ni dans l'adresse ni ailleurs que dans le stockage local
   assert.ok(kjs.includes("history.replaceState(null, '', location.pathname)") && kjs.includes("'x-terminal-token'"));
 });
+
+test('Atelier (production) : onglet admin branché, écran tablette sans script en ligne, textes saisis échappés', () => {
+  const app = fs.readFileSync(path.join(PUBLIC, 'app.js'), 'utf8');
+  // onglet de l'administration
+  assert.ok(html.includes('data-admin-view="atelier"') && html.includes('id="admin-view-atelier"') && html.includes('id="atelier-root"'));
+  assert.ok(/const ADMIN_VIEWS = \[[^\]]*'atelier'/.test(app) && app.includes("if (view === 'atelier') renderAtelierView()"));
+  assert.ok(app.includes("if (view === 'rh') renderRhView()"), 'l\'onglet Équipe reste branché');
+  assert.ok(html.includes('<link rel="stylesheet" href="/prod.css">') && html.includes('<script src="/prod.js"></script>'));
+  for (const dep of ['/app.js', '/billing/core.js', '/rh.js']) assert.ok(html.indexOf(dep) < html.indexOf('/prod.js'), `prod.js se charge après ${dep}`);
+  for (const f of ['prod.js', 'prod.css', 'atelier.js', 'atelier.css', 'atelier.html']) assert.ok(fs.existsSync(path.join(PUBLIC, f)), `${f} manquant`);
+  for (const f of ['prod.js', 'atelier.js']) assert.doesNotThrow(() => new vm.Script(fs.readFileSync(path.join(PUBLIC, f), 'utf8'), { filename: f }), f);
+
+  // tablette : aucun script en ligne (la politique de sécurité les interdit), page non indexée
+  const tab = fs.readFileSync(path.join(PUBLIC, 'atelier.html'), 'utf8');
+  assert.deepEqual([...tab.matchAll(/<script\b[^>]*>/g)].map(m => m[0]), ['<script src="/atelier.js">']);
+  assert.ok(!/\son(click|load|error|submit|change)=/i.test(tab), 'aucun gestionnaire en ligne');
+  assert.ok(tab.includes('<link rel="stylesheet" href="/atelier.css">') && tab.includes('noindex'));
+
+  // textes saisis (clients, notes, motifs, programmes) : toujours échappés avant d'être placés dans la page
+  const pj = fs.readFileSync(path.join(PUBLIC, 'prod.js'), 'utf8');
+  const aj = fs.readFileSync(path.join(PUBLIC, 'atelier.js'), 'utf8');
+  // (seule interpolation directe : le code du lot, généré par le serveur, dans le titre d'une fenêtre Bill)
+  for (const [name, src, allowed] of [['prod.js', pj, 1], ['atelier.js', aj, 0]]) {
+    assert.ok(/const e(sc)? = /.test(src), `${name} : fonction d'échappement`);
+    const bare = [...src.matchAll(/\$\{\s*[a-z]\w*\.(?:name|firstName|lastName|jobTitle|machineName|note|notes|label|poste|text|reason|clientName|programName|linenType|code)\s*\}/g)].map(m => m[0]);
+    assert.equal(bare.length, allowed, `${name} : texte saisi placé sans échappement : ${bare.join(', ')}`);
+  }
+  // l'écran tablette partage le jeton de la badgeuse et n'en laisse rien dans l'adresse
+  assert.ok(aj.includes("history.replaceState(null, '', location.pathname)") && aj.includes("'x-terminal-token'") && aj.includes('cezanne.badgeuse.token'));
+});

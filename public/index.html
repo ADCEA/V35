@@ -21,6 +21,7 @@
 <link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="/billing/billing.css">
 <link rel="stylesheet" href="/rh.css">
+<link rel="stylesheet" href="/prod.css">
 <script src="/vendor/jspdf.umd.min.js"></script>
 </head>
 <body>
@@ -340,6 +341,7 @@
 
         <div class="admin-subnav">
           <button data-admin-view="production" class="active">Production</button>
+          <button data-admin-view="atelier">Atelier</button>
           <button data-admin-view="kanban">Préparation de commande</button>
           <button data-admin-view="logistics">Logistique livraison</button>
           <button data-admin-view="rh">Équipe</button>
@@ -456,6 +458,10 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <div id="admin-view-atelier" class="admin-subview" style="display:none;">
+          <div id="atelier-root"><p class="empty-note">Chargement…</p></div>
         </div>
 
         <div id="admin-view-rh" class="admin-subview" style="display:none;">
@@ -675,5 +681,6 @@
 <script src="/billing/prices.js"></script>
 <script src="/billing/clients.js"></script>
 <script src="/rh.js"></script>
+<script src="/prod.js"></script>
 </body>
 </html>

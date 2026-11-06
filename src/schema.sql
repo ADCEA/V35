@@ -486,6 +486,7 @@ CREATE TABLE IF NOT EXISTS machines (
   name        TEXT NOT NULL,
   bu          TEXT NOT NULL,
   capacity_kg REAL,
+  throughput_kgh REAL,
   active      INTEGER NOT NULL DEFAULT 1,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
@@ -536,3 +537,89 @@ CREATE TABLE IF NOT EXISTS badge_terminals (
   last_seen_at TEXT,
   revoked_at   TEXT
 );
+
+-- ---------- Production : lots de lavage, passages machine, programmes ----------
+-- Réglages (prix de l'eau et de l'énergie, objectif de coût au kilo, horaires d'ouverture) : clé → valeur texte.
+CREATE TABLE IF NOT EXISTS prod_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS linen_types (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  label      TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  active     INTEGER NOT NULL DEFAULT 1
+);
+-- Programme de lavage : durée et consommations moyennes (servent à estimer le coût tant que les compteurs ne sont pas branchés).
+CREATE TABLE IF NOT EXISTS wash_programs (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  name            TEXT NOT NULL,
+  temp_c          INTEGER,
+  duration_min    INTEGER,
+  water_l         REAL,
+  energy_kwh      REAL,
+  detergent_cents INTEGER,
+  active          INTEGER NOT NULL DEFAULT 1,
+  sort_order      INTEGER NOT NULL DEFAULT 0
+);
+-- Un lot = du linge traité ensemble ; il peut regrouper plusieurs clients (lot_clients) et passer par plusieurs machines (lot_steps).
+CREATE TABLE IF NOT EXISTS lots (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  code          TEXT NOT NULL UNIQUE,
+  day           TEXT NOT NULL,
+  linen_type_id INTEGER REFERENCES linen_types(id) ON DELETE SET NULL,
+  status        TEXT NOT NULL DEFAULT 'en_cours',
+  note          TEXT,
+  created_by    INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  terminal_id   INTEGER,
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  closed_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_lots_day ON lots(day);
+CREATE TABLE IF NOT EXISTS lot_clients (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  lot_id    INTEGER NOT NULL REFERENCES lots(id) ON DELETE CASCADE,
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  societe   TEXT NOT NULL,
+  order_id  INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  weight_kg REAL
+);
+CREATE INDEX IF NOT EXISTS idx_lot_clients_lot ON lot_clients(lot_id);
+-- stage : lavage | sechage | finition. Un passage sans ended_at est en cours sur sa machine.
+CREATE TABLE IF NOT EXISTS lot_steps (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  lot_id         INTEGER NOT NULL REFERENCES lots(id) ON DELETE CASCADE,
+  stage          TEXT NOT NULL,
+  machine_id     INTEGER REFERENCES machines(id) ON DELETE SET NULL,
+  program_id     INTEGER REFERENCES wash_programs(id) ON DELETE SET NULL,
+  weight_kg      REAL NOT NULL,
+  started_at     TEXT NOT NULL,
+  planned_end_at TEXT,
+  ended_at       TEXT,
+  employee_id    INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  note           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_lot_steps_lot ON lot_steps(lot_id);
+CREATE INDEX IF NOT EXISTS idx_lot_steps_machine ON lot_steps(machine_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_lot_steps_start ON lot_steps(started_at);
+-- kind : remarque | probleme | relavage
+CREATE TABLE IF NOT EXISTS lot_notes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  lot_id      INTEGER NOT NULL REFERENCES lots(id) ON DELETE CASCADE,
+  at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  kind        TEXT NOT NULL DEFAULT 'remarque',
+  text        TEXT NOT NULL,
+  employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lot_notes_lot ON lot_notes(lot_id);
+-- Panne ou arrêt d'une machine : bloque le lancement d'un lot tant qu'elle n'est pas remise en service.
+CREATE TABLE IF NOT EXISTS machine_incidents (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  machine_id  INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
+  started_at  TEXT NOT NULL,
+  ended_at    TEXT,
+  reason      TEXT NOT NULL,
+  note        TEXT,
+  employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_incidents_machine ON machine_incidents(machine_id, started_at);

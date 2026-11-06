@@ -6,28 +6,12 @@ const db = require('../db');
 const security = require('../middleware/security');
 const rh = require('../utils/rh');
 const store = require('../utils/rhStore');
-const loginGuard = require('../utils/loginGuard');
-const securityLog = require('../utils/securityLog');
 
 const router = express.Router();
 router.use(security.rateLimit({ name: 'badgeuse', windowMs: 10 * 60 * 1000, max: 900, message: 'Trop de demandes. Réessayez dans quelques minutes.' }));
 
-const SEEN_EVERY_MS = 60 * 1000;
-const seenStmt = db.prepare('UPDATE badge_terminals SET last_seen_at = ? WHERE id = ?');
-const fail = (res, status, error, extra) => res.status(status).json({ error, ...(extra || {}) });
+const { requireTerminal, authenticate, fail } = require('../utils/rhAuth');
 
-// ---------- authentification de la tablette ----------
-function requireTerminal(req, res, next) {
-  const raw = req.get('x-terminal-token');
-  if (!raw || raw.length < 32 || raw.length > 128) return fail(res, 401, 'Tablette non activée.', { code: 'TERMINAL_UNKNOWN' });
-  const t = db.prepare('SELECT * FROM badge_terminals WHERE token_hash = ?').get(rh.tokenHash(raw));
-  if (!t) return fail(res, 401, 'Tablette non reconnue : demandez un nouveau lien d\'activation.', { code: 'TERMINAL_UNKNOWN' });
-  if (t.revoked_at) return fail(res, 401, 'Cette tablette a été désactivée.', { code: 'TERMINAL_REVOKED' });
-  const now = Date.now();
-  if (!t.last_seen_at || now - Date.parse(t.last_seen_at) > SEEN_EVERY_MS) seenStmt.run(new Date(now).toISOString(), t.id);
-  req.terminal = t;
-  next();
-}
 router.use(requireTerminal);
 
 // ---------- présentation ----------
@@ -49,46 +33,6 @@ function employeeOut(e) {
     id: e.id, firstName: e.first_name, lastName: e.last_name, name: `${e.first_name} ${e.last_name}`.trim(),
     bu: e.bu, machineId: usable ? usable.id : null, machineName: usable ? usable.name : null,
   };
-}
-
-// ---------- identification (code personnel ou badge) ----------
-// Les échecs sont comptés par collaborateur (code) ou par tablette (badge) : jamais par adresse, qui est partagée derrière le relais.
-function authenticate(req, res) {
-  const body = req.body || {};
-  if (body.uid !== undefined && body.uid !== null && body.uid !== '') {
-    const h = rh.uidHash(body.uid);
-    if (!h || rh.normUid(body.uid).length < 4) { fail(res, 400, 'Badge illisible : passez-le de nouveau.'); return null; }
-    const key = `badge:uid:${req.terminal.id}`;
-    const st = loginGuard.status(key);
-    if (st.locked) { fail(res, 429, loginGuard.message(st.retryAfterSec), { code: 'LOCKED', retryAfterSec: st.retryAfterSec }); return null; }
-    const e = db.prepare('SELECT * FROM employees WHERE badge_uid_hash = ? AND active = 1').get(h);
-    if (!e) {
-      const after = loginGuard.fail(key);
-      if (after.locked) securityLog.record('badgeuse_blocked', req, `badges inconnus — tablette « ${req.terminal.label} »`);
-      fail(res, 401, 'Badge inconnu. Utilisez votre code personnel.', { code: 'BAD_BADGE' });
-      return null;
-    }
-    loginGuard.ok(key);
-    return e;
-  }
-  const id = Number(body.employeeId);
-  const pin = body.pin == null ? '' : String(body.pin);
-  const e = Number.isInteger(id) ? db.prepare('SELECT * FROM employees WHERE id = ? AND active = 1').get(id) : null;
-  if (!e) { fail(res, 401, 'Code incorrect.', { code: 'BAD_PIN' }); return null; }
-  const key = `badge:emp:${e.id}`;
-  const st = loginGuard.status(key);
-  if (st.locked) { fail(res, 429, loginGuard.message(st.retryAfterSec), { code: 'LOCKED', retryAfterSec: st.retryAfterSec }); return null; }
-  if (!e.pin_hash) { fail(res, 403, 'Aucun code personnel défini : voyez le responsable.', { code: 'NO_PIN' }); return null; }
-  if (!/^\d{4,6}$/.test(pin) || !rh.checkPin(pin, e.pin_hash)) {
-    const after = loginGuard.fail(key);
-    if (after.locked) {
-      securityLog.record('badgeuse_blocked', req, `code erroné — ${e.first_name} ${e.last_name}`.trim());
-      fail(res, 429, loginGuard.message(after.retryAfterSec), { code: 'LOCKED', retryAfterSec: after.retryAfterSec });
-    } else fail(res, 401, 'Code incorrect.', { code: 'BAD_PIN' });
-    return null;
-  }
-  loginGuard.ok(key);
-  return e;
 }
 
 // GET /api/badgeuse/state — liste des collaborateurs (qui est là, qui n'y est pas), machines et unités.

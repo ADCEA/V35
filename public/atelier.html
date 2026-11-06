@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#F5F8FC">
+<title>Atelier — Blanchisserie Cézanne</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/atelier.css">
+</head>
+<body>
+<div id="app" class="at">
+  <header class="at-top">
+    <div>
+      <div class="at-title">Atelier</div>
+      <div class="at-date" id="at-date" aria-live="off"></div>
+    </div>
+    <div class="at-sum" id="at-sum"></div>
+    <div class="at-who" id="at-who"></div>
+    <button type="button" class="at-new" id="at-new" hidden>+ Nouveau lot</button>
+    <div class="at-clock" id="at-clock" aria-hidden="true"></div>
+  </header>
+  <div class="at-banner" id="at-banner" role="alert" hidden></div>
+  <main class="at-main" id="at-main"></main>
+</div>
+<div class="at-sheet" id="at-sheet" hidden role="dialog" aria-modal="true"></div>
+<div class="at-toast" id="at-toast" role="status" hidden></div>
+<script src="/atelier.js"></script>
+</body>
+</html>

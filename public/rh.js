@@ -189,9 +189,9 @@
     const staff = (m) => S.ov.employees.filter(p => p.active && p.machineId === m.id).map(p => p.firstName);
     body().innerHTML = `
       <div class="rh-bar"><button type="button" class="bl-btn primary" id="rh-newm">+ Ajouter une machine</button></div>
-      <div class="bl-tablewrap"><table class="bl-table rh-table"><thead><tr><th>Machine</th><th>Unité (BU)</th><th class="r">Capacité</th><th>Rattachés</th><th>État</th></tr></thead><tbody>
+      <div class="bl-tablewrap"><table class="bl-table rh-table"><thead><tr><th>Machine</th><th>Unité (BU)</th><th class="r">Capacité</th><th class="r">Cadence</th><th>Rattachés</th><th>État</th></tr></thead><tbody>
       ${ms.map(m => `<tr class="bl-row${m.active ? '' : ' rh-off'}" data-id="${m.id}" tabindex="0"><td class="client">${e(m.name)}</td><td>${e(buLabel(m.bu))}</td>
-        <td class="r bl-num">${m.capacityKg ? NF1.format(m.capacityKg) + ' kg' : '—'}</td><td>${staff(m).map(e).join(', ') || '<span class="bl-faint">—</span>'}</td>
+        <td class="r bl-num">${m.capacityKg ? NF1.format(m.capacityKg) + ' kg' : '—'}</td><td class="r bl-num">${m.throughputKgh ? NF1.format(m.throughputKgh) + ' kg/h' : '—'}</td><td>${staff(m).map(e).join(', ') || '<span class="bl-faint">—</span>'}</td>
         <td>${m.active ? '<span class="bl-tag ok">en service</span>' : '<span class="bl-tag draft">retirée</span>'}</td></tr>`).join('')}
       </tbody></table></div>
       <p class="rh-help">Les machines servent à la badgeuse (où travaille chacun) et aux heures par poste. Une machine déjà utilisée est retirée sans effacer l'historique.</p>`;
@@ -206,7 +206,7 @@
     if (m) buttons.push({ label: 'Retirer', danger: true, onClick: async () => { if (!(await Bill.confirm('Retirer ' + m.name + ' ?', 'Les collaborateurs rattachés à cette machine ne le seront plus. L\'historique des heures est conservé.', 'Retirer', true))) return true; const r = await del(`/machines/${m.id}`); toast(r.archived ? 'Machine retirée (historique conservé).' : 'Machine supprimée.'); refreshTab(); } });
     buttons.push({ label: 'Annuler' });
     buttons.push({ label: 'Enregistrer', primary: true, onClick: async (box) => {
-      const payload = { name: box.$('#mf-name').value, bu: box.$('#mf-bu').value, capacityKg: box.$('#mf-cap').value, ...(m ? { active: box.$('#mf-active').checked } : {}) };
+      const payload = { name: box.$('#mf-name').value, bu: box.$('#mf-bu').value, capacityKg: box.$('#mf-cap').value, throughputKgh: box.$('#mf-tph').value, ...(m ? { active: box.$('#mf-active').checked } : {}) };
       if (m) await put(`/machines/${m.id}`, payload); else await post('/machines', payload);
       toast('Machine enregistrée.'); refreshTab();
     } });
@@ -215,6 +215,7 @@
       body: `<div class="bl-field"><label for="mf-name">Nom *</label><input id="mf-name" value="${e(m && m.name)}" maxlength="60" placeholder="Laveuse 4, Calandre 3…"></div>
         <div class="bl-row2"><div class="bl-field"><label for="mf-bu">Unité (BU) *</label><select id="mf-bu">${S.ov.bus.map(b => `<option value="${e(b.id)}"${m && m.bu === b.id ? ' selected' : ''}>${e(b.label)}</option>`).join('')}</select></div>
         <div class="bl-field"><label for="mf-cap">Capacité (kg)</label><input id="mf-cap" type="number" min="0" step="0.5" value="${m && m.capacityKg ? m.capacityKg : ''}"></div></div>
+        <div class="bl-field"><label for="mf-tph">Cadence réelle (kg/h) — facultatif</label><input id="mf-tph" type="number" min="0" step="0.5" value="${m && m.throughputKgh ? m.throughputKgh : ''}" placeholder="Sert à prévoir la fin d'un passage (calandres)"></div>
         ${m ? `<label class="bl-check rh-chk"><input type="checkbox" id="mf-active"${m.active ? ' checked' : ''}> En service</label>` : ''}`,
     });
   }
@@ -316,7 +317,8 @@
     S.terminals = (await get('/terminals')).terminals;
     body().innerHTML = `
       <div class="rh-bar"><button type="button" class="bl-btn primary" id="rh-newt">+ Nouvelle tablette</button>
-        <a class="bl-btn" href="/badgeuse" target="_blank" rel="noopener">Ouvrir la page de pointage</a></div>
+        <a class="bl-btn" href="/badgeuse" target="_blank" rel="noopener">Ouvrir la page de pointage</a>
+        <a class="bl-btn" href="/atelier" target="_blank" rel="noopener">Ouvrir l'écran Atelier</a></div>
       ${S.terminals.length ? `<div class="bl-tablewrap"><table class="bl-table rh-table"><thead><tr><th>Tablette</th><th>Créée le</th><th>Dernière activité</th><th>État</th><th></th></tr></thead><tbody>
         ${S.terminals.map(t => `<tr class="${t.revoked ? 'rh-off' : ''}"><td class="client">${e(t.label)}</td><td>${e(Bill.dtFr(t.createdAt))}</td><td>${t.lastSeenAt ? e(Bill.dtFr(t.lastSeenAt)) : '<span class="bl-faint">jamais</span>'}</td>
           <td>${t.revoked ? '<span class="bl-tag draft">désactivée</span>' : '<span class="bl-tag ok">active</span>'}</td>
@@ -343,7 +345,8 @@
             return true;
           } }, { label: 'Fermer', primary: true }],
           body: `<p class="rh-help" style="margin-top:0">Ouvrez ce lien <b>sur la tablette</b> : elle s'active et pointe aussitôt. Il ne sera plus affiché ensuite — conservez-le jusqu'à l'activation, et ne le partagez pas.</p>
-            <div class="bl-field"><label for="tf-url">${e(r.terminal.label)}</label><input id="tf-url" readonly value="${e(url)}"></div>`,
+            <div class="bl-field"><label for="tf-url">${e(r.terminal.label)}</label><input id="tf-url" readonly value="${e(url)}"></div>
+            <p class="rh-help">La même activation sert à l'écran Atelier (lots de lavage) : une fois la tablette activée, ouvrez simplement <b>${e(location.origin)}/atelier</b>.</p>`,
         });
         return true;
       } }],
