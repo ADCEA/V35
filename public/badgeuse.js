@@ -110,7 +110,7 @@
     main.innerHTML = '<div class="bk-groups">' + groups.map((g) => `
       <section class="bk-group"><h2>${esc(g.b.label)}</h2>
         <div class="bk-grid">${g.list.map((e) => {
-          const sub = e.present ? `${esc(posteLabel(e.present.bu, e.present.machineName))} · depuis ${esc(fmtTime(Date.parse(e.present.since)))}`
+          const sub = e.present ? `${esc(e.present.machineName || bu(e.present.bu).label)} · depuis ${esc(fmtTime(Date.parse(e.present.since)))}`
             : (e.hasPin ? esc(defaultPoste(e)) : 'Code à définir');
           return `<button type="button" class="bk-person${e.present ? ' here' : ''}${e.hasPin ? '' : ' nopin'}" data-emp="${e.id}"><span class="n">${esc(shortName(e))}</span><span class="s">${sub}</span></button>`;
         }).join('')}</div>
