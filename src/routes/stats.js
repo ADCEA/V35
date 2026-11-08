@@ -11,6 +11,7 @@ router.use(requireAdmin);
 //  - commandes, articles, statuts, top hôtels et top articles : commandes REÇUES dans la période (date de création, heure de Paris) ;
 //  - commandes livrées, poids et kilomètres : commandes LIVRÉES dans la période (même date que les bons de livraison).
 const dailyStats = require('../utils/dailyStats');
+const linenFamilies = require('../utils/linenFamilies');
 const dailyFail = (res, e) => (e && e.name === 'StatsError' ? res.status(e.status).json({ error: e.message }) : (console.error('[stats]', e), res.status(500).json({ error: 'Erreur serveur.' })));
 
 function overview(p) {
@@ -70,6 +71,12 @@ router.get('/', (req, res) => {
     const p = (req.query.from || req.query.to) ? dailyStats.period(req.query.from, req.query.to) : null;
     res.json(overview(p));
   } catch (e) { dailyFail(res, e); }
+});
+
+// GET /api/admin/stats/families?from=&to= — répartition du linge livré par famille (grand plat, petit plat, éponge, divers),
+// en pièces et en poids, au total et mois par mois (voir utils/linenFamilies.js). Sans dates : les 30 derniers jours.
+router.get('/families', (req, res) => {
+  try { res.json(linenFamilies.breakdown(dailyStats.period(req.query.from, req.query.to))); } catch (e) { dailyFail(res, e); }
 });
 
 // GET /api/admin/stats/daily?from=AAAA-MM-JJ&to=AAAA-MM-JJ — exploitation jour par jour (sans montants :

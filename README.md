@@ -728,6 +728,25 @@ valeur, factures, règlements) et export Excel (CSV).
   Sans le code, aucun montant n'est affiché ni envoyé par le serveur (`GET /api/admin/billing/stats/daily[/:date]`).
 - Une annulation de règlement se voit dans la journée où elle est écrite.
 
+### Répartition du linge (grand plat, petit plat, éponge, divers)
+
+Dans **Statistiques**, sous « Activité jour par jour », le bloc **Répartition du linge** suit le même filtre de dates que le reste de la page
+(« Ce mois-ci », « Mois dernier », dates libres…). Il donne, pour chaque famille, le **poids**, la **part du poids**, le nombre de
+**pièces** et la **part des pièces** ; sur une période qui couvre plusieurs mois, un tableau **mois par mois** s'ajoute.
+`GET /api/admin/stats/families?from=&to=` (`src/utils/linenFamilies.js`).
+
+- **Périmètre** : le linge *livré* (commandes livrées, date du bon de livraison, quantité livrée si elle est connue, sinon commandée), comme
+  le « Poids livré » de la page. Les reprises (quantités négatives) ne sont pas comptées.
+- **Poids** : théorique, poids de la fiche article × quantité. Un article sans poids compte dans les pièces mais pas dans le poids (signalé).
+- **Famille d'un article** : celle choisie dans sa fiche (Facturation → Articles → « Famille de linge », aussi visible dans la liste), sinon
+  **proposée d'après le nom** — éponge (éponge, serviette de toilette, drap de bain, tapis de bain, peignoir, bain de soleil, SPA), petit plat
+  (taie, traversin, serviette de table, torchon), grand plat (drap, housse de couette, nappe, alèse), sinon la catégorie « toilette » donne de
+  l'éponge et le reste va en divers. **C'est une proposition à vérifier** : le bloc indique combien d'articles livrés n'ont pas de famille choisie
+  et liste ce qui est rangé en Divers. Une ligne de commande dont l'article n'existe plus est classée d'après le nom figé dans la commande.
+- Colonne `articles.linen_family` (vide = automatique), ajoutée au démarrage sans toucher aux données ; l'import CSV des articles ne la modifie pas.
+- Correctif au passage : les barres des listes « Top hôtels » et « Articles les plus commandés » étaient invisibles (`.stats-row-bar-fill`
+  n'avait pas `display:block`).
+
 ### Prélèvements SEPA
 
 Facturation → **Prélèvements SEPA** (menu *Encaissements*). Le module prépare un fichier de prélèvement (norme
@@ -1048,7 +1067,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (361 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (367 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

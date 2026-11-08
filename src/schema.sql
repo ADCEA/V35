@@ -387,6 +387,9 @@ CREATE TABLE IF NOT EXISTS articles (
   folded_width_cm  REAL NOT NULL DEFAULT 0,
   folded_length_cm REAL NOT NULL DEFAULT 0,
   folded_height_cm REAL NOT NULL DEFAULT 0,
+  -- Famille de linge pour les statistiques : grand_plat, petit_plat, eponge ou divers.
+  -- NULL = automatique (proposée d'après le nom de l'article, voir utils/linenFamilies.js).
+  linen_family     TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
