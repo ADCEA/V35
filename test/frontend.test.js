@@ -133,6 +133,11 @@ test('Atelier (production) : onglet admin branché, écran tablette sans script 
   assert.ok(html.includes('data-admin-view="atelier"') && html.includes('id="admin-view-atelier"') && html.includes('id="atelier-root"'));
   assert.ok(/const ADMIN_VIEWS = \[[^\]]*'atelier'/.test(app) && app.includes("if (view === 'atelier') renderAtelierView()"));
   assert.ok(app.includes("if (view === 'rh') renderRhView()"), 'l\'onglet Équipe reste branché');
+  // l'ancien onglet « Production » n'est plus dans la navigation ; Atelier est le premier onglet et celui qui s'ouvre
+  assert.ok(!html.includes('<button data-admin-view="production"'), 'onglet Production retiré');
+  assert.ok(html.includes('<button data-admin-view="atelier" class="active">Atelier</button>'));
+  assert.ok(app.includes("switchAdminView('atelier');\n    return;") && !app.includes("switchAdminView('production')"));
+  assert.ok(/<div id="admin-view-production" class="admin-subview" style="display:none;">/.test(html), 'la section retirée de la navigation reste masquée');
   assert.ok(html.includes('<link rel="stylesheet" href="/prod.css">') && html.includes('<script src="/prod.js"></script>'));
   for (const dep of ['/app.js', '/billing/core.js', '/rh.js']) assert.ok(html.indexOf(dep) < html.indexOf('/prod.js'), `prod.js se charge après ${dep}`);
   for (const f of ['prod.js', 'prod.css', 'atelier.js', 'atelier.css', 'atelier.html']) assert.ok(fs.existsSync(path.join(PUBLIC, f)), `${f} manquant`);

@@ -1335,7 +1335,7 @@ async function renderAdminGate() {
     gate.style.display = 'none';
     dash.style.display = 'block';
     refreshAdmin(); // peuple aussi les compteurs "Commandes totales / En cours", toujours visibles
-    switchAdminView('production');
+    switchAdminView('atelier');
     return;
   }
   gate.style.display = 'block';
