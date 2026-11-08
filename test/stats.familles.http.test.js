@@ -142,6 +142,46 @@ test('répartition : livré seulement, quantité livrée prioritaire, reprises e
   assert.ok(none.families.every(x => x.weightPct === 0 && x.piecesPct === 0));
 });
 
+test('prix moyen au kilo par famille : articles pesés seulement, mêmes lignes que la répartition, derrière le verrou de la Facturation', async () => {
+  const Q = '?from=2026-10-01&to=2026-11-08';
+  // verrouillée : refusé, et la répartition (sans montants) ne contient aucun montant
+  await call('POST', `${B}/lock/lock`);
+  assert.equal((await call('GET', `${B}/stats/families${Q}`)).status, 423);
+  const open = await call('GET', `/api/admin/stats/families${Q}`);
+  assert.equal(open.status, 200); assert.ok(!JSON.stringify(open.data).includes('Cents'), 'aucun montant hors verrou');
+  assert.equal((await call('POST', `${B}/lock/unlock`, { code: CODE })).status, 200);
+
+  // Mêmes commandes que ci-dessus, tous les prix figés à 1,00 € : grand plat 8+5 draps, petit plat 20 taies (+ plaid et torchon sans poids),
+  // éponge 6 draps de bain, divers 2 couvertures. Les reprises (-3 draps) et la commande non livrée ne comptent pas.
+  const r = await call('GET', `${B}/stats/families${Q}`);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const f = Object.fromEntries(r.data.families.map(x => [x.id, x]));
+  assert.deepEqual(f.grand_plat, { id: 'grand_plat', htCents: 1300, unweightedHtCents: 0, kg: 5.2, centsPerKg: 250 }, '13,00 € ÷ 5,2 kg = 2,50 €/kg');
+  assert.deepEqual(f.petit_plat, { id: 'petit_plat', htCents: 2000, unweightedHtCents: 1100, kg: 2, centsPerKg: 1000 }, 'plaid (4,00 €) et torchon (7,00 €) sans poids : exclus du prix, signalés à part');
+  assert.equal(f.eponge.centsPerKg, 200); assert.equal(f.eponge.kg, 3);
+  assert.equal(f.divers.centsPerKg, 67, '2,00 € ÷ 3 kg');
+  assert.deepEqual(r.data.total, { htCents: 4100, unweightedHtCents: 1100, kg: 13.2, centsPerKg: 311 });
+
+  // cohérence avec la répartition : même poids, famille par famille
+  const rep = (await call('GET', `/api/admin/stats/families${Q}`)).data;
+  for (const x of rep.families) assert.equal(f[x.id].kg, x.weightKg, `${x.id} : même poids que la répartition`);
+  assert.equal(r.data.total.kg, rep.totalWeightKg);
+
+  // mois par mois
+  assert.deepEqual(r.data.months.map(m => m.month), ['2026-10', '2026-11']);
+  const oct = Object.fromEntries(r.data.months[0].families.map(x => [x.id, x]));
+  assert.equal(oct.grand_plat.centsPerKg, 250); assert.equal(oct.petit_plat.centsPerKg, 1000);
+  const nov = Object.fromEntries(r.data.months[1].families.map(x => [x.id, x]));
+  assert.equal(nov.grand_plat.htCents, 500); assert.equal(nov.grand_plat.kg, 2); assert.equal(nov.grand_plat.centsPerKg, 250);
+  assert.equal(nov.eponge.centsPerKg, null, 'rien de pesé livré en novembre dans cette famille : pas de prix');
+  assert.equal(nov.petit_plat.centsPerKg, null); assert.equal(nov.petit_plat.unweightedHtCents, 1100);
+
+  // période vide ; dates contrôlées
+  const none = (await call('GET', `${B}/stats/families?from=2026-01-01&to=2026-01-31`)).data;
+  assert.equal(none.total.centsPerKg, null); assert.deepEqual(none.months, []);
+  assert.equal((await call('GET', `${B}/stats/families?from=2026-11-30&to=2026-11-01`)).status, 400);
+});
+
 test('route : réservée à l\'administrateur, dates contrôlées', async () => {
   const anon = await fetch(s.BASE + '/api/admin/stats/families');
   assert.equal(anon.status, 401);

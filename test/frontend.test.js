@@ -170,7 +170,7 @@ test('Statistiques : bloc « Répartition du linge » branché après le filtre 
   assert.ok(app.includes('<div id="stats-families"></div>') && app.includes('renderStatsFamilies(fam)'));
   assert.doesNotThrow(() => new vm.Script(fs.readFileSync(path.join(PUBLIC, 'stats-families.js'), 'utf8'), { filename: 'stats-families.js' }));
   const sf = fs.readFileSync(path.join(PUBLIC, 'stats-families.js'), 'utf8');
-  assert.ok(sf.includes('/api/admin/stats/families?from=') && sf.includes('window.statsRange()'));
+  assert.ok(sf.includes('/api/admin/stats/families${qs}') && sf.includes('window.statsRange()'));
   // noms d'articles (saisis) : toujours échappés
   const bare = [...sf.matchAll(/\$\{\s*[a-z]\w*\.(?:name|label)\s*\}/g)].map(m => m[0]);
   assert.deepEqual(bare, [], `texte saisi placé sans échappement : ${bare.join(', ')}`);
@@ -184,4 +184,13 @@ test('Statistiques : tuile « Prix vendu au kilo » (livré pesé ÷ poids livr�
   assert.ok(sd.includes("tile('Prix vendu au kilo'") && sd.includes('m.deliveredWeightedHtCents') && sd.includes('m.deliveredUnweightedHtCents'));
   assert.ok(sd.includes("m ? kgTile() : ''"), 'comme les autres tuiles de montants : absente tant que la Facturation est verrouillée');
   assert.ok(sd.indexOf("tile('Livré (HT)'") < sd.indexOf('m ? kgTile()') && sd.indexOf('m ? kgTile()') < sd.indexOf("tile('Facturé (HT)'"), 'en haut : juste après le livré HT, sur la première ligne de tuiles');
+});
+
+test('Répartition du linge : prix moyen au kilo par famille, au total et mois par mois, absent (avec invitation à déverrouiller) tant que la Facturation est verrouillée', () => {
+  const sf = fs.readFileSync(path.join(PUBLIC, 'stats-families.js'), 'utf8');
+  assert.ok(sf.includes('/api/admin/billing/stats/families?from=') || sf.includes('/api/admin/billing/stats/families${qs}'));
+  assert.ok(sf.includes('Prix moyen au kilo') && sf.includes('centsPerKg') && sf.includes('sf-unlock') && sf.includes('e.status === 423'));
+  assert.ok(fs.readFileSync(path.join(PUBLIC, 'styles.css'), 'utf8').includes('.sf-row.sf-money'));
+  const bare = [...sf.matchAll(/\$\{\s*[a-z]\w*\.(?:name|label)\s*\}/g)].map(m => m[0]);
+  assert.deepEqual(bare, [], 'texte saisi placé sans échappement');
 });

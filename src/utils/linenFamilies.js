@@ -45,18 +45,37 @@ const round1 = (n) => Math.round(n * 10) / 10;
 const pct = (n, total) => (total > 0 ? round1((n / total) * 100) : 0);
 const emptyFam = () => Object.fromEntries(FAMILIES.map(f => [f.id, { pieces: 0, weightKg: 0, refs: new Set() }]));
 
-/** Répartition du linge livré dans la période p ({from, to}) : total, mois par mois, et articles rangés en « Divers » à vérifier. */
-function breakdown(p) {
+/**
+ * Lignes de linge livré dans la période p ({from, to}), prêtes à être regroupées : famille, quantité livrée (> 0), poids, prix figé.
+ * Source commune de la répartition (sans montants) et des prix au kilo (billing/daily.js, derrière le verrou de la Facturation) :
+ * les deux ne peuvent donc pas se contredire sur ce qui est compté. Reprises (quantités négatives) et lignes à zéro : exclues.
+ */
+function deliveredLines(p) {
   const rows = db.prepare(`
     SELECT ${dailyStats.DELIVERY_DATE_SQL} AS date, oi.service_id AS serviceId, oi.name AS itemName,
-           oi.qty AS qty, oi.delivered_qty AS delivered,
+           oi.qty AS qty, oi.delivered_qty AS delivered, oi.price AS price,
            a.name AS articleName, a.category AS category, a.linen_family AS explicit, COALESCE(a.weight_g, 0) AS weightG
     FROM orders o
     JOIN order_items oi ON oi.order_id = o.id
     LEFT JOIN articles a ON a.id = oi.service_id
     WHERE o.status = 'livree' AND ${dailyStats.DELIVERY_DATE_SQL} BETWEEN ? AND ?
   `).all(p.from, p.to);
+  const out = [];
+  for (const r of rows) {
+    const qty = r.delivered ?? r.qty;
+    if (!(qty > 0)) continue;
+    const name = r.articleName || r.itemName;
+    const chosen = IDS.has(r.explicit);
+    out.push({
+      date: r.date, serviceId: r.serviceId, name, family: chosen ? r.explicit : inferFamily(name, r.category), chosen,
+      qty, weightG: r.weightG, kg: (qty * r.weightG) / 1000, price: r.price,
+    });
+  }
+  return out;
+}
 
+/** Répartition du linge livré dans la période p ({from, to}) : total, mois par mois, et articles rangés en « Divers » à vérifier. */
+function breakdown(p) {
   const total = emptyFam();
   const months = new Map();
   const divers = new Map();          // article → pièces rangées en Divers
@@ -64,23 +83,18 @@ function breakdown(p) {
   const refs = new Set();
   let piecesNoWeight = 0;
 
-  for (const r of rows) {
-    const qty = r.delivered ?? r.qty;
-    if (!(qty > 0)) continue;       // reprises et lignes à zéro : hors répartition
-    const name = r.articleName || r.itemName;
-    const fam = IDS.has(r.explicit) ? r.explicit : inferFamily(name, r.category);
-    if (!IDS.has(r.explicit)) inferred.add(r.serviceId);
-    const kg = (qty * r.weightG) / 1000;
-    if (!r.weightG) piecesNoWeight += qty;
-    refs.add(r.serviceId);
+  for (const l of deliveredLines(p)) {
+    if (!l.chosen) inferred.add(l.serviceId);
+    if (!l.weightG) piecesNoWeight += l.qty;
+    refs.add(l.serviceId);
 
-    const month = r.date.slice(0, 7);
+    const month = l.date.slice(0, 7);
     if (!months.has(month)) months.set(month, emptyFam());
-    for (const t of [total, months.get(month)]) { t[fam].pieces += qty; t[fam].weightKg += kg; t[fam].refs.add(r.serviceId); }
+    for (const t of [total, months.get(month)]) { t[l.family].pieces += l.qty; t[l.family].weightKg += l.kg; t[l.family].refs.add(l.serviceId); }
 
-    if (fam === 'divers') {
-      const d = divers.get(r.serviceId) || { name, pieces: 0, weightKg: 0, explicit: IDS.has(r.explicit) };
-      d.pieces += qty; d.weightKg += kg; divers.set(r.serviceId, d);
+    if (l.family === 'divers') {
+      const d = divers.get(l.serviceId) || { name: l.name, pieces: 0, weightKg: 0, explicit: l.chosen };
+      d.pieces += l.qty; d.weightKg += l.kg; divers.set(l.serviceId, d);
     }
   }
 
@@ -106,4 +120,4 @@ function breakdown(p) {
   };
 }
 
-module.exports = { FAMILIES, LABEL, inferFamily, cleanFamily, breakdown };
+module.exports = { FAMILIES, LABEL, IDS, inferFamily, cleanFamily, deliveredLines, breakdown };

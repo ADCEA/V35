@@ -746,6 +746,13 @@ Dans **Statistiques**, sous « Activité jour par jour », le bloc **Répartitio
   (taie, traversin, serviette de table, torchon), grand plat (drap, housse de couette, nappe, alèse), sinon la catégorie « toilette » donne de
   l'éponge et le reste va en divers. **C'est une proposition à vérifier** : le bloc indique combien d'articles livrés n'ont pas de famille choisie
   et liste ce qui est rangé en Divers. Une ligne de commande dont l'article n'existe plus est classée d'après le nom figé dans la commande.
+- **Prix moyen au kilo** de chaque famille (colonne de droite, ligne Total et chaque mois du tableau mois par mois) = montant HT livré des
+  articles *pesés* ÷ leur poids, au prix figé sur chaque ligne de commande. Les articles sans poids dans leur fiche sont exclus du montant comme
+  du poids (sinon le prix serait gonflé) et leur montant est indiqué sous le tableau. Ce sont des montants : ils viennent de
+  `GET /api/admin/billing/stats/families?from=&to=`, derrière le verrou de la Facturation — verrouillée, la colonne est absente et le bloc
+  propose de l'ouvrir ; la répartition elle-même (kilos, pièces) reste visible. Les deux routes partagent les mêmes lignes de linge livré
+  (`deliveredLines`), donc les kilos ne peuvent pas diverger. Les reprises sont exclues ici, alors que la tuile « Prix vendu au kilo » du haut
+  les déduit : un léger écart est possible quand il y en a.
 - Colonne `articles.linen_family` (vide = automatique), ajoutée au démarrage sans toucher aux données ; l'import CSV des articles ne la modifie pas.
 - Correctif au passage : les barres des listes « Top hôtels » et « Articles les plus commandés » étaient invisibles (`.stats-row-bar-fill`
   n'avait pas `display:block`).
@@ -1070,7 +1077,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (369 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (371 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

@@ -16,6 +16,11 @@ router.get('/stats/articles', wrap((req, res) => {
   res.json(daily.articlePrices(req.query.from, req.query.to));
 }));
 
+// Prix moyen au kilo par famille de linge (page Statistiques, bloc « Répartition du linge »).
+router.get('/stats/families', wrap((req, res) => {
+  res.json(daily.familyPrices(req.query.from, req.query.to));
+}));
+
 router.get('/stats/daily/:date', wrap((req, res) => {
   res.json(daily.dayDetail(req.params.date));
 }));

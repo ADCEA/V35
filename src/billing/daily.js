@@ -10,6 +10,7 @@
 const db = require('../db');
 const engine = require('./engine');
 const stats = require('../utils/dailyStats');
+const linen = require('../utils/linenFamilies');
 
 const { lineCents } = engine;
 const { DELIVERY_DATE_SQL } = stats;
@@ -140,4 +141,38 @@ function articlePrices(from, to) {
   };
 }
 
-module.exports = { daily, dayDetail, articlePrices };
+/**
+ * Prix moyen au kilo par famille de linge (grand plat, petit plat, éponge, divers) sur la période, au total et mois par mois : page
+ * Statistiques, bloc « Répartition du linge ». Mêmes lignes que la répartition (utils/linenFamilies.deliveredLines : linge livré,
+ * reprises exclues). Prix au kilo = montant HT livré des articles PESÉS ÷ leur poids ; les articles sans poids dans leur fiche sont
+ * exclus du montant comme du poids (sinon le prix serait gonflé) et leur montant est renvoyé à part (`unweightedHtCents`).
+ * `centsPerKg` est null quand aucun article pesé n'a été livré. Derrière le verrou de la Facturation, comme tous les montants.
+ */
+function familyPrices(from, to) {
+  const p = stats.period(from, to);
+  const blank = () => Object.fromEntries(linen.FAMILIES.map(f => [f.id, { weightedHtCents: 0, kg: 0, unweightedHtCents: 0 }]));
+  const total = blank();
+  const months = new Map();
+  for (const l of linen.deliveredLines(p)) {
+    const cents = lineCents(l.qty, l.price);
+    const month = l.date.slice(0, 7);
+    if (!months.has(month)) months.set(month, blank());
+    for (const t of [total, months.get(month)]) {
+      const f = t[l.family];
+      if (l.weightG > 0) { f.weightedHtCents += cents; f.kg += l.kg; } else f.unweightedHtCents += cents;
+    }
+  }
+  const shape = (f) => ({
+    htCents: f.weightedHtCents, unweightedHtCents: f.unweightedHtCents, kg: Math.round(f.kg * 10) / 10,
+    centsPerKg: f.kg > 0 ? Math.round(f.weightedHtCents / f.kg) : null,
+  });
+  const all = (t) => shape(Object.values(t).reduce((a, f) => ({ weightedHtCents: a.weightedHtCents + f.weightedHtCents, kg: a.kg + f.kg, unweightedHtCents: a.unweightedHtCents + f.unweightedHtCents }), { weightedHtCents: 0, kg: 0, unweightedHtCents: 0 }));
+  const rows = (t) => linen.FAMILIES.map(f => ({ id: f.id, ...shape(t[f.id]) }));
+  return {
+    period: { from: p.from, to: p.to },
+    families: rows(total), total: all(total),
+    months: [...months.keys()].sort().map(m => ({ month: m, families: rows(months.get(m)), total: all(months.get(m)) })),
+  };
+}
+
+module.exports = { daily, dayDetail, articlePrices, familyPrices };
