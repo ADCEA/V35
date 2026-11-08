@@ -721,6 +721,9 @@ période, reprises exclues ; une astérisque signale un prix qui a varié). C'es
 derrière le verrou de la Facturation — verrouillée, le bloc l'indique et propose de l'ouvrir. Tuiles de synthèse,
 graphique jour par jour (au choix du chiffre affiché), tableau jour par jour avec détail dépliable (commandes reçues et livrées,
 valeur, factures, règlements) et export Excel (CSV).
+La tuile **Prix vendu au kilo** (en haut, juste après « Livré (HT) ») = livré HT des articles pesés ÷ poids livré, sur la même période et la même date de
+BL. Les articles sans poids dans leur fiche sont exclus du montant comme du poids, pour ne pas gonfler le prix, et leur montant est indiqué sous
+le chiffre ; le poids est théorique (fiche article × quantité). Comme les autres montants, la tuile n'apparaît qu'une fois la Facturation déverrouillée.
 
 - **Exploitation** (commandes, pièces, poids, kilomètres, écarts commandé/livré) : `GET /api/admin/stats/daily`. Les commandes sont
   datées à l'heure de Paris à la réception, à la date du BL à la livraison.
@@ -1067,7 +1070,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (367 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (369 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

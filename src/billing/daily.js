@@ -16,6 +16,8 @@ const { DELIVERY_DATE_SQL } = stats;
 
 const emptyDay = (date) => ({
   date, deliveredCount: 0, deliveredHtCents: 0,
+  // Livré valorisé réparti selon que l'article a un poids dans sa fiche ou non (pour le prix vendu au kilo).
+  deliveredWeightedHtCents: 0, deliveredUnweightedHtCents: 0,
   invoiceCount: 0, invoicedHtCents: 0, invoicedVatCents: 0, invoicedTtcCents: 0,
   creditCount: 0, creditedTtcCents: 0,
   paymentCount: 0, paidCents: 0, reversedCents: 0, discountCents: 0, paidByMethod: {},
@@ -28,13 +30,15 @@ function daily(from, to) {
 
   // Livré valorisé
   const lines = db.prepare(`
-    SELECT o.id AS orderId, ${DELIVERY_DATE_SQL} AS date, oi.qty, oi.delivered_qty AS delivered, oi.price
-    FROM orders o JOIN order_items oi ON oi.order_id = o.id
+    SELECT o.id AS orderId, ${DELIVERY_DATE_SQL} AS date, oi.qty, oi.delivered_qty AS delivered, oi.price, COALESCE(a.weight_g, 0) AS weightG
+    FROM orders o JOIN order_items oi ON oi.order_id = o.id LEFT JOIN articles a ON a.id = oi.service_id
     WHERE o.status = 'livree' AND ${DELIVERY_DATE_SQL} BETWEEN ? AND ?
   `).all(p.from, p.to);
   for (const l of lines) {
     const d = days.get(l.date); if (!d) continue;
-    d.deliveredHtCents += lineCents(l.delivered ?? l.qty, l.price);
+    const cents = lineCents(l.delivered ?? l.qty, l.price);
+    d.deliveredHtCents += cents;
+    d[l.weightG > 0 ? 'deliveredWeightedHtCents' : 'deliveredUnweightedHtCents'] += cents;
   }
   // Nombre de BL du jour : toutes les commandes livrées, y compris celles sans ligne (valeur nulle).
   for (const r of db.prepare(`SELECT ${DELIVERY_DATE_SQL} AS date, COUNT(*) AS n FROM orders o WHERE o.status = 'livree' AND ${DELIVERY_DATE_SQL} BETWEEN ? AND ? GROUP BY date`).all(p.from, p.to)) {
@@ -80,6 +84,7 @@ function daily(from, to) {
   `).get().due;
   const totals = {
     deliveredCount: sum('deliveredCount'), deliveredHtCents: sum('deliveredHtCents'),
+    deliveredWeightedHtCents: sum('deliveredWeightedHtCents'), deliveredUnweightedHtCents: sum('deliveredUnweightedHtCents'),
     invoiceCount: sum('invoiceCount'), invoicedHtCents: sum('invoicedHtCents'), invoicedVatCents: sum('invoicedVatCents'), invoicedTtcCents: sum('invoicedTtcCents'),
     creditCount: sum('creditCount'), creditedTtcCents: sum('creditedTtcCents'),
     paymentCount: sum('paymentCount'), paidCents: sum('paidCents'), discountCents: sum('discountCents'), paidByMethod: byMethod,

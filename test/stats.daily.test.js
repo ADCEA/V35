@@ -119,3 +119,23 @@ test('ventes : livré valorisé, factures, avoirs, encaissements par mode, annul
   assert.equal(money.dayDetail('2026-10-13').invoices[0].number, inv.number);
   assert.equal(money.dayDetail('2026-10-12').deliveries.reduce((s, o) => s + o.htCents, 0), d12.deliveredHtCents, 'le détail retombe sur le total du jour');
 });
+
+test('prix vendu au kilo : le livré valorisé est réparti entre articles avec et sans poids', () => {
+  const r = money.daily('2026-10-09', '2026-10-16');
+  const d12 = day(r, '2026-10-12');
+  assert.equal(d12.deliveredWeightedHtCents, d12.deliveredHtCents, 'tous les articles ont un poids : tout le livré compte');
+  assert.equal(d12.deliveredUnweightedHtCents, 0);
+
+  catalog.createArticle({ name: 'Location de chariot', code: 'CH', sageCode: 'S-CH', price: 1, category: 'service' });
+  const CH = db.prepare("SELECT id FROM articles WHERE name = 'Location de chariot'").get().id;   // aucun poids dans la fiche
+  order('T6', A, { created: '2026-10-20T08:00:00.000Z', date: '2026-10-20', lines: [[X, 10, 10, 2], [CH, 2, 2, 5]] });
+  const t = money.daily('2026-10-20', '2026-10-20').totals;
+  assert.equal(t.deliveredHtCents, 10 * 200 + 2 * 500);
+  assert.equal(t.deliveredWeightedHtCents, 10 * 200, 'les 10 draps (500 g) ont un poids');
+  assert.equal(t.deliveredUnweightedHtCents, 2 * 500, 'le chariot n\'en a pas : exclu du prix au kilo');
+  assert.equal(t.deliveredWeightedHtCents + t.deliveredUnweightedHtCents, t.deliveredHtCents);
+  // le poids livré ne compte que les articles pesés : 10 × 0,5 kg → prix vendu au kilo = 20,00 € ÷ 5 kg = 4,00 €/kg
+  const ops = stats.daily('2026-10-20', '2026-10-20').totals;
+  assert.equal(ops.weightKg, 5);
+  assert.equal(t.deliveredWeightedHtCents / 100 / ops.weightKg, 4);
+});

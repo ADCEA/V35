@@ -123,8 +123,18 @@
     const t = S.ops.totals; const m = S.money && S.money.totals;
     const tile = (label, value, sub) => `<div class="stats-card"><div class="eyebrow">${esc(label)}</div><strong>${value}</strong>${sub ? `<div class="dd-sub">${sub}</div>` : ''}</div>`;
     const by = m ? Object.entries(m.paidByMethod).filter(([, c]) => c).map(([k, c]) => `${esc(METHODS[k] || k)} ${eur0(c)}`).join(' · ') : '';
+    // Prix vendu au kilo = livré HT des articles pesés ÷ poids livré (même période, même date de BL) ; les articles sans poids dans leur fiche sont
+    // exclus des deux côtés pour que le prix ne soit pas gonflé, et signalés sous le chiffre.
+    const kgTile = () => {
+      const w = m.deliveredWeightedHtCents, u = m.deliveredUnweightedHtCents;
+      const noKg = !(t.weightKg > 0) || !(w > 0);
+      const excl = u ? ` · ${eur0(u)} d'articles sans poids non comptés` : '';
+      return tile('Prix vendu au kilo', noKg ? '—' : `${eur(w / t.weightKg)}<small> / kg</small>`,
+        noKg ? `aucun linge pesé livré${excl}` : `${eur0(w)} HT ÷ ${nf(t.weightKg, 1)} kg livrés${excl}`);
+    };
     return [
       m ? tile('Livré (HT)', eur(m.deliveredHtCents), `${nf(m.deliveredCount)} bons de livraison`) : '',
+      m ? kgTile() : '',
       m ? tile('Facturé (HT)', eur(m.invoicedHtCents), `${nf(m.invoiceCount)} facture${m.invoiceCount > 1 ? 's' : ''}${m.creditCount ? ` · ${nf(m.creditCount)} avoir${m.creditCount > 1 ? 's' : ''}` : ''}`) : '',
       m ? tile('Encaissé', eur(m.paidCents), `${by || `${nf(m.paymentCount)} règlement${m.paymentCount > 1 ? 's' : ''}`}${m.discountCents ? ` · escomptes accordés ${eur0(m.discountCents)}` : ''}`) : '',
       m ? tile('Reste dû à ce jour', eur(S.money.outstandingCents), 'toutes factures ouvertes') : '',

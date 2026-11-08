@@ -178,3 +178,10 @@ test('Statistiques : bloc « Répartition du linge » branché après le filtre 
   assert.ok(articles.includes('id="a-fam"') && articles.includes('linenFamily: val(\'#a-fam\')'));
   assert.ok(fs.readFileSync(path.join(PUBLIC, 'styles.css'), 'utf8').includes('.sf-row'));
 });
+
+test('Statistiques : tuile « Prix vendu au kilo » (livré pesé ÷ poids livré), réservée aux montants déverrouillés', () => {
+  const sd = fs.readFileSync(path.join(PUBLIC, 'stats-daily.js'), 'utf8');
+  assert.ok(sd.includes("tile('Prix vendu au kilo'") && sd.includes('m.deliveredWeightedHtCents') && sd.includes('m.deliveredUnweightedHtCents'));
+  assert.ok(sd.includes("m ? kgTile() : ''"), 'comme les autres tuiles de montants : absente tant que la Facturation est verrouillée');
+  assert.ok(sd.indexOf("tile('Livré (HT)'") < sd.indexOf('m ? kgTile()') && sd.indexOf('m ? kgTile()') < sd.indexOf("tile('Facturé (HT)'"), 'en haut : juste après le livré HT, sur la première ligne de tuiles');
+});
