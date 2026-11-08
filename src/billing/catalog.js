@@ -23,6 +23,7 @@ const bcrypt = require('bcryptjs');
 const db = require('../db');
 const engine = require('./engine');
 const { CATEGORIES, resolveClientPrice, todayParis } = require('../services');
+const linen = require('../utils/linenFamilies');
 const { parseCsv } = require('../utils/csv');
 const accessCode = require('../utils/accessCode');
 
@@ -92,13 +93,16 @@ function transact(apply, fn) {
 // ======================================================================
 
 const ARTICLE_COLS = `id, name, code, sage_code AS sageCode, price, category, weight_g AS weightG, volume_l AS volumeL, gsm,
-  width_cm AS widthCm, length_cm AS lengthCm, folded_width_cm AS foldedWidthCm, folded_length_cm AS foldedLengthCm, folded_height_cm AS foldedHeightCm`;
+  width_cm AS widthCm, length_cm AS lengthCm, folded_width_cm AS foldedWidthCm, folded_length_cm AS foldedLengthCm, folded_height_cm AS foldedHeightCm, linen_family AS linenFamily`;
 
 function computeWeightAndVolume({ widthCm, lengthCm, foldedWidthCm, foldedLengthCm, foldedHeightCm, gsm }) {
   const weightG = Math.round(((widthCm * lengthCm) / 10000) * gsm);
   const volumeL = Math.round(((foldedWidthCm * foldedLengthCm * foldedHeightCm) / 1000) * 100) / 100;
   return { weightG, volumeL };
 }
+
+// Famille de linge effective (celle de la fiche, sinon proposée d'après le nom) et sa proposition automatique.
+const withFamily = (a) => ({ ...a, linenFamilyAuto: linen.inferFamily(a.name, a.category) });
 
 function listArticles() {
   const today = todayParis();
@@ -123,8 +127,9 @@ function listArticles() {
   return {
     categories: CATEGORIES,
     clientCount: db.prepare('SELECT COUNT(*) c FROM clients').get().c,
+    families: linen.FAMILIES,
     articles: articles.map(a => ({
-      ...a,
+      ...withFamily(a),
       hiddenFor: hidden.get(a.id) || 0,
       negotiatedCount: negotiated.get(a.id) || 0,
       qty90: usage.get(a.id)?.qty || 0,
@@ -153,7 +158,7 @@ function articleImpact(articleId) {
 function getArticle(id) {
   const a = db.prepare(`SELECT ${ARTICLE_COLS} FROM articles WHERE id = ?`).get(id);
   if (!a) throw new BillingError('Article introuvable.', 404);
-  return { ...a, impact: articleImpact(id) };
+  return { ...withFamily(a), impact: articleImpact(id) };
 }
 
 // Valide et complète les champs d'un article (création : existing = null).
@@ -168,6 +173,9 @@ function normalizeArticle(body, existing) {
   const category = b.category ?? existing?.category ?? 'lit';
   if (!CATEGORIES.some(c => c.id === category)) throw new BillingError('Catégorie invalide.');
   const price = b.price !== undefined ? parsePrice(b.price) : (existing ? round3(existing.price) : parsePrice(undefined));
+  let linenFamily;
+  try { linenFamily = linen.cleanFamily(b.linenFamily); } catch (_) { throw new BillingError('Famille de linge invalide.'); }
+  if (linenFamily === undefined) linenFamily = existing?.linen_family ?? null;
 
   const widthCm = parseNum(b.widthCm, 'Largeur', existing?.width_cm ?? 0);
   const lengthCm = parseNum(b.lengthCm, 'Longueur', existing?.length_cm ?? 0);
@@ -184,7 +192,7 @@ function normalizeArticle(body, existing) {
   else gsm = 0;
 
   const { weightG, volumeL } = computeWeightAndVolume({ widthCm, lengthCm, foldedWidthCm, foldedLengthCm, foldedHeightCm, gsm });
-  return { name, code, sageCode, category, price, widthCm, lengthCm, foldedWidthCm, foldedLengthCm, foldedHeightCm, gsm, weightG, volumeL };
+  return { name, code, sageCode, category, price, linenFamily, widthCm, lengthCm, foldedWidthCm, foldedLengthCm, foldedHeightCm, gsm, weightG, volumeL };
 }
 
 function assertSageFree(sageCode, exceptId) {
@@ -201,8 +209,8 @@ function uniqueArticleId(name) {
 }
 
 const INSERT_ARTICLE = () => db.prepare(`
-  INSERT INTO articles (id, name, code, sage_code, price, category, weight_g, volume_l, gsm, width_cm, length_cm, folded_width_cm, folded_length_cm, folded_height_cm)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO articles (id, name, code, sage_code, price, category, weight_g, volume_l, gsm, width_cm, length_cm, folded_width_cm, folded_length_cm, folded_height_cm, linen_family)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 function createArticle(body) {
@@ -210,7 +218,7 @@ function createArticle(body) {
   assertSageFree(v.sageCode, null);
   const id = uniqueArticleId(v.name);
   db.transaction(() => {
-    INSERT_ARTICLE().run(id, v.name, v.code, v.sageCode, v.price, v.category, v.weightG, v.volumeL, v.gsm, v.widthCm, v.lengthCm, v.foldedWidthCm, v.foldedLengthCm, v.foldedHeightCm);
+    INSERT_ARTICLE().run(id, v.name, v.code, v.sageCode, v.price, v.category, v.weightG, v.volumeL, v.gsm, v.widthCm, v.lengthCm, v.foldedWidthCm, v.foldedLengthCm, v.foldedHeightCm, v.linenFamily);
     log('article_created', { articleId: id, name: v.name, sageCode: v.sageCode, price: v.price });
   })();
   return getArticle(id);
@@ -225,14 +233,15 @@ function updateArticle(id, body) {
   db.transaction(() => {
     db.prepare(`
       UPDATE articles SET name=?, code=?, sage_code=?, price=?, category=?, weight_g=?, volume_l=?, gsm=?, width_cm=?, length_cm=?,
-        folded_width_cm=?, folded_length_cm=?, folded_height_cm=? WHERE id=?
-    `).run(v.name, v.code, v.sageCode, v.price, v.category, v.weightG, v.volumeL, v.gsm, v.widthCm, v.lengthCm, v.foldedWidthCm, v.foldedLengthCm, v.foldedHeightCm, id);
+        folded_width_cm=?, folded_length_cm=?, folded_height_cm=?, linen_family=? WHERE id=?
+    `).run(v.name, v.code, v.sageCode, v.price, v.category, v.weightG, v.volumeL, v.gsm, v.widthCm, v.lengthCm, v.foldedWidthCm, v.foldedLengthCm, v.foldedHeightCm, v.linenFamily, id);
     if (v.price !== before) log('article_price_changed', { articleId: id, name: v.name, sageCode: v.sageCode, from: before, to: v.price });
     const changed = [];
     if (v.name !== existing.name) changed.push('nom');
     if (v.code !== existing.code) changed.push('code');
     if (v.sageCode !== existing.sage_code) changed.push('code Sage');
     if (v.category !== existing.category) changed.push('catégorie');
+    if (v.linenFamily !== (existing.linen_family ?? null)) changed.push('famille de linge');
     if (changed.length) log('article_updated', { articleId: id, name: v.name, fields: changed });
   })();
   return getArticle(id);
@@ -313,7 +322,7 @@ function importArticles(csvText, { apply = false } = {}) {
       const sameName = findByName.get(norm(name));
       if (sameName) out.possibleDuplicates.push({ line, name, error: `Un article nommé « ${name} » existe déjà avec le code_sage « ${sameName.sage_code} » (celui-ci : « ${sageCode} ») — à vérifier, créé quand même.` });
       const id = uniqueArticleId(name);
-      insert.run(id, name, code, sageCode, price, category, weightG, volumeL, gsm, num.widthCm, num.lengthCm, num.foldedWidthCm, num.foldedLengthCm, num.foldedHeightCm);
+      insert.run(id, name, code, sageCode, price, category, weightG, volumeL, gsm, num.widthCm, num.lengthCm, num.foldedWidthCm, num.foldedLengthCm, num.foldedHeightCm, null);   // famille de linge : automatique tant qu'elle n'est pas choisie
       log('article_created', { articleId: id, name, sageCode, price, via: 'import' });
       out.created.push({ line, name, sageCode, price });
     });

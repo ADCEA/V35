@@ -126,3 +126,20 @@ test('Équipe (RH) : onglet branché dans l\'administration, scripts valides, pa
   // le jeton de tablette ne reste ni dans l'adresse ni ailleurs que dans le stockage local
   assert.ok(kjs.includes("history.replaceState(null, '', location.pathname)") && kjs.includes("'x-terminal-token'"));
 });
+
+test('Statistiques : bloc « Répartition du linge » branché après le filtre de dates, famille de linge dans la fiche article', () => {
+  const app = fs.readFileSync(path.join(PUBLIC, 'app.js'), 'utf8');
+  assert.ok(html.includes('<script src="/stats-families.js"></script>'));
+  assert.ok(html.indexOf('/stats-daily.js') < html.indexOf('/stats-families.js'), 'stats-families.js utilise window.statsRange défini par stats-daily.js');
+  assert.ok(html.indexOf('/app.js') < html.indexOf('/stats-families.js'), 'api() et escHtml() viennent de app.js');
+  assert.ok(app.includes('<div id="stats-families"></div>') && app.includes('renderStatsFamilies(fam)'));
+  assert.doesNotThrow(() => new vm.Script(fs.readFileSync(path.join(PUBLIC, 'stats-families.js'), 'utf8'), { filename: 'stats-families.js' }));
+  const sf = fs.readFileSync(path.join(PUBLIC, 'stats-families.js'), 'utf8');
+  assert.ok(sf.includes('/api/admin/stats/families?from=') && sf.includes('window.statsRange()'));
+  // noms d'articles (saisis) : toujours échappés
+  const bare = [...sf.matchAll(/\$\{\s*[a-z]\w*\.(?:name|label)\s*\}/g)].map(m => m[0]);
+  assert.deepEqual(bare, [], `texte saisi placé sans échappement : ${bare.join(', ')}`);
+  const articles = fs.readFileSync(path.join(PUBLIC, 'billing', 'articles.js'), 'utf8');
+  assert.ok(articles.includes('id="a-fam"') && articles.includes('linenFamily: val(\'#a-fam\')'));
+  assert.ok(fs.readFileSync(path.join(PUBLIC, 'styles.css'), 'utf8').includes('.sf-row'));
+});

@@ -5,6 +5,7 @@
   let DATA = null;
 
   const catLabel = (id) => (DATA.categories.find(c => c.id === id) || {}).label || id;
+  const famLabel = (id) => ((DATA.families || []).find(f => f.id === id) || {}).label || id || '';
   const SORTS = { name: (a, b) => a.name.localeCompare(b.name, 'fr'), price: (a, b) => b.price - a.price, usage: (a, b) => b.qty90 - a.qty90 };
 
   function visible() {
@@ -23,10 +24,11 @@
     }
     if (!list.length) { box.innerHTML = '<div class="bl-empty"><b>Aucun résultat</b>Essayez un autre mot, ou retirez le filtre de catégorie.</div>'; return; }
     box.innerHTML = `<div class="bl-tablewrap"><table class="bl-table"><thead><tr>
-      <th>Article</th><th>Catégorie</th><th class="r">Prix catalogue HT</th><th>Tarifs négociés</th><th>Proposé à</th><th class="r">Pièces sur 90 jours</th></tr></thead><tbody>
+      <th>Article</th><th>Catégorie</th><th>Famille de linge</th><th class="r">Prix catalogue HT</th><th>Tarifs négociés</th><th>Proposé à</th><th class="r">Pièces sur 90 jours</th></tr></thead><tbody>
       ${list.map(a => `<tr class="bl-row" tabindex="0" data-id="${e(a.id)}">
         <td class="client">${e(a.name)}<span class="sub">${e(a.sageCode)} · badge ${e(a.code)}</span></td>
         <td>${e(catLabel(a.category))}</td>
+        <td style="white-space:nowrap">${e(famLabel(a.linenFamily || a.linenFamilyAuto))}${a.linenFamily ? '' : ' <span class="bl-faint" title="Proposée d\'après le nom : à vérifier, ou à choisir dans la fiche">auto</span>'}</td>
         <td class="r bl-num"><b style="font-weight:600">${Bill.price(a.price)}</b></td>
         <td>${a.negotiatedCount ? `<span class="bl-tag info">${a.negotiatedCount} / ${DATA.clientCount} hôtels</span>` : '<span class="bl-faint">Aucun</span>'}</td>
         <td>${a.hiddenFor ? `<span class="bl-tag wait">Retiré à ${plural(a.hiddenFor, 'hôtel', 'hôtels')}</span>` : '<span class="bl-faint">Tous</span>'}</td>
@@ -80,7 +82,7 @@
           art = (await Bill.get('/catalog/articles/' + encodeURIComponent(id))).article;
           log = (await Bill.get('/catalog/prices/log?articleId=' + encodeURIComponent(id))).events;
           access = await Bill.get('/catalog/articles/' + encodeURIComponent(id) + '/access');
-        } else art = { name: '', code: '', sageCode: '', category: DATA.categories[0].id, price: '', gsm: '', widthCm: '', lengthCm: '', foldedWidthCm: '', foldedLengthCm: '', foldedHeightCm: '' };
+        } else art = { name: '', code: '', sageCode: '', category: DATA.categories[0].id, linenFamily: null, price: '', gsm: '', widthCm: '', lengthCm: '', foldedWidthCm: '', foldedLengthCm: '', foldedHeightCm: '' };
       } catch (err) { Bill.closeDrawer(); return Bill.fail(err); }
       paint();
     }
@@ -168,6 +170,9 @@
         <div class="bl-panel"><div class="bl-panel-h"><h3>Identité et prix</h3></div><div class="bl-panel-b">
           <div class="bl-row2"><div class="bl-field"><label for="a-name">Nom</label><input id="a-name" value="${f('name')}" placeholder="Ex. Drap plat 2 personnes"></div>
             <div class="bl-field"><label for="a-cat">Catégorie</label><select id="a-cat">${DATA.categories.map(c => `<option value="${e(c.id)}" ${art.category === c.id ? 'selected' : ''}>${e(c.label)}</option>`).join('')}</select></div></div>
+          <div class="bl-row2"><div class="bl-field"><label for="a-fam">Famille de linge <span class="bl-muted">— pour la répartition dans Statistiques</span></label>
+            <select id="a-fam"><option value="" ${art.linenFamily ? '' : 'selected'}>Automatique (d'après le nom)</option>${(DATA.families || []).map(f => `<option value="${e(f.id)}" ${art.linenFamily === f.id ? 'selected' : ''}>${e(f.label)}</option>`).join('')}</select>
+            <div class="bl-hint">${art.linenFamily ? 'Choisie par vous.' : (id ? `Proposée d'après le nom : <b>${e(famLabel(art.linenFamilyAuto))}</b>. Choisissez une famille pour la fixer.` : 'Laissée sur « Automatique », elle est proposée d\'après le nom ; vous pourrez la fixer ensuite.')}</div></div></div>
           <div class="bl-row3"><div class="bl-field"><label for="a-sage">Code Sage</label><input id="a-sage" value="${f('sageCode')}" placeholder="B-DP2"><div class="bl-hint">Unique : il sert de référence sur les factures et les imports.</div></div>
             <div class="bl-field"><label for="a-code">Badge affiché</label><input id="a-code" value="${f('code')}" placeholder="DP2"></div>
             <div class="bl-field"><label for="a-price">Prix catalogue HT (€)</label><input id="a-price" inputmode="decimal" value="${art.price === '' ? '' : e(String(art.price).replace('.', ','))}" placeholder="1,35"></div></div>
@@ -202,7 +207,7 @@
 
       d.head.querySelector('[data-a="save"]').onclick = async (ev) => {
         const btn = ev.currentTarget; const errEl = d.body.querySelector('#a-err'); errEl.textContent = '';
-        const payload = { name: val('#a-name'), category: val('#a-cat'), sageCode: val('#a-sage'), code: val('#a-code'), price: val('#a-price'),
+        const payload = { name: val('#a-name'), category: val('#a-cat'), linenFamily: val('#a-fam'), sageCode: val('#a-sage'), code: val('#a-code'), price: val('#a-price'),
           gsm: val('#a-gsm'), widthCm: val('#a-w'), lengthCm: val('#a-l'), foldedWidthCm: val('#a-fw'), foldedLengthCm: val('#a-fl'), foldedHeightCm: val('#a-fh') };
         btn.disabled = true;
         try {

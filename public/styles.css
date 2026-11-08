@@ -286,7 +286,7 @@ section.block{padding:48px 0;}
 .stats-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;}
 .stats-row:last-child{border-bottom:none;}
 .stats-row-bar{flex:1;height:6px;background:var(--bg);border-radius:3px;margin:0 10px;overflow:hidden;}
-.stats-row-bar-fill{height:100%;background:var(--brand);border-radius:3px;}
+.stats-row-bar-fill{display:block;height:100%;background:var(--brand);border-radius:3px;}
 .stats-row-pct{min-width:58px;text-align:right;margin-left:12px;color:var(--steel);font-variant-numeric:tabular-nums;white-space:nowrap;}
 .stats-row-price{min-width:78px;text-align:right;margin-left:12px;color:var(--steel);font-variant-numeric:tabular-nums;white-space:nowrap;}
 .stats-row-note{font-size:11.5px;color:var(--steel);margin:10px 0 0;}
@@ -828,3 +828,21 @@ details.bon[open] .esp-chev{transform:rotate(180deg);}
 .sec-journal table{width:100%;border-collapse:collapse;font-size:12.5px;}
 .sec-journal th,.sec-journal td{padding:6px 10px;text-align:left;border-bottom:1px solid var(--line,#e6ebf0);vertical-align:top;}
 .sec-journal tr.bad td{color:var(--rust);}
+
+/* Statistiques : répartition du linge (grand plat, petit plat, éponge, divers) */
+.sf-lead{font-size:12.5px;color:var(--steel);margin:0 0 12px;}
+.sf-head,.sf-row{display:grid;grid-template-columns:96px minmax(60px,1fr) 78px 72px 66px 72px;align-items:center;gap:0 8px;}
+.sf-head{font-size:11.5px;color:var(--steel);padding:0 0 4px;border-bottom:1px solid var(--line);}
+.sf-head span:nth-child(n+3){text-align:right;}
+.sf-row .stats-row-bar{margin:0;}
+.sf-row .stats-row-pct{margin-left:0;min-width:0;}
+.sf-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.sf-pieces{color:var(--steel);}
+.sf-name{font-weight:600;}
+.sf-total{border-top:1px solid var(--line);font-weight:600;}
+.sf-sub{font-size:13px;margin:18px 0 8px;}
+.sf-sub span{font-weight:400;color:var(--steel);font-size:12px;}
+.sf-months td{font-size:12px;}
+.sf-notes{margin-top:12px;}
+.sf-notes p{font-size:11.5px;color:var(--steel);margin:4px 0;}
+@media (max-width:640px){.sf-head,.sf-row{grid-template-columns:78px minmax(30px,1fr) 64px 56px;}.sf-head span:nth-child(n+5),.sf-row .sf-pieces,.sf-row .sf-pieces+.stats-row-pct{display:none;}}

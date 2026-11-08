@@ -211,6 +211,10 @@ if (articlesColumns.length > 0 && !articlesColumns.includes('folded_length_cm'))
 if (articlesColumns.length > 0 && !articlesColumns.includes('folded_height_cm')) {
   db.exec(`ALTER TABLE articles ADD COLUMN folded_height_cm REAL NOT NULL DEFAULT 0;`);
 }
+// Famille de linge pour les statistiques (grand plat, petit plat, éponge, divers). NULL = proposée d'après le nom de l'article.
+if (articlesColumns.length > 0 && !articlesColumns.includes('linen_family')) {
+  db.exec(`ALTER TABLE articles ADD COLUMN linen_family TEXT;`);
+}
 
 // Migration défensive pour la capacité de camion et le poids chariot.
 const adminColumns = db.prepare(`PRAGMA table_info(admin)`).all().map(c => c.name);
