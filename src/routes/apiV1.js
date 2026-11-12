@@ -3,6 +3,7 @@ const db = require('../db');
 const { requireApiToken } = require('../middleware/auth');
 const { getServicesForClient } = require('../services');
 const { sendWhatsAppNotification } = require('../utils/whatsapp');
+const { lineDiff } = require('../utils/deliveryDiff');
 
 const router = express.Router();
 
@@ -155,11 +156,20 @@ router.get('/orders/:ticket', requireApiToken, (req, res) => {
     return res.status(404).json({ error: `Le ticket "${req.params.ticket}" existe mais n'est pas rattaché à ce compte.` });
   }
 
-  const items = db.prepare('SELECT sage_code as sageCode, name, qty, delivered_qty as deliveredQty FROM order_items WHERE order_id = ?').all(order.id);
+  const rows = db.prepare('SELECT sage_code as sageCode, name, qty, delivered_qty as deliveredQty FROM order_items WHERE order_id = ?').all(order.id);
+  // Écart livré / commandé : annoncé seulement une fois la commande livrée. Avant, les quantités livrées sont
+  // encore en cours de saisie à l'atelier — un écart y serait provisoire et déclencherait de fausses alertes.
+  //   difference  : livré − commandé (négatif = moins que commandé) ; discrepancy : 'short', 'over' ou null.
+  const delivered = order.status === 'livree';
+  const items = rows.map(r => {
+    const d = lineDiff(r);
+    return { ...r, difference: delivered ? d.difference : null, discrepancy: delivered ? d.discrepancy : null };
+  });
   res.json({
     ticket: order.ticket,
     status: order.status,
     livraisonPrevue: order.livraison_prevue,
+    hasDiscrepancy: delivered && items.some(i => i.discrepancy !== null),
     items,
     createdAt: order.created_at,
   });

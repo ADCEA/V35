@@ -12,6 +12,7 @@
 const db = require('../db');
 const engine = require('./engine');
 const deliveries = require('./deliveries');
+const { notifyOrderDeliveryUpdated } = require('../utils/webhookNotify');
 
 const { BillingError } = engine;
 
@@ -63,7 +64,20 @@ function setDelivered(orderId, items) {
       engine.logEvent('delivered_qty_changed', null, { orderId, ticket: order.ticket, status: order.status, changes });
     }
   })();
+  // Commande déjà livrée : le logiciel de l'hôtel a reçu les anciennes quantités, on lui envoie les nouvelles.
+  if (changes.length && order.status === 'livree') notifyClientOfCorrection(order);
   return changes;
+}
+
+/** Prévient le logiciel de l'hôtel (webhook) d'une correction faite après la livraison. Jamais bloquant. */
+function notifyClientOfCorrection(order) {
+  try {
+    if (!order.client_id) return;
+    const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(order.client_id);
+    if (!client?.webhook_url) return;
+    const items = db.prepare('SELECT name, code, qty, delivered_qty AS deliveredQty FROM order_items WHERE order_id = ?').all(order.id);
+    notifyOrderDeliveryUpdated(client, order, items).catch(() => {});
+  } catch { /* best-effort : la correction elle-même est déjà enregistrée */ }
 }
 
 module.exports = { EDITABLE_STATUSES, assertNotBilled, setDelivered };
