@@ -626,3 +626,23 @@ CREATE TABLE IF NOT EXISTS machine_incidents (
   employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_incidents_machine ON machine_incidents(machine_id, started_at);
+
+-- Tournées fixes : une tournée = un chauffeur, des jours de la semaine (1 = lundi … 7 = dimanche, séparés par des virgules)
+-- et des hôtels dans l'ordre de passage. Planifiées à l'avance, modifiables par l'équipe ; les commandes des hôtels
+-- rattachés sont affectées au chauffeur de la tournée du jour (voir src/utils/fixedTours.js).
+CREATE TABLE IF NOT EXISTS fixed_tours (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL,
+  driver_id  INTEGER REFERENCES drivers(id) ON DELETE SET NULL,
+  weekdays   TEXT NOT NULL DEFAULT '',
+  active     INTEGER NOT NULL DEFAULT 1,
+  notes      TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fixed_tour_clients (
+  tour_id   INTEGER NOT NULL REFERENCES fixed_tours(id) ON DELETE CASCADE,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  position  INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (tour_id, client_id)
+);
+CREATE INDEX IF NOT EXISTS idx_fixed_tour_clients_client ON fixed_tour_clients(client_id);

@@ -412,6 +412,19 @@
               <button class="btn-secondary" id="btn-add-driver">+ Ajouter</button>
             </div>
           </div>
+          <div class="card ft-card" style="margin-bottom:20px;">
+            <div class="tm-card-head">
+              <h4 class="card-subhead">Tournées fixes</h4>
+              <span class="tm-status" id="ft-status" role="status"></span>
+            </div>
+            <p class="ft-help">Planifiez vos tournées à l'avance : jours de passage, chauffeur et hôtels dans l'ordre. Les commandes de ces hôtels partent automatiquement chez le chauffeur de la tournée, au rang indiqué. Tout reste modifiable, et vous pouvez toujours replacer une commande à la main plus bas : elle ne sera plus déplacée.</p>
+            <div id="ft-plan"></div>
+            <div id="ft-root"></div>
+            <div class="ft-new">
+              <div class="field"><label for="ft-new-name">Nouvelle tournée</label><input id="ft-new-name" maxlength="60" placeholder="Ex. Centre-ville, lundi et jeudi"></div>
+              <button class="btn-secondary" id="ft-new-btn" type="button" style="width:auto;">+ Créer la tournée</button>
+            </div>
+          </div>
           <div class="card tm-card" style="margin-bottom:20px;">
             <div class="tm-card-head">
               <h4 class="card-subhead">Carte des tournées</h4>
@@ -680,6 +693,7 @@
 
 <script src="/espace.js"></script>
 <script src="/logistics-map.js"></script>
+<script src="/tournees-fixes.js"></script>
 <script src="/app.js"></script>
 <script src="/stats-daily.js"></script>
 <script src="/stats-families.js"></script>

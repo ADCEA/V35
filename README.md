@@ -134,6 +134,16 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
   la dernière livraison) : le camion est alors à cette position tant qu'elle date de moins de 10 min, sinon à sa dernière
   livraison validée. Fond de carte OpenStreetMap, tracés routiers OSRM (`ROAD_ROUTING=off` pour les désactiver : lignes
   droites), adresses géocodées en arrière-plan par Nominatim.
+  **Tournées fixes** (même onglet, sous les chauffeurs) : le chef planifie à l'avance ses tournées — nom, chauffeur,
+  jours de la semaine (L à D) et hôtels dans l'ordre de passage (↑ ↓ ✕, ajout par liste). Chaque changement s'enregistre
+  tout de suite. Les commandes non livrées des hôtels rattachés sont affectées automatiquement au chauffeur de la prochaine
+  tournée qui roule (la livraison prévue sert de date de départ si elle est à venir), au rang de l'hôtel dans la tournée ;
+  l'affectation se fait quand on ouvre la logistique ou la carte, quand le livreur ouvre son lien, au passage d'une
+  commande à « Prête » et via le bouton « Affecter les commandes ». Un placement à la main (glisser-déposer, y compris vers
+  « Non assigné ») est définitif : l'automatisme ne le déplace plus (`orders.tour_manual`). Modifier, désactiver ou supprimer
+  une tournée replace ses commandes (`orders.tour_id`). Un hôtel ne peut être que dans une tournée active par jour. Le
+  planning d'un jour (demain par défaut) liste qui passe où, avec les commandes en cours de chaque hôtel.
+  API : `GET/POST /api/admin/logistics/tours`, `PUT/DELETE …/tours/:id`, `GET …/tours/plan?date=AAAA-MM-JJ`, `POST …/tours/apply`.
 - **Équipe** — collaborateurs rattachés à une BU ou à une machine, badgeuse de l'atelier, présence en direct et heures
   pointées par poste (voir « Équipe (RH) et badgeuse »).
 - **Statistiques** — un seul filtre de dates en haut de page pilote tout :
