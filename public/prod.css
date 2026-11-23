@@ -74,3 +74,39 @@
 .pf-actions .bl-btn:disabled{opacity:.35;cursor:default;}
 .pf-due{border-color:var(--brand);background:#F2F8FF;}
 @media (max-width:760px){.pf-strip{grid-template-columns:repeat(4,minmax(0,1fr));}.pf-card{flex-wrap:wrap;}.pf-actions{justify-content:flex-start;width:100%;}}
+
+/* ---- Prévision : poids par type de pièce, machines par étape, durée estimée ---- */
+.pf-fams-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}
+.pf-fam{font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:2px 9px;color:var(--steel);}
+.pf-fam b{color:var(--ink);font-weight:600;}
+.pf-est{display:flex;align-items:baseline;gap:6px 8px;flex-wrap:wrap;margin-top:8px;font-size:13px;}
+.pf-seg{display:inline-flex;flex-direction:column;line-height:1.25;background:#F2F8FF;border:1px solid #C9DFF7;border-radius:6px;padding:4px 9px;color:var(--ink);}
+.pf-seg b{font-size:11.5px;font-weight:600;color:var(--steel);}
+.pf-seg small{font-size:11px;color:var(--steel);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pf-seg em{font-style:normal;color:#B3321F;}
+.pf-arrow{color:var(--steel);}
+.pf-sum{margin-left:6px;color:var(--steel);font-size:12.5px;}
+.pf-sum b{color:var(--ink);font-size:14px;}
+.pf-est.big{margin-top:10px;}
+.pf-famin{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;}
+.pf-famin label{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--steel);}
+.pf-famin input{height:34px;border:1px solid #C5D3E0;border-radius:6px;padding:0 8px;background:#fff;color:var(--ink);font-size:13.5px;font-family:inherit;min-width:0;}
+.pf-famin input:disabled{background:var(--bg);color:var(--ink);font-weight:600;}
+.pf-stages{display:grid;gap:10px;}
+.pf-stage{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--paper);}
+.pf-stage h4{margin:0 0 6px;font-size:13.5px;font-weight:600;color:var(--ink);}
+.pf-stmin{font-weight:400;color:var(--steel);}
+.pf-none{margin:0 0 6px;font-size:12.5px;color:var(--steel);}
+.pf-stbtns{display:flex;gap:6px;flex-wrap:wrap;}
+.pf-line{margin-bottom:6px;}
+.pr-crow.pf-line select{min-width:0;max-width:none;flex:1 1 140px;}
+.pf-totalbox{margin:0 0 10px;}
+.pf-totalbox:empty{display:none;}
+.pf-linest{font-size:12.5px;color:var(--steel);flex:1 1 150px;min-width:0;}
+.pf-linest b{color:var(--ink);}
+.pf-linest small{font-size:11px;}
+.pf-unk{color:#B3321F;}
+.pf-err{margin:8px 0 0;font-size:12.5px;color:#B3321F;font-weight:600;}
+.pf-warn{margin:8px 0 0;padding:0;list-style:none;font-size:12px;color:#8A5200;}
+.pf-warn li::before{content:"! ";font-weight:700;}
+@media (max-width:760px){.pf-famin{grid-template-columns:repeat(2,minmax(0,1fr));}.pf-sum{margin-left:0;flex-basis:100%;}.pf-seg small{max-width:140px;}.pf-linest{flex-basis:100%;}}

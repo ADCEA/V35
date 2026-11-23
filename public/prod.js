@@ -187,6 +187,13 @@
     return () => rows.filter(r => r.clientId || r.societe.trim()).map(r => ({ clientId: r.clientId ? Number(r.clientId) : undefined, societe: r.clientId ? undefined : r.societe.trim(), weightKg: r.kg || undefined, orderId: r.orderId ? Number(r.orderId) : undefined }));
   }
 
+  /** Lot prévu sur plusieurs laveuses ou plusieurs charges : on lance la première, les suivantes viennent ensuite passage par passage. */
+  function launchNote(fc) {
+    const wash = fc && fc.plan && fc.plan.stages.lavage;
+    if (!wash || !wash.lines.length || !(wash.lines.length > 1 || wash.lines[0].passes > 1)) return '';
+    return `<p class="rh-help" style="margin:6px 0 12px">Lot de ${e(NF1.format(fc.weightKg || 0))} kg prévu sur ${wash.lines.map(l => `${e(l.machineName)} (${e(NF1.format(l.weightKg || 0))} kg, ${l.passes || 1} passage${l.passes > 1 ? 's' : ''})`).join(', ')} : on lance ici la première charge ; les suivantes se lancent ensuite avec « Ajouter un passage ».</p>`;
+  }
+
   async function lotForm(lot, fc) {
     const [ref, ch] = await Promise.all([refData(), get('/choices')]);
     const choices = ch.clients;
@@ -209,9 +216,10 @@
       body: `<div class="bl-row2"><div class="bl-field"><label for="lf-type">Type de linge *</label><select id="lf-type">${types.map(t => opt(t.id, t.label, pre && t.id === pre.linenTypeId)).join('')}</select></div>
         <div class="bl-field"><label for="lf-note">Remarque</label><input id="lf-note" maxlength="300" value="${e(pre && pre.note)}"></div></div>
         <div class="bl-field"><label>Clients * <span class="bl-faint">— plusieurs si le lot est mélangé ; les kilos par client sont facultatifs</span></label><div id="lf-clients"></div></div>
-        ${editing ? '' : `<div class="bl-row2"><div class="bl-field"><label for="lf-machine">Laveuse *</label><select id="lf-machine">${machOpts(ref, 'lavage', fc && fc.machineId)}</select></div>
-          <div class="bl-field"><label for="lf-kg">Poids chargé (kg) *</label><input id="lf-kg" inputmode="decimal" placeholder="24,5" value="${e(fc && fc.weightKg != null ? fc.weightKg : '')}"></div></div>
-          <div class="bl-field"><label for="lf-prog">Programme</label><select id="lf-prog">${progOpts(ref, fc && fc.programId)}</select></div>
+        ${editing ? '' : `<div class="bl-row2"><div class="bl-field"><label for="lf-machine">Laveuse *</label><select id="lf-machine">${machOpts(ref, 'lavage', fc && fc.firstPass ? fc.firstPass.machineId : fc && fc.machineId)}</select></div>
+          <div class="bl-field"><label for="lf-kg">Poids chargé (kg) *</label><input id="lf-kg" inputmode="decimal" placeholder="24,5" value="${e(fc && fc.firstPass && fc.firstPass.weightKg != null ? fc.firstPass.weightKg : fc && fc.weightKg != null ? fc.weightKg : '')}"></div></div>
+          <div class="bl-field"><label for="lf-prog">Programme</label><select id="lf-prog">${progOpts(ref, fc && fc.firstPass ? fc.firstPass.programId : fc && fc.programId)}</select></div>
+          ${launchNote(fc)}
           <div class="bl-row2"><div class="bl-field"><label for="lf-date">Jour *</label><input id="lf-date" type="date" value="${S.day || today()}" max="${today()}"></div>
           <div class="bl-field"><label>Début * / fin</label><div style="display:flex;gap:8px"><input id="lf-start" type="time" value="${nowHm()}" aria-label="Début"><input id="lf-end" type="time" aria-label="Fin"></div></div></div>
           <p class="rh-help">Sans heure de fin, le lavage est « en cours » (possible seulement aujourd'hui).</p>`}`,
@@ -263,6 +271,21 @@
   const dDay = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('fr-FR', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'numeric' });
   const tomorrow = () => addDays(today(), 1);
 
+
+  // Durée estimée d'un lot prévu : « Lavage 1 h 50 → Séchage 2 h 30 → Finition 1 h 08 ».
+  const FAM_LABEL = { grand_plat: 'Grand plat', petit_plat: 'Petit plat', eponge: 'Éponge', divers: 'Divers' };
+  const STAGE_NAME = { lavage: 'Lavage', sechage: 'Séchage', finition: 'Finition' };
+  const MACHINE_WORD = { lavage: ['laveuse', 'laveuses'], sechage: ['sécheuse', 'sécheuses'], finition: ['machine de finition', 'machines de finition'] };
+  function estimateRow(plan) {
+    if (!plan || !STAGE_ORDER.some(st => plan.stages[st].planned)) return '';
+    const segs = STAGE_ORDER.filter(st => plan.stages[st].planned).map(st => {
+      const g = plan.stages[st], n = g.lines.length;
+      return `<span class="pf-seg"><b>${STAGE_NAME[st]}</b> ${g.minutes != null ? e(dur(g.minutes)) + (g.incomplete ? '+' : '') : '<em>à renseigner</em>'}<small>${e(g.lines.map(l => l.machineName).join(', '))}${n > 1 ? '' : ''}</small></span>`;
+    }).join('<span class="pf-arrow" aria-hidden="true">→</span>');
+    const total = plan.minutes.total ? `<span class="pf-sum">${plan.incomplete ? 'au moins ' : ''}<b>${e(dur(plan.minutes.total))}</b> en tout</span>` : '';
+    return `<div class="pf-est" title="Estimation : les machines d'une même étape travaillent en même temps, les étapes s'enchaînent">${segs}${total}</div>`;
+  }
+
   async function paintForecast() {
     if (!S.fday || S.fday < today()) S.fday = tomorrow();
     const d = await get('/forecast?day=' + S.fday);
@@ -273,7 +296,8 @@
         <span>${e(dDay(u.day))}</span><b>${u.count ? e(u.count + ' lot' + (u.count > 1 ? 's' : '')) : '—'}</b><small>${u.count ? e(NF1.format(u.kg)) + ' kg' : 'rien de prévu'}</small></button>`).join('');
     const card = (f, i, n) => {
       const clients = f.clients.map(c => `${e(c.societe)}${c.weightKg ? ` <span class="bl-faint">${e(NF1.format(c.weightKg))} kg</span>` : ''}${c.orderTicket ? ` <span class="bl-tag draft">${e(c.orderTicket)}</span>` : ''}`).join(', ');
-      const meta = [f.machineName ? 'Laveuse prévue : ' + f.machineName : '', f.programName ? 'Programme : ' + f.programName : ''].filter(Boolean).map(e).join(' · ');
+      const meta = [].filter(Boolean).map(e).join(' · ');
+      const fams = f.families.filter(x => x.weightKg > 0).map(x => `<span class="pf-fam">${e(x.label)} <b>${e(NF1.format(x.weightKg))} kg</b></span>`).join('');
       const planned = f.status === 'prevu';
       return `<article class="pf-card${planned ? '' : ' done'}" data-fc="${f.id}">
         <span class="pf-n">${i + 1}</span>
@@ -281,6 +305,8 @@
           <div class="pf-title"><b>${e(f.linenType || 'Type à choisir')}</b><span class="pf-kg">${f.weightKg != null ? e(NF1.format(f.weightKg)) + ' kg' : 'poids à peser'}</span>
             ${planned ? '<span class="bl-tag wait">prévu</span>' : `<span class="bl-tag ok">lancé</span>${f.lotCode ? ` <button type="button" class="pr-code" data-lot="${f.lotId}">${e(f.lotCode)}</button>` : ''}`}</div>
           <div class="pf-clients">${clients}</div>
+          ${fams ? `<div class="pf-fams-row">${fams}</div>` : ''}
+          ${estimateRow(f.plan)}
           ${meta || f.note ? `<div class="pf-meta">${meta}${meta && f.note ? ' · ' : ''}${f.note ? '« ' + e(f.note) + ' »' : ''}</div>` : ''}
         </div>
         ${planned ? `<div class="pf-actions">
@@ -347,34 +373,123 @@
     let getClients;
     const first = fc || seed || {};
     const types = ref.linenTypes.filter(t => t.active || (fc && t.id === fc.linenTypeId));
+    const FAMS = Object.keys(FAM_LABEL);
+    // État du formulaire : kilos par type de pièce, et machines par étape (kilos vides = part automatique).
+    const fam = Object.fromEntries(FAMS.map(k => [k, ((fc && fc.families.find(x => x.id === k)) || {}).weightKg || '']));
+    const lines = { lavage: [], sechage: [], finition: [] };
+    if (fc) fc.machines.forEach(l => { if (lines[l.stage]) lines[l.stage].push({ machineId: String(l.machineId), programId: l.programId ? String(l.programId) : '', kg: l.weightKg != null ? String(l.weightKg) : '' }); });
+    const famSum = () => Math.round(FAMS.reduce((a, k) => a + (Number(String(fam[k]).replace(',', '.')) || 0), 0) * 10) / 10;
+    const machinesOf = (st) => ref.machines.filter(m => m.bu === st);
+    // programme proposé pour une nouvelle laveuse : celui de la précédente, sinon le premier programme actif qui a une durée
+    const defProg = () => { const last = lines.lavage[lines.lavage.length - 1]; const p = ref.programs.find(x => x.active && x.durationMin); return (last && last.programId) || (p ? String(p.id) : ''); };
+    let timer = 0, seq = 0;
+    const payload = (box) => {
+      const day = box.$('#pf-day').value;
+      const families = {}; FAMS.forEach(k => { if (String(fam[k]).trim()) families[k] = fam[k]; });
+      const machines = {};
+      STAGE_ORDER.forEach(st => { machines[st] = lines[st].filter(l => l.machineId).map(l => ({ machineId: Number(l.machineId), ...(st === 'lavage' ? { programId: l.programId ? Number(l.programId) : null } : {}), weightKg: l.kg === '' ? null : l.kg })); });
+      const body = { families, machines };
+      if (!Object.keys(families).length) body.weightKg = box.$('#pf-kg').value;
+      return { day, body };
+    };
+    const drawStages = (box) => {
+      box.$('#pf-stages').innerHTML = STAGE_ORDER.map(st => {
+        const all = machinesOf(st);
+        const rows = lines[st].map((l, i) => {
+          const taken = new Set(lines[st].filter((_, j) => j !== i).map(x => x.machineId));
+          const opts = opt('', '— machine —', !l.machineId) + all.filter(m => !taken.has(String(m.id))).map(m => opt(m.id, m.name + (m.capacityKg || m.throughputKgh ? ` (${[m.capacityKg ? NF1.format(m.capacityKg) + ' kg' : '', m.throughputKgh ? NF1.format(m.throughputKgh) + ' kg/h' : ''].filter(Boolean).join(' · ')})` : ''), String(m.id) === l.machineId)).join('');
+          return `<div class="pr-crow pf-line" data-st="${st}" data-i="${i}">
+            <select data-f="machineId" aria-label="${e(STAGE_NAME[st])} : machine">${opts}</select>
+            ${st === 'lavage' ? `<select data-f="programId" aria-label="Programme">${progOpts(ref, l.programId ? Number(l.programId) : null)}</select>` : ''}
+            <input data-f="kg" inputmode="decimal" placeholder="auto" value="${e(l.kg)}" aria-label="Kilos sur cette machine" style="width:84px">
+            <span class="pf-linest" aria-live="polite"></span>
+            <button type="button" class="bl-btn small" data-rm aria-label="Retirer cette machine">✕</button></div>`;
+        }).join('');
+        const left = all.filter(m => !lines[st].some(l => l.machineId === String(m.id))).length;
+        const room = lines[st].length < 6 && left > 0;
+        return `<section class="pf-stage" data-st="${st}"><h4>${e(STAGE_NAME[st])}<span class="pf-stmin" data-stmin></span></h4>
+          ${rows || `<p class="pf-none">Aucune ${e(MACHINE_WORD[st][0])} prévue : à choisir le jour même.</p>`}
+          <div class="pf-stbtns">${room ? `<button type="button" class="bl-btn small" data-add>+ Ajouter ${st === 'finition' ? 'une machine' : 'une ' + e(MACHINE_WORD[st][0])}</button>` : ''}${left > 1 && lines[st].length + left <= 6 ? `<button type="button" class="bl-btn small" data-all>Toutes (${lines[st].length + left})</button>` : ''}</div></section>`;
+      }).join('');
+      wireStages(box);
+      schedule(box);
+    };
+    const paintEstimate = (box, plan, err) => {
+      const tot = box.$('#pf-total');
+      if (err) { tot.innerHTML = `<p class="pf-err">${e(err)}</p>`; box.el.querySelectorAll('.pf-linest,[data-stmin]').forEach(n => { n.textContent = ''; }); return; }
+      // lignes : les machines sans choix ne sont pas envoyées, on retrouve donc les lignes par ordre
+      STAGE_ORDER.forEach(st => {
+        const sec = box.el.querySelector(`.pf-stage[data-st="${st}"]`);
+        const g = plan.stages[st];
+        const rows = [...sec.querySelectorAll('.pf-line')].filter((_, i) => lines[st][i].machineId);
+        rows.forEach((row, k) => {
+          const l = g.lines[k]; if (!l) return;
+          const kgIn = row.querySelector('[data-f="kg"]');
+          if (l.auto) kgIn.placeholder = l.weightKg != null ? NF1.format(l.weightKg) : 'auto';
+          row.querySelector('.pf-linest').innerHTML = l.minutes != null
+            ? (st === 'lavage' ? `${l.passes} passage${l.passes > 1 ? 's' : ''} × ${e(dur(l.passMin))} = <b>${e(dur(l.minutes))}</b>` : `${l.weightKg != null ? e(NF1.format(l.weightKg)) + ' kg · ' : ''}<b>${e(dur(l.minutes))}</b>${l.source === 'historique' ? ' <small>d\'après l\'historique</small>' : ''}`)
+            : '<span class="pf-unk">durée inconnue</span>';
+        });
+        sec.querySelector('[data-stmin]').textContent = g.planned ? (g.minutes != null ? ` · ${dur(g.minutes)}${g.incomplete ? ' au moins' : ''}` : ' · durée à renseigner') : '';
+      });
+      const segs = STAGE_ORDER.filter(st => plan.stages[st].planned).map(st => `<span class="pf-seg"><b>${STAGE_NAME[st]}</b> ${plan.stages[st].minutes != null ? e(dur(plan.stages[st].minutes)) : '<em>?</em>'}</span>`).join('<span class="pf-arrow" aria-hidden="true">→</span>');
+      tot.innerHTML = segs ? `<div class="pf-est big">${segs}<span class="pf-sum">${plan.incomplete ? 'au moins ' : ''}<b>${e(dur(plan.minutes.total))}</b> en tout</span></div>
+        <p class="rh-help" style="margin:4px 0 0">Les machines d'une même étape travaillent en même temps ; les étapes s'enchaînent.${plan.missingStages.length ? ` ${e(plan.missingStages.map(x => STAGE_NAME[x].toLowerCase()).join(' et '))} non prévu${plan.missingStages.length > 1 ? 's' : ''} : pas compté${plan.missingStages.length > 1 ? 's' : ''}.` : ''}</p>
+        ${plan.warnings.length ? `<ul class="pf-warn">${plan.warnings.map(w => `<li>${e(w)}</li>`).join('')}</ul>` : ''}`
+        : '<p class="rh-help" style="margin:0">Choisissez des machines pour estimer le temps de lavage, de séchage et de finition.</p>';
+    };
+    const schedule = (box) => {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const mine = ++seq;
+        try {
+          const r = await post('/forecasts/estimate', payload(box).body);
+          if (mine === seq) paintEstimate(box, r.plan);
+        } catch (err) { if (mine === seq) paintEstimate(box, null, err.message); }
+      }, 200);
+    };
+    const syncWeight = (box) => {
+      const sum = famSum(), kg = box.$('#pf-kg');
+      kg.disabled = sum > 0;
+      if (sum > 0) kg.value = String(sum).replace('.', ',');
+      box.$('#pf-famnote').textContent = sum > 0 ? 'Total calculé : somme des types de pièces.' : 'Facultatif : répartissez par type de pièce pour estimer finement.';
+    };
+    const wireStages = (box) => {
+      box.el.querySelectorAll('.pf-stage').forEach(sec => {
+        const st = sec.dataset.st;
+        sec.querySelectorAll('.pf-line').forEach(row => {
+          const l = lines[st][Number(row.dataset.i)];
+          row.querySelectorAll('select[data-f]').forEach(x => x.onchange = () => { l[x.dataset.f] = x.value; if (x.dataset.f === 'machineId') drawStages(box); else schedule(box); });
+          row.querySelector('input[data-f="kg"]').oninput = (ev) => { l.kg = ev.target.value; schedule(box); };
+          row.querySelector('[data-rm]').onclick = () => { lines[st].splice(Number(row.dataset.i), 1); drawStages(box); };
+        });
+        const add = sec.querySelector('[data-add]'); if (add) add.onclick = () => { lines[st].push({ machineId: '', programId: st === 'lavage' ? defProg() : '', kg: '' }); drawStages(box); const sel = box.el.querySelectorAll(`.pf-stage[data-st="${st}"] .pf-line select[data-f="machineId"]`); if (sel.length) sel[sel.length - 1].focus(); };
+        const all = sec.querySelector('[data-all]'); if (all) all.onclick = () => { machinesOf(st).forEach(m => { if (!lines[st].some(l => l.machineId === String(m.id))) lines[st].push({ machineId: String(m.id), programId: st === 'lavage' ? defProg() : '', kg: '' }); }); lines[st] = lines[st].filter(l => l.machineId); drawStages(box); };
+      });
+    };
     Bill.modal({
       title: editing ? 'Modifier le lot prévu' : 'Prévoir un lot', wide: true,
       buttons: [{ label: 'Annuler' }, { label: editing ? 'Enregistrer' : 'Ajouter à la prévision', primary: true, onClick: async (box) => {
-        const day = box.$('#pf-day').value;
-        const payload = { day, linenTypeId: Number(box.$('#pf-type').value), clients: getClients(), weightKg: box.$('#pf-kg').value, machineId: box.$('#pf-machine').value ? Number(box.$('#pf-machine').value) : null,
-          programId: box.$('#pf-prog').value ? Number(box.$('#pf-prog').value) : null, note: box.$('#pf-note').value };
-        if (editing) await put(`/forecasts/${fc.id}`, payload); else await post('/forecasts', payload);
+        const { day, body } = payload(box);
+        const data = { day, linenTypeId: Number(box.$('#pf-type').value), clients: getClients(), note: box.$('#pf-note').value, ...body };
+        if (editing) await put(`/forecasts/${fc.id}`, data); else await post('/forecasts', data);
         toast(editing ? 'Prévision modifiée.' : 'Lot ajouté à la prévision.'); box.close(); S.fday = day; S.tab = 'forecast'; refreshTab(); return true;
       } }],
       body: `<div class="bl-row2"><div class="bl-field"><label for="pf-day">Jour prévu *</label><input id="pf-day" type="date" value="${e(fc ? fc.day : S.fday || tomorrow())}" min="${today()}"></div>
         <div class="bl-field"><label for="pf-type">Type de linge *</label><select id="pf-type">${types.map(t => opt(t.id, t.label, fc && t.id === fc.linenTypeId)).join('')}</select></div></div>
         <div class="bl-field"><label>Clients * <span class="bl-faint">— plusieurs si le lot est mélangé ; rattachez la commande pour comparer au poids attendu</span></label><div id="lf-clients"></div></div>
-        <div class="bl-row2"><div class="bl-field"><label for="pf-kg">Poids estimé (kg)</label><input id="pf-kg" inputmode="decimal" placeholder="Facultatif" value="${e(first.weightKg != null ? first.weightKg : '')}"></div>
-          <div class="bl-field"><label for="pf-machine">Laveuse souhaitée</label><select id="pf-machine">${opt('', '— à choisir le jour même —', !fc || !fc.machineId)}${machOpts(ref, 'lavage', fc && fc.machineId)}</select></div></div>
-        <div class="bl-row2"><div class="bl-field"><label for="pf-prog">Programme</label><select id="pf-prog">${progOpts(ref, fc && fc.programId)}</select></div>
-          <div class="bl-field"><label for="pf-note">Remarque</label><input id="pf-note" maxlength="300" value="${e(fc && fc.note)}" placeholder="Ex. draps du week-end, taches à traiter"></div></div>
-        <p class="rh-help" id="pf-hint" style="color:var(--rust);display:none"></p>
-        <p class="rh-help">Rien n'est lancé : le lot apparaîtra dans « Aujourd'hui » et sur la tablette le jour prévu.</p>`,
+        <div class="bl-field"><label>Poids par type de pièce (kg)</label>
+          <div class="pf-famin">${FAMS.map(k => `<label><span>${e(FAM_LABEL[k])}</span><input data-fam="${k}" inputmode="decimal" placeholder="0" value="${e(fam[k])}"></label>`).join('')}
+            <label><span>Total</span><input id="pf-kg" inputmode="decimal" placeholder="Facultatif" value="${e(first.weightKg != null ? first.weightKg : '')}" aria-describedby="pf-famnote"></label></div>
+          <p class="rh-help" id="pf-famnote" style="margin:4px 0 0"></p></div>
+        <div class="bl-field"><label>Machines et durée <span class="bl-faint">— plusieurs machines par étape ; kilos vides = répartis automatiquement</span></label><div id="pf-total" class="pf-totalbox"></div><div id="pf-stages" class="pf-stages"></div></div>
+        <div class="bl-field"><label for="pf-note">Remarque</label><input id="pf-note" maxlength="300" value="${e(fc && fc.note)}" placeholder="Ex. draps du week-end, taches à traiter"></div>
+        <p class="rh-help">Rien n'est lancé ni réservé : le lot apparaîtra dans « Aujourd'hui » et sur la tablette le jour prévu.</p>`,
       onOpen: (box) => {
-        const cap = Math.max(0, ...ref.machines.filter(m => m.bu === 'lavage').map(m => m.capacityKg || 0));
-        const hint = () => {
-          const kg = Number(String(box.$('#pf-kg').value).replace(',', '.'));
-          const h = box.$('#pf-hint');
-          h.style.display = cap && kg > cap ? '' : 'none';
-          h.textContent = `Plus que la plus grande laveuse (${NF1.format(cap)} kg) : prévoyez plusieurs lots, un par charge.`;
-        };
-        box.$('#pf-kg').addEventListener('input', hint); hint();
         getClients = clientRows(box, ch.clients, (fc || seed) ? first.clients.map(c => ({ clientId: c.clientId || '', societe: c.societe, kg: c.weightKg || '', orderId: c.orderId || '' })) : []);
+        box.el.querySelectorAll('[data-fam]').forEach(x => x.oninput = () => { fam[x.dataset.fam] = x.value; syncWeight(box); schedule(box); });
+        box.$('#pf-kg').oninput = () => schedule(box);
+        syncWeight(box); drawStages(box);
       },
     });
   }

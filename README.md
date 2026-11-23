@@ -701,7 +701,22 @@ aucun lot ni aucune prévision, avec un poids estimé (articles × poids catalog
 on la lance en confirmant la laveuse et le poids réellement chargé (prérempli, modifiable) : le vrai lot est alors créé (mêmes contrôles de
 capacité et d'occupation qu'un nouveau lot) et la prévision passe à « lancée » avec le code du lot. Une prévision lancée ne se modifie
 plus. API : `GET /api/admin/atelier/forecast?day=`, `POST/PUT/DELETE …/forecasts[/:id]`, `POST …/forecasts/copy`, `…/forecasts/:id/move`,
-`…/forecasts/:id/launch` ; tablette `POST /api/atelier/forecasts/:id/launch` (code du collaborateur).
+`…/forecasts/:id/launch`, `POST …/forecasts/estimate` ; tablette `POST /api/atelier/forecasts/:id/launch` (code du collaborateur).
+
+**Poids par type de pièce et durée estimée** (formulaire « Prévoir un lot ») : le poids se répartit en *grand plat, petit plat, éponge, divers*
+(`lot_forecast_families`) ; dès qu'une répartition est saisie, sa somme fait le poids du lot. Pour chaque étape — **lavage, séchage, finition** —
+on affecte **plusieurs machines** (`lot_forecast_machines`, 6 au plus par étape, une fois chacune) ; kilos laissés vides = part automatique du
+poids restant, répartie au prorata de la capacité des laveuses ou de la cadence des sécheuses et des machines de finition (les machines d'une
+étape finissent ainsi ensemble). Durées : lavage = passages (kilos ÷ capacité, arrondi au-dessus — une machine peut donc recevoir plus que sa
+capacité, elle enchaîne les charges) × durée du programme ; séchage et finition = kilos ÷ cadence (kg/h). Les machines d'une même étape
+travaillent en même temps (l'étape dure autant que la plus longue), les étapes s'enchaînent : **total = lavage + séchage + finition**
+(estimation prudente, sans chevauchement des charges ; une étape sans machine n'est pas comptée). Sans programme ou sans cadence renseignés,
+la médiane des passages terminés de la machine sur 90 jours est utilisée (3 passages au moins), sinon la ligne est « durée inconnue » et le
+total est marqué « au moins ». Le formulaire recalcule en direct (`POST …/forecasts/estimate`, rien n'est enregistré) ; les cartes de la liste
+montrent les types de pièces et « Lavage → Séchage → Finition ». Une prévision ne réserve toujours aucune machine. Au lancement, on démarre
+la **première charge de la première laveuse** prévue (au plus sa capacité, programme repris) ; les kilos des clients portent sur tout le lot, et
+les autres charges se lancent ensuite passage par passage. L'ancienne saisie d'une seule laveuse (`machineId`, `programId`) reste acceptée
+(capacité contrôlée) et devient une ligne de lavage.
 
 Règles :
 - une machine doit appartenir à l'étape (laveuse → lavage…), le poids ne dépasse pas sa capacité, et deux passages ne peuvent pas se

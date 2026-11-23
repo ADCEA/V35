@@ -176,10 +176,11 @@
       <span class="s">${esc(l.stageLabel)}${clients ? ' · ' + esc(clients) : ''}</span></button>`;
   }
 
+  const durFr = (min) => (min >= 60 ? `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')}` : `${min} min`);
   function forecastButton(f) {
     const clients = f.clients.map((c) => c.societe).join(', ');
     return `<button type="button" class="at-lot plan" data-act="launchfc" data-fc="${num(f.id)}"><span class="t"><b>${esc(f.linenType || 'Lot')}</b>${f.weightKg != null ? ' · ' + esc(kgf(f.weightKg)) + ' kg' : ''}</span>
-      <span class="s">${esc(clients)}${f.machineName ? ' · ' + esc(f.machineName) : ''}${f.note ? ' · ' + esc(f.note) : ''}</span></button>`;
+      <span class="s">${esc(clients)}${f.machineName ? ' · ' + esc(f.machineName) : ''}${f.plan && f.plan.minutes.total ? ' · ' + esc(durFr(f.plan.minutes.total)) + (f.plan.incomplete ? '+' : '') : ''}${f.note ? ' · ' + esc(f.note) : ''}</span></button>`;
   }
 
   function renderBoard() {
@@ -313,15 +314,19 @@
   function openNewLot(machineId, fc) {
     const free = stageMachines('lavage').filter((m) => m.state === 'free');
     // Un lot prévu : sa laveuse souhaitée si elle est libre, sinon la première libre.
-    const wanted = fc && fc.machineId ? free.find((m) => m.id === fc.machineId) : null;
+    const fp = fc && fc.firstPass;
+    const wanted = fc && (fp ? fp.machineId : fc.machineId) ? free.find((m) => m.id === (fp ? fp.machineId : fc.machineId)) : null;
     const m = wanted || (machineId ? machineById(machineId) : free[0]);
     if (!m) { toast('Aucune laveuse libre pour le moment.', true); return; }
     F = { kind: 'newlot', typeId: null, clients: [], find: '', free: '', machineId: m.id, kg: m.capacityKg || 0, programId: null, err: '' };
     if (fc) {
       F.forecastId = fc.id; F.typeId = fc.linenTypeId; F.note = fc.note || '';
       F.clients = fc.clients.map((c) => ({ clientId: c.clientId || null, societe: c.societe, kg: c.weightKg || '', orderId: c.orderId || null }));
-      if (fc.weightKg) F.kg = m.capacityKg ? Math.min(fc.weightKg, m.capacityKg) : fc.weightKg;
-      F.programId = fc.programId || null;
+      const kg = fp && fp.weightKg != null ? fp.weightKg : fc.weightKg;
+      if (kg) F.kg = m.capacityKg ? Math.min(kg, m.capacityKg) : kg;
+      F.programId = (fp ? fp.programId : fc.programId) || null;
+      F.wash = fc.plan && fc.plan.stages.lavage ? fc.plan.stages.lavage.lines : [];
+      F.total = fc.weightKg || 0;
     }
     showSheet(renderNewLot);
   }
@@ -339,6 +344,12 @@
       return `<div class="row"><button type="button" class="at-chip on" data-act="rmclient" data-i="${i}">${esc(c.societe)} <span class="x">✕</span></button>${multi ? `<input inputmode="decimal" data-kgin="${i}" placeholder="kg" value="${esc(c.kg)}" aria-label="Kilos de ${esc(c.societe)}">` : ''}</div>${orders ? `<div class="at-chips" style="width:100%">${orders}</div>` : ''}`;
     }).join('');
   }
+  /** Lot prévu sur plusieurs laveuses ou plusieurs charges : on lance la première charge, les suivantes viennent ensuite. */
+  function moreNote() {
+    const w = F.wash || [];
+    if (!w.length || !(w.length > 1 || w[0].passes > 1)) return '';
+    return `<p class="at-none">Lot de ${esc(kgf(F.total))} kg prévu sur ${w.map((l) => `${esc(l.machineName)} (${esc(kgf(l.weightKg || 0))} kg, ${num(l.passes || 1)} passage${l.passes > 1 ? 's' : ''})`).join(', ')} : on lance la première charge, les suivantes viennent ensuite.</p>`;
+  }
   function renderNewLot() {
     const m = machineById(F.machineId);
     pane(`${head(F.forecastId ? 'Lancer le lot prévu' : 'Nouveau lot', F.forecastId ? 'Vérifiez la laveuse et le poids réellement chargé.' : 'Lavage lancé maintenant.')}
@@ -351,6 +362,7 @@
       <div class="at-blk"><div class="l">Machine</div><div class="at-chips">${machineChips('lavage')}</div></div>
       <div class="at-blk"><div class="l">Poids chargé</div>${stepper(F.kg, m && m.capacityKg, 'at-kg')}</div>
       ${programChips()}
+      ${moreNote()}
       ${errBox()}
       <div class="at-go"><button type="button" class="at-b" data-act="close">Annuler</button><button type="button" class="at-b main" data-act="submit-newlot">Démarrer le lavage</button></div>`);
   }

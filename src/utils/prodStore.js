@@ -236,7 +236,8 @@ function createLot(o) {
   if (startMs > nowMs + 60000 || (o.endMs && o.endMs > nowMs + 60000)) throw bad('Cette heure est dans le futur.');
   if (o.endMs && o.endMs <= startMs) throw bad('La fin doit être après le début.');
   return db.transaction(() => {
-    const clients = resolveClients(o.clients, weightKg);
+    // totalKg : poids de tout le lot quand ce premier passage n'en charge qu'une partie (lot prévu sur plusieurs machines ou plusieurs charges)
+    const clients = resolveClients(o.clients, o.totalKg != null ? Math.max(weightKg, Number(o.totalKg) || 0) : weightKg);
     const day = rh.parisDate(startMs);
     const lot = db.prepare('INSERT INTO lots (code, day, linen_type_id, note, created_by, terminal_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(nextCode(day), day, type.id, clean(o.note, 300) || null, o.employeeId || null, o.terminalId || null, iso(nowMs));

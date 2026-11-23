@@ -690,3 +690,22 @@ CREATE TABLE IF NOT EXISTS lot_forecast_clients (
   weight_kg   REAL
 );
 CREATE INDEX IF NOT EXISTS idx_lot_forecast_clients ON lot_forecast_clients(forecast_id);
+-- Poids prévu par type de pièce (grand_plat, petit_plat, eponge, divers) : la somme est le poids du lot prévu.
+CREATE TABLE IF NOT EXISTS lot_forecast_families (
+  forecast_id INTEGER NOT NULL REFERENCES lot_forecasts(id) ON DELETE CASCADE,
+  family      TEXT NOT NULL,
+  weight_kg   REAL NOT NULL,
+  PRIMARY KEY (forecast_id, family)
+);
+-- Machines prévues par étape (lavage, sechage, finition) : plusieurs par étape, qui travaillent en même temps.
+-- weight_kg vide = part automatique du poids restant. Servent à estimer la durée (utils/washPlan.js), rien n'est réservé.
+CREATE TABLE IF NOT EXISTS lot_forecast_machines (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  forecast_id INTEGER NOT NULL REFERENCES lot_forecasts(id) ON DELETE CASCADE,
+  stage       TEXT NOT NULL,
+  position    INTEGER NOT NULL DEFAULT 0,
+  machine_id  INTEGER REFERENCES machines(id) ON DELETE CASCADE,
+  program_id  INTEGER REFERENCES wash_programs(id) ON DELETE SET NULL,
+  weight_kg   REAL
+);
+CREATE INDEX IF NOT EXISTS idx_lot_forecast_machines ON lot_forecast_machines(forecast_id, stage, position);
