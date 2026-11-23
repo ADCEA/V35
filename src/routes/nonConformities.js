@@ -52,7 +52,7 @@ clientRouter.post('/', createLimit, (req, res) => {
   if (comment != null && (typeof comment !== 'string' || comment.length > MAX_COMMENT)) return res.status(400).json({ error: `Le commentaire est trop long (${MAX_COMMENT} caractères au plus).` });
   if (lines != null && (!Array.isArray(lines) || lines.length > MAX_LINES)) return res.status(400).json({ error: 'Liste d\'articles invalide.' });
 
-  const order = db.prepare("SELECT * FROM orders WHERE id = ? AND client_id = ? AND status = 'livree'").get(Number(orderId), clientId);
+  const order = db.prepare("SELECT * FROM orders WHERE id = ? AND client_id = ? AND status = 'livree' AND collect_only = 0").get(Number(orderId), clientId);
   if (!order) return res.status(404).json({ error: 'Livraison introuvable.' });
 
   const items = Object.fromEntries(db.prepare('SELECT service_id AS id, name FROM order_items WHERE order_id = ?').all(order.id).map(i => [i.id, i.name]));

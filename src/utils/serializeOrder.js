@@ -8,6 +8,7 @@ function serializeOrder(order, items) {
     productionStage: order.production_stage,
     driverId: order.driver_id,
     deliverySequence: order.delivery_sequence,
+    collectOnly: !!order.collect_only,
     client: {
       societe: order.societe,
       contact: order.contact,

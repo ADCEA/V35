@@ -187,7 +187,7 @@ function dashboard(today = engine.todayParis()) {
   const dso = paidInv.length ? Math.round(sum(paidInv, d => daysBetween(d.issueDate, d.lastPaidOn)) / paidInv.length) : null;
 
   // BL livrés pas encore facturés
-  const clientsWithDelivered = db.prepare("SELECT DISTINCT client_id FROM orders WHERE status = 'livree' AND client_id IS NOT NULL").all().map(r => r.client_id);
+  const clientsWithDelivered = db.prepare("SELECT DISTINCT client_id FROM orders WHERE status = 'livree' AND collect_only = 0 AND client_id IS NOT NULL").all().map(r => r.client_id);
   let toInvoiceCount = 0; let toInvoiceCents = 0; let toInvoiceClients = 0;
   for (const cid of clientsWithDelivered) {
     const ids = engine.listInvoiceableOrders(cid).map(o => o.id);

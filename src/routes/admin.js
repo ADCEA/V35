@@ -346,7 +346,7 @@ router.get('/clients/:id/invoiceable-orders', (req, res) => {
   const orders = db.prepare(`
     SELECT o.id, o.ticket, o.livraison_prevue as livraisonPrevue, o.created_at as createdAt
     FROM orders o
-    WHERE o.client_id = ? AND o.status = 'livree'
+    WHERE o.client_id = ? AND o.status = 'livree' AND o.collect_only = 0
       AND o.id NOT IN (SELECT order_id FROM invoice_orders)
       AND o.id NOT IN (
         -- BL déjà pris par une facture de la facturation intégrée (sauf si
@@ -791,7 +791,7 @@ router.get('/orders/:id/copy', (req, res) => {
 
 // GET /api/admin/orders — toutes les commandes, tous clients
 router.get('/orders', (req, res) => {
-  const orders = db.prepare('SELECT * FROM orders ORDER BY created_at DESC').all();
+  const orders = db.prepare('SELECT * FROM orders WHERE collect_only = 0 ORDER BY created_at DESC').all();   // les arrêts de collecte vivent dans Logistique
   // `billed` : commande déjà reprise dans une facture ou un brouillon, donc quantités livrées figées.
   const billed = deliveries.billedOrderIds();
   res.json({ orders: orders.map(o => ({ ...serializeOrder(o, getItems(o.id)), billed: billed.has(o.id) })) });

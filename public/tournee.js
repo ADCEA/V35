@@ -103,6 +103,7 @@ async function resumeSharing(){
 
 // ---------- validation d'une livraison ----------
 async function deliver(orderId, btn){
+  const label = btn.textContent;
   btn.disabled = true; btn.textContent = 'Validation…';
   const fresh = share.on && share.last && Date.now() - share.last.at < 2 * 60 * 1000;
   try {
@@ -113,7 +114,7 @@ async function deliver(orderId, btn){
     await load();
   } catch (err) {
     alert(err.message);
-    btn.disabled = false; btn.textContent = 'Oui, c\'est livré';
+    btn.disabled = false; btn.textContent = label;
   }
 }
 
@@ -169,12 +170,12 @@ function render(data){
 
   const doneList = data.deliveredToday || [];
   const doneHtml = doneList.length ? `
-    <section class="done-box" aria-label="Livraisons validées aujourd'hui">
-      <h3>Livré aujourd'hui · ${doneList.length}</h3>
+    <section class="done-box" aria-label="Arrêts validés aujourd'hui">
+      <h3>Fait aujourd'hui · ${doneList.length}</h3>
       <ul>${doneList.map(d => `
         <li>
           <span class="done-check" aria-hidden="true">✓</span>
-          <span class="done-name">${esc(d.societe)}<small>${esc(d.ticket)}</small></span>
+          <span class="done-name">${esc(d.societe)}<small>${d.collectOnly ? '🧺 collecte · ' : ''}${esc(d.ticket)}</small></span>
           <span class="done-time">${hhmm(d.deliveredAt)}${d.minutesSincePrev != null ? `<small>+${formatDuration(d.minutesSincePrev)}</small>` : ''}</span>
         </li>`).join('')}
       </ul>
@@ -204,22 +205,23 @@ function render(data){
       <div class="stop-card">
         <div class="stop-societe">${esc(s.societe)}</div>
         <div class="stop-ticket">${esc(s.ticket)}</div>
+        ${s.collectOnly ? `<div class="stop-collect">🧺 Collecte du linge sale — rien à livrer</div>${s.notes ? `<div class="stop-note">${esc(s.notes)}</div>` : ''}` : ''}
         <div class="stop-addr">${esc(s.adresse)}</div>
         <div class="tr-eta" data-order="${esc(s.orderId)}" hidden></div>
         <div class="stop-actions">
           <a class="maps" href="${esc(safeUrl(s.mapsUrl))}" target="_blank" rel="noopener">🧭 Itinéraire</a>
           ${s.tel ? `<a class="call" href="tel:${esc(String(s.tel).replace(/[^\d+]/g, ''))}">📞 Appeler</a>` : ''}
         </div>
-        <div class="stop-actions">
+        ${s.collectOnly ? '' : `<div class="stop-actions">
           <a class="bl" href="${esc(safeUrl(s.deliveryNoteUrl))}" target="_blank" rel="noopener">📄 Bon de livraison</a>
         </div>
-        <div class="stop-items">${s.items.map(it => `<span>${esc(it.name)} ×${it.qty}</span>`).join('')}</div>
+        <div class="stop-items">${s.items.map(it => `<span>${esc(it.name)} ×${it.qty}</span>`).join('')}</div>`}
         <div class="deliver-zone" id="deliver-zone-${s.orderId}">
-          <button type="button" class="deliver-btn" data-deliver-ask="${s.orderId}">✓ Livraison effectuée</button>
+          <button type="button" class="deliver-btn" data-deliver-ask="${s.orderId}">${s.collectOnly ? '✓ Collecte effectuée' : '✓ Livraison effectuée'}</button>
           <div class="deliver-confirm" hidden>
-            <p>Confirmer la livraison chez <b>${esc(s.societe)}</b> ?</p>
+            <p>${s.collectOnly ? 'Confirmer la collecte' : 'Confirmer la livraison'} chez <b>${esc(s.societe)}</b> ?</p>
             <div class="deliver-row">
-              <button type="button" class="deliver-yes" data-deliver-yes="${s.orderId}">Oui, c'est livré</button>
+              <button type="button" class="deliver-yes" data-deliver-yes="${s.orderId}">${s.collectOnly ? 'Oui, c\'est collecté' : 'Oui, c\'est livré'}</button>
               <button type="button" class="deliver-no" data-deliver-no="${s.orderId}">Annuler</button>
             </div>
           </div>

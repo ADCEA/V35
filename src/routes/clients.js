@@ -263,7 +263,7 @@ router.post('/reset-code', (req, res) => {
 // GET /api/clients/orders — historique du client connecté
 router.get('/orders', requireClient, (req, res) => {
   const orders = db.prepare(`
-    SELECT * FROM orders WHERE client_id = ? ORDER BY created_at DESC
+    SELECT * FROM orders WHERE client_id = ? AND collect_only = 0 ORDER BY created_at DESC
   `).all(req.session.clientId);
 
   const itemsStmt = db.prepare('SELECT service_id as id, name, code, price, qty, delivered_qty as deliveredQty FROM order_items WHERE order_id = ?');
@@ -397,7 +397,7 @@ router.get('/deliveries', requireClient, (req, res) => {
 
 // GET /api/clients/deliveries/:id/pdf — le bon de livraison, après vérification qu'il est bien celui de l'hôtel connecté.
 router.get('/deliveries/:id/pdf', requireClient, async (req, res) => {
-  const row = db.prepare("SELECT id FROM orders WHERE id = ? AND client_id = ? AND status = 'livree'").get(Number(req.params.id), req.session.clientId);
+  const row = db.prepare("SELECT id FROM orders WHERE id = ? AND client_id = ? AND status = 'livree' AND collect_only = 0").get(Number(req.params.id), req.session.clientId);
   if (!row) return res.status(404).json({ error: 'Bon de livraison introuvable.' });
   try {
     const order = require('../billing/mail').loadDeliveryNote(row.id);

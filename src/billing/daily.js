@@ -33,7 +33,7 @@ function daily(from, to) {
   const lines = db.prepare(`
     SELECT o.id AS orderId, ${DELIVERY_DATE_SQL} AS date, oi.qty, oi.delivered_qty AS delivered, oi.price, COALESCE(a.weight_g, 0) AS weightG
     FROM orders o JOIN order_items oi ON oi.order_id = o.id LEFT JOIN articles a ON a.id = oi.service_id
-    WHERE o.status = 'livree' AND ${DELIVERY_DATE_SQL} BETWEEN ? AND ?
+    WHERE o.status = 'livree' AND o.collect_only = 0 AND ${DELIVERY_DATE_SQL} BETWEEN ? AND ?
   `).all(p.from, p.to);
   for (const l of lines) {
     const d = days.get(l.date); if (!d) continue;
@@ -42,7 +42,7 @@ function daily(from, to) {
     d[l.weightG > 0 ? 'deliveredWeightedHtCents' : 'deliveredUnweightedHtCents'] += cents;
   }
   // Nombre de BL du jour : toutes les commandes livrées, y compris celles sans ligne (valeur nulle).
-  for (const r of db.prepare(`SELECT ${DELIVERY_DATE_SQL} AS date, COUNT(*) AS n FROM orders o WHERE o.status = 'livree' AND ${DELIVERY_DATE_SQL} BETWEEN ? AND ? GROUP BY date`).all(p.from, p.to)) {
+  for (const r of db.prepare(`SELECT ${DELIVERY_DATE_SQL} AS date, COUNT(*) AS n FROM orders o WHERE o.status = 'livree' AND o.collect_only = 0 AND ${DELIVERY_DATE_SQL} BETWEEN ? AND ? GROUP BY date`).all(p.from, p.to)) {
     const d = days.get(r.date); if (d) d.deliveredCount = r.n;
   }
 
@@ -98,7 +98,7 @@ function dayDetail(date) {
   if (!stats.isIso(date)) throw new stats.StatsError('Date invalide.');
   const deliveries = db.prepare(`
     SELECT o.id, o.ticket, COALESCE(c.societe, o.societe) AS clientName FROM orders o LEFT JOIN clients c ON c.id = o.client_id
-    WHERE o.status = 'livree' AND ${DELIVERY_DATE_SQL} = ? ORDER BY o.id
+    WHERE o.status = 'livree' AND o.collect_only = 0 AND ${DELIVERY_DATE_SQL} = ? ORDER BY o.id
   `).all(date);
   const amount = db.prepare('SELECT qty, delivered_qty AS d, price FROM order_items WHERE order_id = ?');
   for (const o of deliveries) o.htCents = amount.all(o.id).reduce((s, l) => s + lineCents(l.d ?? l.qty, l.price), 0);

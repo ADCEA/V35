@@ -16,9 +16,9 @@ const dailyFail = (res, e) => (e && e.name === 'StatsError' ? res.status(e.statu
 
 function overview(p) {
   // Commandes reçues dans la période (voir dailyStats.receivedIds).
-  let received = '1=1'; const rArgs = [];
+  let received = 'o.collect_only = 0'; const rArgs = [];   // un arrêt de collecte n'est pas une commande de linge
   if (p) {
-    received = 'o.id IN (SELECT value FROM json_each(?))'; rArgs.push(JSON.stringify(dailyStats.receivedIds(p)));
+    received = 'o.collect_only = 0 AND o.id IN (SELECT value FROM json_each(?))'; rArgs.push(JSON.stringify(dailyStats.receivedIds(p)));
   }
   const delivered = p ? `o.status = 'livree' AND ${dailyStats.DELIVERY_DATE_SQL} BETWEEN ? AND ?` : "o.status = 'livree'";
   const dArgs = p ? [p.from, p.to] : [];
@@ -47,7 +47,7 @@ function overview(p) {
   `).get(...rArgs).n || 0;
   const totalItems = db.prepare(`SELECT SUM(oi.qty) AS n FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE ${received}`).get(...rArgs).n || 0;
 
-  const deliveredOrders = db.prepare(`SELECT COUNT(*) AS n FROM orders o WHERE ${delivered}`).get(...dArgs).n;
+  const deliveredOrders = db.prepare(`SELECT COUNT(*) AS n FROM orders o WHERE ${delivered} AND o.collect_only = 0`).get(...dArgs).n;
   // Poids réellement livré, linge seul (hors poids des chariots qui le transportent — voir Logistique).
   const deliveredWeightKg = db.prepare(`
     SELECT SUM(COALESCE(oi.delivered_qty, oi.qty) * a.weight_g) / 1000.0 AS kg
@@ -56,7 +56,7 @@ function overview(p) {
   `).get(...dArgs).kg || 0;
   // Kilomètres cumulés sur les commandes livrées, tels que calculés lors des optimisations de tournée.
   const totalDistanceKm = db.prepare(`SELECT SUM(o.distance_from_prev_km) AS km FROM orders o WHERE ${delivered}`).get(...dArgs).km || 0;
-  const last30Days = db.prepare("SELECT COUNT(*) AS n FROM orders WHERE created_at >= datetime('now', '-30 days')").get().n;
+  const last30Days = db.prepare("SELECT COUNT(*) AS n FROM orders WHERE collect_only = 0 AND created_at >= datetime('now', '-30 days')").get().n;
 
   return {
     period: p ? { from: p.from, to: p.to, days: p.days } : null,

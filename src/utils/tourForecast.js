@@ -127,7 +127,7 @@ function tourHistory(tour, clientIds, today, st, types, truck) {
   const since = ft.addDays(today, -HISTORY_DAYS);
   const marks = clientIds.map(() => '?').join(',');
   const rows = db.prepare(`SELECT id, client_id, delivered_at, livraison_prevue, created_at FROM orders
-    WHERE status = 'livree' AND client_id IN (${marks}) AND COALESCE(delivered_at, livraison_prevue, created_at) >= ?`).all(...clientIds, ft.addDays(since, -1))
+    WHERE status = 'livree' AND collect_only = 0 AND client_id IN (${marks}) AND COALESCE(delivered_at, livraison_prevue, created_at) >= ?`).all(...clientIds, ft.addDays(since, -1))
     .map(o => ({ ...o, day: dateOf(o) })).filter(o => ft.isDate(o.day) && o.day >= since && o.day < today);
   if (!rows.length) return { ...empty, clients: clientIds.map(id => ({ clientId: id, deliveries: 0 })) };
   const items = rows.length ? db.prepare(itemsSql(rows.map(() => '?').join(','))).all(...rows.map(o => o.id)) : [];
@@ -180,7 +180,7 @@ function knownLoads(tour, clientIds, today, st, types, truck, cap) {
   if (!clientIds.length || !tour.weekdays.length) return out;
   const marks = clientIds.map(() => '?').join(',');
   const rows = db.prepare(`SELECT id, client_id, driver_id, tour_id, livraison_prevue FROM orders
-    WHERE status IN ('recue', 'traitement', 'prete') AND client_id IN (${marks})`).all(...clientIds);
+    WHERE status IN ('recue', 'traitement', 'prete') AND collect_only = 0 AND client_id IN (${marks})`).all(...clientIds);
   const byDate = new Map();
   for (const o of rows) {
     const ref = ft.isDate(o.livraison_prevue) && o.livraison_prevue > today ? o.livraison_prevue : today;

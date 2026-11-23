@@ -166,6 +166,19 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
   chauffeur le même jour sont évaluées séparément.
   API : `GET/POST /api/admin/logistics/tours`, `PUT/DELETE …/tours/:id`, `GET …/tours/plan?date=AAAA-MM-JJ`, `POST …/tours/apply`,
   `GET …/tours/forecast?days=28` (14 à 60 jours).
+  **Arrêt de collecte** (bouton « + Arrêt de collecte » au-dessus des colonnes des chauffeurs) : le chauffeur passe chercher
+  du **linge sale sans linge propre à livrer**. On choisit le client (il doit avoir une adresse), le jour (aujourd'hui par
+  défaut, jusqu'à un an) et, au choix, un chauffeur ; sans chauffeur, l'hôtel rejoint sa tournée fixe s'il en a une, sinon
+  l'arrêt reste « Non assigné ». Technique : une « commande » sans ligne (`orders.collect_only = 1`) pour hériter du chauffeur,
+  du rang dans la tournée, de l'itinéraire, de l'heure de validation, des estimations d'arrivée et de la carte. Un arrêt
+  programmé un jour à venir reste « reçu » (invisible du chauffeur et de l'atelier) et passe « prêt » le matin même. Sur sa page,
+  le chauffeur voit « Collecte du linge sale — rien à livrer » et la consigne, sans bon de livraison ni liste d'articles, et
+  valide par « Collecte effectuée » ; l'arrêt validé apparaît dans « Fait aujourd'hui ». Une collecte n'est **jamais** facturée,
+  n'est ni un bon de livraison, ni une livraison dans les statistiques (commandes reçues et livrées, jours, ventes), ni dans
+  l'historique, les bons de livraison ou les signalements de l'hôtel, ni dans la préparation, l'atelier ou la charge des
+  tournées ; le logiciel de l'hôtel (webhook) n'est pas prévenu. Ses kilomètres restent dans le total « kilomètres parcourus »
+  (le camion a bien roulé). Se supprime depuis sa fiche (Logistique → clic sur l'étiquette).
+  API : `POST /api/admin/logistics/collections` `{ clientId, date?, driverId?, notes? }`.
 - **Équipe** — collaborateurs rattachés à une BU ou à une machine, badgeuse de l'atelier, présence en direct et heures
   pointées par poste (voir « Équipe (RH) et badgeuse »).
 - **Statistiques** — un seul filtre de dates en haut de page pilote tout :
@@ -1217,7 +1230,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (454 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (461 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

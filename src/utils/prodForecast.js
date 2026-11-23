@@ -214,7 +214,7 @@ function pendingOrders() {
     SELECT o.id, o.ticket, o.client_id, o.societe, o.livraison_prevue, o.status,
       COALESCE((SELECT SUM(oi.qty * a.weight_g) / 1000.0 FROM order_items oi JOIN articles a ON a.id = oi.service_id WHERE oi.order_id = o.id AND oi.qty > 0 AND a.weight_g > 0), 0) AS kg
     FROM orders o
-    WHERE o.status IN ('recue', 'traitement') AND o.client_id IS NOT NULL
+    WHERE o.status IN ('recue', 'traitement') AND o.collect_only = 0 AND o.client_id IS NOT NULL
       AND o.id NOT IN (SELECT order_id FROM lot_clients WHERE order_id IS NOT NULL)
       AND o.id NOT IN (SELECT order_id FROM lot_forecast_clients WHERE order_id IS NOT NULL)
     ORDER BY (o.livraison_prevue IS NULL OR o.livraison_prevue = ''), o.livraison_prevue, o.id LIMIT 100`).all();

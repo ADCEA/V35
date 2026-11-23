@@ -7,7 +7,8 @@ const { geocodeAddress, sleep, nearestNeighborRoute } = require('../utils/geocod
 const { buildPreparationSlipPdf } = require('../utils/pdf');
 const { legGeometry } = require('../utils/roadRoute');
 const { parisDay } = require('../utils/orderDelivery');
-const { assignPending } = require('../utils/fixedTours');
+const { assignPending, isDate, addDays } = require('../utils/fixedTours');
+const { nextTicket } = require('../utils/ticket');
 const { recommendCarts } = require('../utils/loadPlan');
 
 const router = express.Router();
@@ -55,6 +56,41 @@ router.get('/orders', (req, res) => {
     ORDER BY delivery_sequence ASC, created_at ASC
   `).all();
   res.json({ orders: rows.map(o => serializeOrder(o, itemsStmt.all(o.id))) });
+});
+
+// POST /api/admin/logistics/collections — arrêt de COLLECTE : le chauffeur passe chez un client chercher du linge sale, sans linge
+// propre à livrer. C'est une « commande » sans ligne (collect_only = 1) : elle a un chauffeur, un rang dans la tournée, un point sur
+// la carte et une heure de validation comme n'importe quel arrêt, mais n'est ni facturée, ni comptée comme livraison, ni visible dans
+// l'historique de l'hôtel. Programmée un jour à venir, elle reste « reçue » (invisible du chauffeur) jusqu'à ce jour-là.
+// body: { clientId, date?: 'AAAA-MM-JJ' (défaut aujourd'hui), driverId?: number|null, notes?: string }
+router.post('/collections', (req, res) => {
+  const b = req.body || {};
+  const client = Number.isInteger(Number(b.clientId)) ? db.prepare('SELECT * FROM clients WHERE id = ?').get(Number(b.clientId)) : null;
+  if (!client) return res.status(400).json({ error: 'Choisissez un client enregistré.' });
+  if (!String(client.adresse || '').trim()) return res.status(400).json({ error: 'Ce client n\'a pas d\'adresse : complétez sa fiche dans Facturation → Clients.' });
+  const today = parisDay();
+  const day = b.date === undefined || b.date === null || b.date === '' ? today : String(b.date);
+  if (!isDate(day)) return res.status(400).json({ error: 'Date invalide (format AAAA-MM-JJ).' });
+  if (day < today) return res.status(400).json({ error: 'On ne programme pas un arrêt dans le passé.' });
+  if (day > addDays(today, 365)) return res.status(400).json({ error: 'Date trop lointaine (un an au plus).' });
+  let driverId = null;
+  if (b.driverId !== undefined && b.driverId !== null && b.driverId !== '') {
+    driverId = Number(b.driverId);
+    if (!Number.isInteger(driverId) || !db.prepare('SELECT 1 FROM drivers WHERE id = ?').get(driverId)) return res.status(400).json({ error: 'Chauffeur introuvable.' });
+  }
+  const notes = String(b.notes ?? '').trim().slice(0, 300) || null;
+
+  const id = db.transaction(() => {
+    const info = db.prepare(`
+      INSERT INTO orders (ticket, client_id, societe, contact, tel, adresse, livraison_prevue, notes, status, production_stage, created_at, collect_only, driver_id, tour_manual)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'tri', ?, 1, ?, ?)
+    `).run(nextTicket(new Date()), client.id, client.societe, client.contact || '', client.tel || '', client.adresse, day, notes,
+      day <= today ? 'prete' : 'recue', new Date().toISOString(), driverId, driverId ? 1 : 0);
+    return Number(info.lastInsertRowid);
+  })();
+  assignPending();   // sans chauffeur choisi : l'hôtel rejoint sa tournée fixe, s'il en a une
+  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(id);
+  res.status(201).json({ order: serializeOrder(order, []) });
 });
 
 // PATCH /api/admin/logistics/orders/:id — assigner à un chauffeur et/ou

@@ -473,7 +473,7 @@ function deleteLinenType(id) {
 /** Clients proposés dans le formulaire d'un lot, avec leurs commandes encore à traiter. */
 function clientChoices() {
   const clients = db.prepare('SELECT id, societe FROM clients ORDER BY societe COLLATE NOCASE').all();
-  const orders = db.prepare("SELECT id, ticket, client_id, livraison_prevue, status FROM orders WHERE status IN ('recue','traitement') ORDER BY id DESC LIMIT 400").all();
+  const orders = db.prepare("SELECT id, ticket, client_id, livraison_prevue, status FROM orders WHERE status IN ('recue','traitement') AND collect_only = 0 ORDER BY id DESC LIMIT 400").all();
   return clients.map(c => ({ id: c.id, societe: c.societe, orders: orders.filter(o => o.client_id === c.id).slice(0, 6).map(o => ({ id: o.id, ticket: o.ticket, deliveryDate: o.livraison_prevue })) }));
 }
 
