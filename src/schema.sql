@@ -626,3 +626,22 @@ CREATE TABLE IF NOT EXISTS machine_incidents (
   employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_incidents_machine ON machine_incidents(machine_id, started_at);
+
+-- Non-conformités déclarées par un hôtel depuis son espace client, à propos d'une livraison : manque, linge en trop, linge
+-- sale, abîmé... `lines_json` = [{ id, name, qty }] (articles concernés, facultatif si le commentaire suffit).
+-- `team_note` est la réponse de l'atelier, visible par l'hôtel.
+CREATE TABLE IF NOT EXISTS non_conformities (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id   INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  order_id    INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  ticket      TEXT,
+  kind        TEXT NOT NULL,
+  lines_json  TEXT,
+  comment     TEXT,
+  status      TEXT NOT NULL DEFAULT 'ouverte',
+  team_note   TEXT,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_nonconf_client ON non_conformities(client_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_nonconf_status ON non_conformities(status, created_at);

@@ -900,3 +900,53 @@ details.bon[open] .esp-chev{transform:rotate(180deg);}
   #tours-map{height:380px;}
   #tours-side{max-height:none;}
 }
+/* ---------- non-conformités (espace client) ---------- */
+.nc-card{margin-bottom:18px;}
+.nc-head{display:flex;gap:12px 20px;flex-wrap:wrap;align-items:center;justify-content:space-between;}
+.nc-head > div{flex:1 1 320px;}
+.nc-hint{margin:4px 0 0;font-size:12.5px;color:var(--steel);}
+.nc-list{margin-top:14px;border-top:1px solid var(--line);padding-top:10px;}
+.nc-list summary{cursor:pointer;font-weight:600;font-size:13.5px;}
+.nc-list ul{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:10px;}
+.nc-item{border:1px solid var(--line);border-radius:6px;padding:10px 12px;background:var(--bg);}
+.nc-item-head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.nc-item-title{font-weight:600;font-size:13.5px;}
+.nc-item-meta{font-size:11.5px;color:var(--steel);margin-top:2px;}
+.nc-item-lines{font-size:12.5px;margin-top:6px;}
+.nc-item-comment{font-size:12.5px;margin-top:4px;color:var(--ink);font-style:italic;}
+.nc-reply{margin-top:8px;padding:8px 10px;border-left:3px solid var(--teal);background:var(--paper);font-size:12.5px;}
+.nc-slot:not(:empty){margin-top:14px;}
+.nc-form{border:1px solid var(--line);border-radius:6px;padding:14px;background:var(--paper);display:grid;gap:12px;}
+.nc-form fieldset{border:none;margin:0;padding:0;display:grid;gap:6px;}
+.nc-form legend{font-weight:600;font-size:13.5px;padding:0;margin-bottom:6px;}
+.nc-form legend small{font-weight:400;color:var(--steel);}
+.nc-radio{display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer;padding:3px 0;}
+.nc-radio input{width:auto;margin:0;}
+.nc-line{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px;}
+.nc-line input{width:84px;text-align:right;}
+.nc-form textarea{width:100%;resize:vertical;}
+.nc-error{color:var(--rust);font-size:12.5px;font-weight:600;}
+.nc-actions{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.nc-actions .esp-btn.solid{width:auto;margin-top:0;}
+.nc-done{margin:0;padding:12px 14px;border-left:3px solid var(--teal);background:var(--bg);font-size:13px;}
+
+/* ---------- non-conformités (administration) ---------- */
+#nav-nonconf.has-alert{font-weight:700;}
+#nav-nonconf.has-alert:not(.active){color:var(--rust);}
+.ncadm-bar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
+.ncadm-chip{padding:6px 12px;border:1px solid var(--line);border-radius:16px;background:var(--paper);font:inherit;font-size:12.5px;cursor:pointer;}
+.ncadm-chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff;}
+.ncadm-card{background:var(--paper);border:1px solid var(--line);border-left:4px solid var(--rust);border-radius:6px;padding:14px 16px;margin-bottom:12px;}
+.ncadm-card.en_cours{border-left-color:var(--brand);}
+.ncadm-card.resolue{border-left-color:var(--teal);}
+.ncadm-card header{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;}
+.ncadm-meta{display:block;font-size:11.5px;color:var(--steel);margin-top:2px;}
+.ncadm-kind{font-size:12px;font-weight:600;padding:3px 10px;border-radius:12px;background:var(--bg);}
+.ncadm-lines{margin:8px 0 0;font-size:13px;}
+.ncadm-comment{margin:6px 0 0;font-size:13px;font-style:italic;}
+.ncadm-form{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;border-top:1px solid var(--line);padding-top:12px;}
+.ncadm-form .field{margin:0;}
+.ncadm-note{flex:1 1 280px;}
+.ncadm-note textarea{width:100%;resize:vertical;}
+.ncadm-saved{font-size:12px;color:var(--teal);font-weight:600;}
+.ncadm-saved.bad{color:var(--rust);}

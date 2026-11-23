@@ -589,6 +589,22 @@ async function reorderFrom(orderId) {
   note.style.display = 'block';
 }
 
+// « Commander des sacs pour le linge non conforme » (espace client) : prépare la commande avec cet article, à ajuster avant de valider.
+const NC_BAG_ID = 'sac_nc';
+async function orderNonConformBags() {
+  try { await loadServices(); } catch (e) { /* on garde le catalogue déjà chargé */ }
+  document.getElementById('order-modal').classList.remove('open');
+  const note = document.getElementById('reorder-note');
+  const available = SERVICES.some(s => s.id === NC_BAG_ID);
+  if (available) { cart = { ...cart, [NC_BAG_ID]: Math.max(cart[NC_BAG_ID] || 0, 5) }; }
+  renderSummary();
+  switchView('commander');
+  note.innerHTML = available
+    ? 'Des <strong>sacs pour le linge non conforme</strong> ont été ajoutés à votre commande. Ajustez la quantité, puis validez.'
+    : "Les sacs pour linge non conforme ne sont pas proposés sur votre compte : contactez Blanchisserie Cézanne pour les ajouter à votre catalogue.";
+  note.style.display = 'block';
+}
+
 function fillAccountForms() {
   document.getElementById('prof-contact').value = currentClient.contact || '';
   document.getElementById('prof-tel').value = currentClient.tel || '';
@@ -2880,7 +2896,7 @@ async function submitManualOrder(context) {
 document.getElementById('btn-new-manual-order').addEventListener('click', () => openManualOrderModal('kanban'));
 document.getElementById('btn-new-manual-production').addEventListener('click', () => openManualOrderModal('production'));
 
-const ADMIN_VIEWS = ['production', 'atelier', 'kanban', 'logistics', 'rh', 'stats', 'historique', 'equipment', 'garage', 'facture', 'billing', 'settings'];
+const ADMIN_VIEWS = ['production', 'atelier', 'kanban', 'logistics', 'nonconf', 'rh', 'stats', 'historique', 'equipment', 'garage', 'facture', 'billing', 'settings'];
 
 function switchAdminView(view) {
   const allButtons = document.querySelectorAll('.admin-subnav > button, .admin-subnav-more-menu button');
@@ -2894,6 +2910,7 @@ function switchAdminView(view) {
   if (view === 'production') renderProductionKanban();
   if (view === 'kanban') refreshAdmin();
   if (view === 'logistics') renderLogisticsView();
+  if (view === 'nonconf' && window.renderNonConfView) window.renderNonConfView();
   if (view === 'atelier') renderAtelierView().catch(err => { document.getElementById('atelier-root').innerHTML = `<p style="color:var(--rust);font-size:12.5px;">${escHtml(err.message)}</p>`; });
   if (view === 'rh') renderRhView().catch(err => { document.getElementById('rh-root').innerHTML = `<p style="color:var(--rust);font-size:12.5px;">${escHtml(err.message)}</p>`; });
   if (view === 'stats') renderStats();
