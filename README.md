@@ -133,7 +133,7 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
   (bouton sur son lien, jamais automatique, seule la dernière position est conservée et elle est effacée à l'arrêt ou à
   la dernière livraison) : le camion est alors à cette position tant qu'elle date de moins de 10 min, sinon à sa dernière
   livraison validée. Fond de carte OpenStreetMap, tracés routiers OSRM (`ROAD_ROUTING=off` pour les désactiver : lignes
-  droites), adresses géocodées en arrière-plan par Nominatim. **Trafic en temps réel** (bouton « Trafic » de la carte et
+  droites), adresses géocodées en arrière-plan par Nominatim (adresse de la commande **complétée par le code postal et la ville de la fiche client** quand elle ne les contient pas ; corriger l'adresse, le code postal ou la ville d'une fiche replace sur la carte ses commandes pas encore livrées). **Trafic en temps réel** (bouton « Trafic » de la carte et
   durée avec trafic par tournée) : voir « Trafic en temps réel (TomTom) » plus bas ; sans clé TomTom, rien ne change.
   **Fond de carte** : Plan (OpenStreetMap), Plan IGN ou Satellite (photos aériennes IGN, sans clé, via la Géoplateforme
   `data.geopf.fr`) ; le choix est retenu dans le navigateur, et si un fond ne s'affiche pas du tout la carte revient au plan avec un message.

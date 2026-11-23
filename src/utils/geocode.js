@@ -5,14 +5,39 @@
 // Documentation : https://operations.osmfoundation.org/policies/nominatim/
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
+// Seul un serveur factice local peut remplacer le service, et seulement en test.
+function serviceUrl() {
+  const o = String(process.env.GEOCODER_URL || '').trim();
+  if (!o || process.env.NODE_ENV !== 'test') return NOMINATIM_URL;
+  try { const u = new URL(o); return ['localhost', '127.0.0.1'].includes(u.hostname) && u.protocol === 'http:' ? o : NOMINATIM_URL; } catch { return NOMINATIM_URL; }
+}
 const USER_AGENT = 'BlanchisserieCezanne/1.0 (application de gestion de blanchisserie)';
+
+const plain = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+/**
+ * Texte envoyé au service de géocodage : l'adresse saisie, complétée par le code postal et la ville de la fiche client quand
+ * elle ne les contient pas déjà. « 1205 route du Château » seul peut tomber dans n'importe quelle commune de France ;
+ * « 1205 route du Château, 26450 Charols » désigne un seul endroit. Un code postal qui n'a pas 5 chiffres est ignoré.
+ * Renvoie '' si l'adresse est vide (on ne géocode jamais la seule commune : le point serait celui de la mairie).
+ */
+function geocodeQuery({ adresse, codePostal, ville } = {}) {
+  const street = String(adresse || '').replace(/\s+/g, ' ').trim();
+  if (!street) return '';
+  const cp = /^\d{5}$/.test(String(codePostal || '').trim()) ? String(codePostal).trim() : '';
+  const city = String(ville || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const hasCp = /\b\d{5}\b/.test(street);
+  const hasCity = !!city && ` ${plain(street)} `.includes(` ${plain(city)} `);
+  const tail = [hasCp ? '' : cp, hasCity ? '' : city].filter(Boolean).join(' ');
+  return tail ? `${street}, ${tail}` : street;
+}
 
 /**
  * Géocode une adresse. Retourne { lat, lng } ou null si introuvable.
  */
 async function geocodeAddress(address) {
   if (!address || !address.trim()) return null;
-  const url = `${NOMINATIM_URL}?q=${encodeURIComponent(address)}&format=json&limit=1&countrycodes=fr`;
+  const url = `${serviceUrl()}?q=${encodeURIComponent(address)}&format=json&limit=1&countrycodes=fr`;
   const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT } });
   if (!res.ok) throw new Error(`Géocodage échoué (${res.status}) pour : ${address}`);
   const data = await res.json();
@@ -64,4 +89,4 @@ function nearestNeighborRoute(depot, stops) {
   return route;
 }
 
-module.exports = { geocodeAddress, sleep, haversineKm, nearestNeighborRoute };
+module.exports = { geocodeAddress, geocodeQuery, sleep, haversineKm, nearestNeighborRoute };
