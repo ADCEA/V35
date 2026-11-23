@@ -135,9 +135,15 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
   livraison validée. Fond de carte OpenStreetMap, tracés routiers OSRM (`ROAD_ROUTING=off` pour les désactiver : lignes
   droites), adresses géocodées en arrière-plan par Nominatim (adresse de la commande **complétée par le code postal et la ville de la fiche client** quand elle ne les contient pas ; corriger l'adresse, le code postal ou la ville d'une fiche replace sur la carte ses commandes pas encore livrées). **Trafic en temps réel** (bouton « Trafic » de la carte et
   durée avec trafic par tournée) : voir « Trafic en temps réel (TomTom) » plus bas ; sans clé TomTom, rien ne change.
-  **Fond de carte** : Plan (OpenStreetMap), Plan IGN ou Satellite (photos aériennes IGN, sans clé, via la Géoplateforme
-  `data.geopf.fr`) ; le choix est retenu dans le navigateur, et si un fond ne s'affiche pas du tout la carte revient au plan avec un message.
-  Chaque fond doit avoir son serveur dans `img-src` de la politique de contenu (`src/middleware/security.js`) : un test le vérifie.
+  **Fond de carte** : **Navigation** (par défaut : fond clair façon application de navigation, routes blanches, autoroutes
+  et grands axes jaunes, eau bleue, parcs verts ; tuiles vectorielles gratuites d'**OpenFreeMap**, sans clé, usage commercial
+  permis, données © OpenStreetMap), Plan (OpenStreetMap) ou Satellite (photos aériennes IGN, sans clé, via la Géoplateforme
+  `data.geopf.fr`). Le plan IGN a été retiré. Le choix est retenu dans le navigateur ; si un fond ne s'affiche pas du tout (service
+  injoignable, appareil sans WebGL) la carte revient au plan avec un message. Navigation est dessiné par **MapLibre GL**
+  (`public/vendor/maplibre/`, servi par le site comme Leaflet) à partir du style `public/fonds/navigation.json` (nos couleurs, le
+  schéma OpenMapTiles) ; la politique de contenu autorise `https://tiles.openfreemap.org` en `connect-src` et le worker de MapLibre
+  (`worker-src 'self'`). Chaque fond d'images doit avoir son serveur dans `img-src` : un test le vérifie. Le lien du livreur garde
+  sa propre carte, inchangée. Inspiré des applications de navigation, sans reprendre le fond d'aucune (les cartes de Waze ne sont pas réutilisables).
 - **Non-conformités** — dans l'espace client, onglet Livraisons : « Signaler un problème » sur une livraison (il manque du
   linge, linge en trop, sale, abîmé, autre), avec les articles et quantités concernés et un commentaire. L'équipe est
   prévenue (WhatsApp si configuré, et dans la discussion de la commande), retrouve les signalements dans l'onglet
@@ -188,7 +194,7 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
   à l'échelle de l'écran (720p à 4K), se rafraîchit toute seule toutes les 15 s, se recadre seule, se recharge toutes les 3 h
   et demande à l'écran de ne pas se mettre en veille ; si les données n'arrivent plus, un bandeau rouge « Connexion perdue »
   s'affiche avec l'heure des dernières données (la carte reste visible). Aucune interaction : clic ou touche **F** =
-  plein écran (le bouton « Plein écran » apparaît quand la souris bouge) ; `?fond=sat` ou `?fond=ign` choisit un autre fond.
+  plein écran (le bouton « Plein écran » apparaît quand la souris bouge) ; `?fond=plan` ou `?fond=sat` choisit un autre fond que Navigation.
   **Accès** : « Aperçu plein écran » ouvre la page avec votre session d'administrateur. Pour la TV, « Créer le lien de la TV »
   donne une adresse `/carte-tv#<jeton>` à ouvrir **une fois** sur l'écran (le navigateur de la TV la mémorise ; le jeton
   est dans la partie « # », qui ne part ni vers le serveur ni dans les journaux). Le lien est en **lecture seule**, sans session
@@ -1262,7 +1268,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (485 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (488 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

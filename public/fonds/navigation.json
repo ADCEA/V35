@@ -1,0 +1,1224 @@
+{
+ "version": 8,
+ "name": "Navigation",
+ "metadata": {
+  "description": "Fond clair façon application de navigation : routes blanches, grands axes jaunes puis orangés, parcs verts pâles. Données OpenStreetMap servies par OpenFreeMap (schéma OpenMapTiles)."
+ },
+ "sources": {
+  "openmaptiles": {
+   "type": "vector",
+   "url": "https://tiles.openfreemap.org/planet",
+   "attribution": "<a href=\"https://openfreemap.org\" target=\"_blank\" rel=\"noopener\">OpenFreeMap</a> © <a href=\"https://www.openmaptiles.org/\" target=\"_blank\" rel=\"noopener\">OpenMapTiles</a> Données <a href=\"https://www.openstreetmap.org/copyright\" target=\"_blank\" rel=\"noopener\">OpenStreetMap</a>"
+  }
+ },
+ "glyphs": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
+ "layers": [
+  {
+   "id": "fond",
+   "type": "background",
+   "paint": {
+    "background-color": "#EDEAE3"
+   }
+  },
+  {
+   "id": "couvert-agricole",
+   "type": "fill",
+   "source": "openmaptiles",
+   "source-layer": "landcover",
+   "paint": {
+    "fill-color": "#E9E9DD",
+    "fill-antialias": true
+   },
+   "filter": [
+    "==",
+    [
+     "get",
+     "class"
+    ],
+    "farmland"
+   ]
+  },
+  {
+   "id": "couvert-herbe",
+   "type": "fill",
+   "source": "openmaptiles",
+   "source-layer": "landcover",
+   "paint": {
+    "fill-color": "#DCEBCF",
+    "fill-antialias": true
+   },
+   "filter": [
+    "==",
+    [
+     "get",
+     "class"
+    ],
+    "grass"
+   ]
+  },
+  {
+   "id": "couvert-bois",
+   "type": "fill",
+   "source": "openmaptiles",
+   "source-layer": "landcover",
+   "paint": {
+    "fill-color": "#CFE5C0",
+    "fill-antialias": true
+   },
+   "filter": [
+    "==",
+    [
+     "get",
+     "class"
+    ],
+    "wood"
+   ]
+  },
+  {
+   "id": "couvert-sable",
+   "type": "fill",
+   "source": "openmaptiles",
+   "source-layer": "landcover",
+   "paint": {
+    "fill-color": "#F1E8D0",
+    "fill-antialias": true
+   },
+   "filter": [
+    "==",
+    [
+     "get",
+     "class"
+    ],
+    "sand"
+   ]
+  },
+  {
+   "id": "usage-sols",
+   "type": "fill",
+   "source": "openmaptiles",
+   "source-layer": "landuse",
+   "paint": {
+    "fill-color": [
+     "match",
+     [
+      "get",
+      "class"
+     ],
+     [
+      "residential",
+      "suburb"
+     ],
+     "#E9E6DF",
+     [
+      "commercial",
+      "retail"
+     ],
+     "#E8E3DB",
+     "industrial",
+     "#E2DFD9",
+     "hospital",
+     "#F1E1DE",
+     "school",
+     "#EEE8DA",
+     "cemetery",
+     "#DAE7CE",
+     [
+      "pitch",
+      "playground",
+      "stadium"
+     ],
+     "#D6EAC8",
+     "#E9E6DF"
+    ],
+    "fill-antialias": true
+   },
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "residential",
+      "suburb",
+      "commercial",
+      "industrial",
+      "retail",
+      "hospital",
+      "school",
+      "cemetery",
+      "pitch",
+      "playground",
+      "stadium"
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "parcs",
+   "type": "fill",
+   "source": "openmaptiles",
+   "source-layer": "park",
+   "paint": {
+    "fill-color": "#D2E7C3",
+    "fill-opacity": 0.85
+   }
+  },
+  {
+   "id": "eau",
+   "type": "fill",
+   "source": "openmaptiles",
+   "source-layer": "water",
+   "paint": {
+    "fill-color": "#B5DAF0",
+    "fill-antialias": true
+   }
+  },
+  {
+   "id": "cours-eau",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "waterway",
+   "minzoom": 8,
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#B5DAF0",
+    "line-width": [
+     "interpolate",
+     [
+      "exponential",
+      1.4
+     ],
+     [
+      "zoom"
+     ],
+     8,
+     0.6,
+     14,
+     2.5,
+     18,
+     8
+    ]
+   }
+  },
+  {
+   "id": "pistes-aeroport",
+   "type": "fill",
+   "source": "openmaptiles",
+   "source-layer": "aeroway",
+   "filter": [
+    "==",
+    [
+     "geometry-type"
+    ],
+    "Polygon"
+   ],
+   "paint": {
+    "fill-color": "#E3E0DA"
+   }
+  },
+  {
+   "id": "batiments",
+   "type": "fill",
+   "source": "openmaptiles",
+   "source-layer": "building",
+   "minzoom": 14,
+   "paint": {
+    "fill-color": "#E1DDD4",
+    "fill-opacity": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     14,
+     0,
+     15.5,
+     0.9
+    ],
+    "fill-outline-color": "#D5D0C6"
+   }
+  },
+  {
+   "id": "voie-ferree",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "transportation",
+   "minzoom": 10,
+   "filter": [
+    "all",
+    [
+     "==",
+     [
+      "get",
+      "class"
+     ],
+     "rail"
+    ],
+    [
+     "!=",
+     [
+      "get",
+      "brunnel"
+     ],
+     "tunnel"
+    ]
+   ],
+   "paint": {
+    "line-color": "#C9C5BB",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     10,
+     0.5,
+     18,
+     2
+    ],
+    "line-dasharray": [
+     3,
+     3
+    ]
+   }
+  },
+  {
+   "id": "chemins",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "transportation",
+   "minzoom": 13,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "path",
+      "track"
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round"
+   },
+   "paint": {
+    "line-color": "#CFCABF",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     13,
+     0.6,
+     18,
+     2.4
+    ],
+    "line-dasharray": [
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "id": "tunnels",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "transportation",
+   "minzoom": 10,
+   "filter": [
+    "all",
+    [
+     "in",
+     [
+      "get",
+      "class"
+     ],
+     [
+      "literal",
+      [
+       "service",
+       "minor",
+       "tertiary",
+       "secondary",
+       "primary",
+       "trunk",
+       "motorway"
+      ]
+     ]
+    ],
+    [
+     "==",
+     [
+      "get",
+      "brunnel"
+     ],
+     "tunnel"
+    ]
+   ],
+   "layout": {
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#DAD6CC",
+    "line-width": [
+     "interpolate",
+     [
+      "exponential",
+      1.4
+     ],
+     [
+      "zoom"
+     ],
+     6,
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      "service",
+      0,
+      "minor",
+      0,
+      "tertiary",
+      0,
+      "secondary",
+      0.4,
+      "primary",
+      0.6,
+      "trunk",
+      0.8,
+      "motorway",
+      1.0,
+      0
+     ],
+     10,
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      "service",
+      0,
+      "minor",
+      0.6,
+      "tertiary",
+      1.2,
+      "secondary",
+      1.6,
+      "primary",
+      2.2,
+      "trunk",
+      2.6,
+      "motorway",
+      3.0,
+      0
+     ],
+     14,
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      "service",
+      2.2,
+      "minor",
+      4.0,
+      "tertiary",
+      4.8,
+      "secondary",
+      5.5,
+      "primary",
+      6.5,
+      "trunk",
+      7.0,
+      "motorway",
+      8.0,
+      0
+     ],
+     18,
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      "service",
+      9.0,
+      "minor",
+      13.0,
+      "tertiary",
+      16.0,
+      "secondary",
+      18.0,
+      "primary",
+      20.0,
+      "trunk",
+      22.0,
+      "motorway",
+      24.0,
+      0
+     ]
+    ],
+    "line-opacity": 0.8,
+    "line-dasharray": [
+     2,
+     1.2
+    ]
+   }
+  },
+  {
+   "id": "routes-lisere",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "transportation",
+   "minzoom": 6,
+   "filter": [
+    "all",
+    [
+     "in",
+     [
+      "get",
+      "class"
+     ],
+     [
+      "literal",
+      [
+       "service",
+       "minor",
+       "tertiary",
+       "secondary",
+       "primary",
+       "trunk",
+       "motorway"
+      ]
+     ]
+    ],
+    [
+     "!=",
+     [
+      "get",
+      "brunnel"
+     ],
+     "tunnel"
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round",
+    "line-sort-key": [
+     "match",
+     [
+      "get",
+      "class"
+     ],
+     "service",
+     0,
+     "minor",
+     1,
+     "tertiary",
+     2,
+     "secondary",
+     3,
+     "primary",
+     4,
+     "trunk",
+     5,
+     "motorway",
+     6,
+     0
+    ]
+   },
+   "paint": {
+    "line-color": [
+     "match",
+     [
+      "get",
+      "class"
+     ],
+     "service",
+     "#D8D4CA",
+     "minor",
+     "#D8D4CA",
+     "tertiary",
+     "#CFCBC0",
+     "secondary",
+     "#CBC6BA",
+     "primary",
+     "#E0CE8C",
+     "trunk",
+     "#E4C468",
+     "motorway",
+     "#E3A944",
+     "#FFFFFF"
+    ],
+    "line-width": [
+     "interpolate",
+     [
+      "exponential",
+      1.4
+     ],
+     [
+      "zoom"
+     ],
+     6,
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      "service",
+      0,
+      "minor",
+      0,
+      "tertiary",
+      0,
+      "secondary",
+      0.95,
+      "primary",
+      1.15,
+      "trunk",
+      1.35,
+      "motorway",
+      1.55,
+      0
+     ],
+     10,
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      "service",
+      0,
+      "minor",
+      1.7,
+      "tertiary",
+      2.3,
+      "secondary",
+      2.7,
+      "primary",
+      3.3,
+      "trunk",
+      3.7,
+      "motorway",
+      4.1,
+      0
+     ],
+     14,
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      "service",
+      3.85,
+      "minor",
+      5.65,
+      "tertiary",
+      6.45,
+      "secondary",
+      7.15,
+      "primary",
+      8.15,
+      "trunk",
+      8.65,
+      "motorway",
+      9.65,
+      0
+     ],
+     18,
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      "service",
+      11.2,
+      "minor",
+      15.2,
+      "tertiary",
+      18.2,
+      "secondary",
+      20.2,
+      "primary",
+      22.2,
+      "trunk",
+      24.2,
+      "motorway",
+      26.2,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "id": "routes",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "transportation",
+   "minzoom": 6,
+   "filter": [
+    "all",
+    [
+     "in",
+     [
+      "get",
+      "class"
+     ],
+     [
+      "literal",
+      [
+       "service",
+       "minor",
+       "tertiary",
+       "secondary",
+       "primary",
+       "trunk",
+       "motorway"
+      ]
+     ]
+    ],
+    [
+     "!=",
+     [
+      "get",
+      "brunnel"
+     ],
+     "tunnel"
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round",
+    "line-sort-key": [
+     "match",
+     [
+      "get",
+      "class"
+     ],
+     "service",
+     0,
+     "minor",
+     1,
+     "tertiary",
+     2,
+     "secondary",
+     3,
+     "primary",
+     4,
+     "trunk",
+     5,
+     "motorway",
+     6,
+     0
+    ]
+   },
+   "paint": {
+    "line-color": [
+     "match",
+     [
+      "get",
+      "class"
+     ],
+     "service",
+     "#FFFFFF",
+     "minor",
+     "#FFFFFF",
+     "tertiary",
+     "#FFFFFF",
+     "secondary",
+     "#FFFFFF",
+     "primary",
+     "#FFF3C2",
+     "trunk",
+     "#FFE79F",
+     "motorway",
+     "#FFD27A",
+     "#FFFFFF"
+    ],
+    "line-width": [
+     "interpolate",
+     [
+      "exponential",
+      1.4
+     ],
+     [
+      "zoom"
+     ],
+     6,
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      "service",
+      0,
+      "minor",
+      0,
+      "tertiary",
+      0,
+      "secondary",
+      0.4,
+      "primary",
+      0.6,
+      "trunk",
+      0.8,
+      "motorway",
+      1.0,
+      0
+     ],
+     10,
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      "service",
+      0,
+      "minor",
+      0.6,
+      "tertiary",
+      1.2,
+      "secondary",
+      1.6,
+      "primary",
+      2.2,
+      "trunk",
+      2.6,
+      "motorway",
+      3.0,
+      0
+     ],
+     14,
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      "service",
+      2.2,
+      "minor",
+      4.0,
+      "tertiary",
+      4.8,
+      "secondary",
+      5.5,
+      "primary",
+      6.5,
+      "trunk",
+      7.0,
+      "motorway",
+      8.0,
+      0
+     ],
+     18,
+     [
+      "match",
+      [
+       "get",
+       "class"
+      ],
+      "service",
+      9.0,
+      "minor",
+      13.0,
+      "tertiary",
+      16.0,
+      "secondary",
+      18.0,
+      "primary",
+      20.0,
+      "trunk",
+      22.0,
+      "motorway",
+      24.0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "id": "frontieres",
+   "type": "line",
+   "source": "openmaptiles",
+   "source-layer": "boundary",
+   "filter": [
+    "all",
+    [
+     "==",
+     [
+      "get",
+      "admin_level"
+     ],
+     2
+    ],
+    [
+     "!=",
+     [
+      "get",
+      "maritime"
+     ],
+     1
+    ]
+   ],
+   "paint": {
+    "line-color": "#BDB8AE",
+    "line-width": 1,
+    "line-dasharray": [
+     3,
+     2
+    ]
+   }
+  },
+  {
+   "id": "noms-routes",
+   "type": "symbol",
+   "source": "openmaptiles",
+   "source-layer": "transportation_name",
+   "minzoom": 13,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "motorway",
+      "trunk",
+      "primary",
+      "secondary",
+      "tertiary",
+      "minor"
+     ]
+    ]
+   ],
+   "layout": {
+    "symbol-placement": "line",
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name:fr"
+     ],
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     13,
+     10,
+     18,
+     13
+    ],
+    "text-letter-spacing": 0.02,
+    "text-padding": 6,
+    "symbol-spacing": 320
+   },
+   "paint": {
+    "text-color": "#6B7782",
+    "text-halo-color": "#FFFFFF",
+    "text-halo-width": 1.6
+   }
+  },
+  {
+   "id": "noms-eau",
+   "type": "symbol",
+   "source": "openmaptiles",
+   "source-layer": "water_name",
+   "minzoom": 10,
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name:fr"
+     ],
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "Noto Sans Italic"
+    ],
+    "text-size": 12
+   },
+   "paint": {
+    "text-color": "#5E8FB0",
+    "text-halo-color": "#B5DAF0",
+    "text-halo-width": 1.2
+   }
+  },
+  {
+   "id": "lieux-ville",
+   "type": "symbol",
+   "source": "openmaptiles",
+   "source-layer": "place",
+   "minzoom": 3,
+   "maxzoom": 24,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "city"
+     ]
+    ]
+   ],
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name:fr"
+     ],
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "Noto Sans Bold"
+    ],
+    "text-size": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     3,
+     12,
+     12,
+     21
+    ],
+    "text-max-width": 8,
+    "text-padding": 4
+   },
+   "paint": {
+    "text-color": "#4B5762",
+    "text-halo-color": "#F7F5F0",
+    "text-halo-width": 1.8
+   }
+  },
+  {
+   "id": "lieux-bourg",
+   "type": "symbol",
+   "source": "openmaptiles",
+   "source-layer": "place",
+   "minzoom": 6,
+   "maxzoom": 24,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "town"
+     ]
+    ]
+   ],
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name:fr"
+     ],
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "Noto Sans Bold"
+    ],
+    "text-size": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     6,
+     11,
+     12,
+     17
+    ],
+    "text-max-width": 8,
+    "text-padding": 4
+   },
+   "paint": {
+    "text-color": "#4B5762",
+    "text-halo-color": "#F7F5F0",
+    "text-halo-width": 1.8
+   }
+  },
+  {
+   "id": "lieux-village",
+   "type": "symbol",
+   "source": "openmaptiles",
+   "source-layer": "place",
+   "minzoom": 9,
+   "maxzoom": 24,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "village"
+     ]
+    ]
+   ],
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name:fr"
+     ],
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     9,
+     10,
+     14,
+     15
+    ],
+    "text-max-width": 8,
+    "text-padding": 4
+   },
+   "paint": {
+    "text-color": "#4B5762",
+    "text-halo-color": "#F7F5F0",
+    "text-halo-width": 1.8
+   }
+  },
+  {
+   "id": "lieux-hameau",
+   "type": "symbol",
+   "source": "openmaptiles",
+   "source-layer": "place",
+   "minzoom": 11,
+   "maxzoom": 24,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "hamlet",
+      "suburb",
+      "neighbourhood",
+      "quarter"
+     ]
+    ]
+   ],
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name:fr"
+     ],
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     11,
+     10,
+     16,
+     13
+    ],
+    "text-max-width": 8,
+    "text-padding": 4
+   },
+   "paint": {
+    "text-color": "#4B5762",
+    "text-halo-color": "#F7F5F0",
+    "text-halo-width": 1.8
+   }
+  }
+ ]
+}

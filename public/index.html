@@ -23,8 +23,12 @@
 <link rel="stylesheet" href="/rh.css">
 <link rel="stylesheet" href="/prod.css">
 <link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css">
 <script src="/vendor/jspdf.umd.min.js"></script>
 <script src="/vendor/leaflet/leaflet.js"></script>
+<script src="/vendor/maplibre/maplibre-gl-csp.js"></script>
+<script src="/vendor/maplibre/leaflet-maplibre-gl.js"></script>
+<script src="/fond-navigation.js"></script>
 </head>
 <body>
 
@@ -433,8 +437,8 @@
               <h4 class="card-subhead">Carte des tournées</h4>
               <span class="tm-status" id="tours-status" role="status"></span>
               <div class="tm-basemaps" id="tours-basemaps" role="group" aria-label="Fond de carte">
-                <button type="button" data-basemap="plan" aria-pressed="true">Plan</button>
-                <button type="button" data-basemap="ign" aria-pressed="false">Plan IGN</button>
+                <button type="button" data-basemap="nav" aria-pressed="false" title="Fond clair façon application de navigation">Navigation</button>
+                <button type="button" data-basemap="plan" aria-pressed="false">Plan</button>
                 <button type="button" data-basemap="sat" aria-pressed="false">Satellite</button>
               </div>
               <button class="btn-secondary tm-traffic-btn" id="tours-traffic" type="button" aria-pressed="false" hidden style="width:auto;padding:6px 10px;font-size:11px;" title="Affiche la vitesse de circulation en temps réel sur la carte">Trafic</button>
