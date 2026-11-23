@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0E2236">
+<title>Tournées du jour — Blanchisserie Cézanne</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/img/favicon-32.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="/carte-tv.css">
+</head>
+<body>
+<div class="tv" id="tv">
+  <header class="tv-top">
+    <div class="tv-heading">
+      <h1>Tournées du jour</h1>
+      <div class="tv-date" id="tv-date"></div>
+    </div>
+    <div class="tv-total" id="tv-total" aria-live="off"></div>
+    <span class="tv-preview" id="tv-preview" hidden>Aperçu</span>
+    <div class="tv-clock" id="tv-clock" aria-hidden="true"></div>
+  </header>
+  <main class="tv-main">
+    <div class="tv-mapwrap">
+      <div id="tv-map" aria-label="Carte des tournées"></div>
+      <div class="tv-banner" id="tv-banner" role="status" hidden></div>
+      <button type="button" class="tv-fs" id="tv-fs">Plein écran</button>
+    </div>
+    <aside class="tv-panel" id="tv-panel" aria-live="off"></aside>
+  </main>
+  <div class="tv-block" id="tv-block" role="alert" hidden>
+    <div>
+      <h2 id="tv-block-title"></h2>
+      <p id="tv-block-text"></p>
+    </div>
+  </div>
+</div>
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script src="/carte-tv.js"></script>
+</body>
+</html>

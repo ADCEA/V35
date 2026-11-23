@@ -11,6 +11,7 @@ const { parisDay } = require('../utils/orderDelivery');
 const { assignPending, isDate, addDays } = require('../utils/fixedTours');
 const { nextTicket } = require('../utils/ticket');
 const { recommendCarts } = require('../utils/loadPlan');
+const { tvTokenHash } = require('../utils/tvScreen');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -484,7 +485,7 @@ const minutesBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 60
 // ses arrêts dans l'ordre de passage (livrés / à faire, avec l'heure de validation), les tronçons de l'itinéraire (faits ou
 // restants) et la position du camion : position partagée par le livreur si elle est récente, sinon dernière livraison
 // validée, sinon dépôt.
-router.get('/map', (req, res) => {
+function buildMap() {
   assignPending();
   const adm = db.prepare('SELECT depot_address, depot_lat, depot_lng FROM admin WHERE id = 1').get() || {};
   let depot = null;
@@ -505,6 +506,7 @@ router.get('/map', (req, res) => {
       lat: lat ?? null, lng: lng ?? null,
       deliveredAt: done ? o.delivered_at : null,
       minutesSincePrev: null,
+      collectOnly: !!o.collect_only,
       _order: o,
     };
   };
@@ -559,13 +561,43 @@ router.get('/map', (req, res) => {
   const unassignedMissing = unassigned.filter(s => s.lat == null).length;
   if (missing + unassignedMissing > 0) geocodeMissing().catch(() => {});
 
-  res.json({
+  return {
     depot,
     drivers: outDrivers,
     unassigned,
     geocoding: missing + unassignedMissing > 0,
     generatedAt: new Date().toISOString(),
-  });
+  };
+}
+
+router.get('/map', (req, res) => { res.json(buildMap()); });
+
+// ---------- écran TV : lien en lecture seule vers la carte plein écran ----------
+// La TV n'a pas de session administrateur : elle ouvre /carte-tv avec un jeton (dans la partie « # » de l'adresse, qui ne part
+// jamais vers le serveur ni dans les journaux). Seule l'empreinte du jeton est conservée ; en créer un nouveau invalide l'ancien.
+
+const tvInfo = () => {
+  const r = db.prepare('SELECT created_at, last_seen_at FROM tv_screen WHERE id = 1').get();
+  return r ? { active: true, createdAt: r.created_at, lastSeenAt: r.last_seen_at || null } : { active: false, createdAt: null, lastSeenAt: null };
+};
+
+// GET /api/admin/logistics/tv — un lien est-il actif, depuis quand, et la TV l'a-t-elle utilisé récemment ?
+router.get('/tv', (req, res) => { res.json(tvInfo()); });
+
+// POST /api/admin/logistics/tv — crée (ou remplace) le lien. Le jeton n'est montré qu'ici, une seule fois.
+router.post('/tv', (req, res) => {
+  const token = crypto.randomBytes(24).toString('hex');
+  db.prepare(`INSERT INTO tv_screen (id, token_hash, created_at, last_seen_at) VALUES (1, ?, ?, NULL)
+    ON CONFLICT(id) DO UPDATE SET token_hash = excluded.token_hash, created_at = excluded.created_at, last_seen_at = NULL`)
+    .run(tvTokenHash(token), new Date().toISOString());
+  res.status(201).json({ ...tvInfo(), token });
+});
+
+// DELETE /api/admin/logistics/tv — coupe l'accès : la TV affichera « lien désactivé ».
+router.delete('/tv', (req, res) => {
+  db.prepare('DELETE FROM tv_screen WHERE id = 1').run();
+  res.json(tvInfo());
 });
 
 module.exports = router;
+module.exports.buildMap = buildMap;

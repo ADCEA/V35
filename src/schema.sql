@@ -541,6 +541,14 @@ CREATE TABLE IF NOT EXISTS badge_terminals (
   revoked_at   TEXT
 );
 
+-- Écran TV (carte des tournées plein écran) : au plus un lien actif, conservé sous forme d'empreinte.
+CREATE TABLE IF NOT EXISTS tv_screen (
+  id           INTEGER PRIMARY KEY CHECK (id = 1),
+  token_hash   TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  last_seen_at TEXT
+);
+
 -- ---------- Production : lots de lavage, passages machine, programmes ----------
 -- Réglages (prix de l'eau et de l'énergie, objectif de coût au kilo, horaires d'ouverture) : clé → valeur texte.
 CREATE TABLE IF NOT EXISTS prod_settings (

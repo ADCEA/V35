@@ -24,6 +24,7 @@ const trafficRouter = require('./routes/traffic');
 const statsRouter = require('./routes/stats');
 const articlesRouter = require('./routes/articles');
 const driverPortalRouter = require('./routes/driverPortal');
+const tvScreenRouter = require('./routes/tvScreen');
 const nonConformities = require('./routes/nonConformities');
 const garageRouter = require('./routes/garage');
 const apiV1Router = require('./routes/apiV1');
@@ -112,6 +113,7 @@ app.use('/api/admin/logistics', logisticsRouter);
 app.use('/api/admin/stats', statsRouter);
 app.use('/api/admin/articles', articlesRouter);
 app.use('/api/driver-portal', driverPortalRouter);
+app.use('/api/tv', tvScreenRouter);
 app.use('/api/admin/garage', garageRouter);
 app.use('/api/admin/billing', billingRouter);
 app.use('/api/v1', apiV1Router);
@@ -130,6 +132,12 @@ app.get('/badgeuse', (req, res) => {
 app.get('/atelier', (req, res) => {
   res.set('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, '..', 'public', 'atelier.html'));
+});
+
+// Carte des tournées plein écran pour la TV de l'atelier : jeton dans la partie « # » de l'adresse (ou session administrateur pour l'aperçu).
+app.get('/carte-tv', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(path.join(__dirname, '..', 'public', 'carte-tv.html'));
 });
 
 // Toute route non-API renvoie l'app (single page)

@@ -438,9 +438,11 @@
                 <button type="button" data-basemap="sat" aria-pressed="false">Satellite</button>
               </div>
               <button class="btn-secondary tm-traffic-btn" id="tours-traffic" type="button" aria-pressed="false" hidden style="width:auto;padding:6px 10px;font-size:11px;" title="Affiche la vitesse de circulation en temps réel sur la carte">Trafic</button>
+              <button class="btn-secondary" id="tv-open" type="button" aria-expanded="false" aria-controls="tv-admin" style="width:auto;padding:6px 10px;font-size:11px;" title="Carte plein écran pour la TV du local">Écran TV</button>
               <button class="btn-secondary" id="tours-refit" type="button" style="width:auto;padding:6px 10px;font-size:11px;">Tout afficher</button>
               <button class="btn-secondary" id="tours-refresh" type="button" style="width:auto;padding:6px 10px;font-size:11px;">Actualiser</button>
             </div>
+            <div class="tv-admin" id="tv-admin" hidden></div>
             <div class="tm-layout">
               <div id="tours-map" role="application" aria-label="Carte des tournées de livraison"></div>
               <div id="tours-side"></div>
@@ -712,6 +714,7 @@
 <script src="/espace.js"></script>
 <script src="/logistics-map.js"></script>
 <script src="/tournees-fixes.js"></script>
+<script src="/carte-tv-admin.js"></script>
 <script src="/tournees-previsions.js"></script>
 <script src="/app.js"></script>
 <script src="/stats-daily.js"></script>

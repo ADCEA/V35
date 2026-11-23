@@ -179,6 +179,24 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
   tournées ; le logiciel de l'hôtel (webhook) n'est pas prévenu. Ses kilomètres restent dans le total « kilomètres parcourus »
   (le camion a bien roulé). Se supprime depuis sa fiche (Logistique → clic sur l'étiquette).
   API : `POST /api/admin/logistics/collections` `{ clientId, date?, driverId?, notes? }`.
+  **Écran TV** (bouton « Écran TV » au-dessus de la carte des tournées ; fichiers : `public/carte-tv.{html,css,js}`,
+  `public/carte-tv-admin.js`, `src/routes/tvScreen.js`, `src/utils/tvScreen.js`) : la carte des tournées en **plein écran**
+  pour une TV du local, à suivre de loin. À gauche la carte (dépôt, itinéraire de chaque chauffeur, arrêts faits ✓ / à faire,
+  le prochain arrêt de chacun nommé, camions avec le prénom du chauffeur, un carré arrondi pour une collecte) ; à droite, par
+  chauffeur, son avancement (`3 / 8`, une pastille par arrêt), le prochain arrêt, la dernière livraison et si sa position est
+  partagée en direct, puis les commandes prêtes sans chauffeur. Heure et date en haut, total des arrêts faits. La page se met
+  à l'échelle de l'écran (720p à 4K), se rafraîchit toute seule toutes les 15 s, se recadre seule, se recharge toutes les 3 h
+  et demande à l'écran de ne pas se mettre en veille ; si les données n'arrivent plus, un bandeau rouge « Connexion perdue »
+  s'affiche avec l'heure des dernières données (la carte reste visible). Aucune interaction : clic ou touche **F** =
+  plein écran (le bouton « Plein écran » apparaît quand la souris bouge) ; `?fond=sat` ou `?fond=ign` choisit un autre fond.
+  **Accès** : « Aperçu plein écran » ouvre la page avec votre session d'administrateur. Pour la TV, « Créer le lien de la TV »
+  donne une adresse `/carte-tv#<jeton>` à ouvrir **une fois** sur l'écran (le navigateur de la TV la mémorise ; le jeton
+  est dans la partie « # », qui ne part ni vers le serveur ni dans les journaux). Le lien est en **lecture seule**, sans session
+  administrateur sur la TV ; il n'est affiché qu'à sa création (le serveur n'en garde que l'empreinte, table `tv_screen`),
+  « Nouveau lien » remplace l'ancien (qui cesse aussitôt de marcher) et « Désactiver » coupe l'écran. La TV ne reçoit ni
+  adresses (clients, dépôt) ni numéros de ticket : seulement les noms des hôtels, les chauffeurs, les positions et les heures.
+  Le trafic en direct n'est pas affiché sur cet écran. API : `GET /api/tv/map` (en-tête `x-tv-token`, 90 appels/min/IP) ;
+  administration `GET/POST/DELETE /api/admin/logistics/tv`.
 - **Coûts de livraison** (Statistiques, sous la répartition du linge) — ce que coûtent les livraisons de la période choisie : coût
   total, par livraison, au kilomètre et au kilo livré, avec le détail par poste (carburant/pneus/usure = km × €/km ; chauffeur =
   temps de tournée × €/h ; entretien des véhicules = dépenses saisies dans le Garage ; frais fixes = montant mensuel au prorata des
@@ -1244,7 +1262,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (477 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (485 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

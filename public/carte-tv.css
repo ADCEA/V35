@@ -1,0 +1,85 @@
+/* Carte des tournées pour la TV du local : lisible à plusieurs mètres, aucune interaction nécessaire.
+   Tout est en rem, et 1 rem suit la taille de l'écran (19,2 px en 1920×1080) : la page se met à l'échelle d'une TV 720p à 4K. */
+:root{--navy:#0E2236;--navy-2:#16324F;--navy-3:#21425F;--paper:#F2F6FA;--mute:#93A9BE;--ok:#3CC58C;--warn:#F5A623;--bad:#E0574B;--line:rgba(255,255,255,.12)}
+html{font-size:min(1vw,1.7778vh)}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;overflow:hidden;background:var(--navy);color:var(--paper)}
+body{font:400 1.1rem/1.35 'IBM Plex Sans',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+body.idle{cursor:none}
+h1,h2,p{margin:0}
+button{font:inherit;color:inherit;cursor:pointer}
+
+.tv{height:100%;display:flex;flex-direction:column}
+.tv-top{flex:none;display:flex;align-items:center;gap:2.2rem;padding:0 1.8rem;height:4.4rem;background:var(--navy);border-bottom:1px solid var(--line)}
+.tv-heading h1{font:600 1.9rem/1 'Fredoka',sans-serif;letter-spacing:.01em}
+.tv-date{margin-top:.25rem;color:var(--mute);font-size:1rem}
+.tv-date::first-letter{text-transform:uppercase}
+.tv-total{margin-left:auto;font-size:1.15rem;color:var(--mute);text-align:right}
+.tv-total b{font:600 2rem/1 'Fredoka',sans-serif;color:var(--paper);margin-right:.35rem;font-variant-numeric:tabular-nums}
+.tv-preview{border:1px solid var(--warn);color:var(--warn);border-radius:.4rem;padding:.1rem .6rem;font-size:.95rem;font-weight:600}
+.tv-clock{font:600 2.9rem/1 'Fredoka',sans-serif;font-variant-numeric:tabular-nums;min-width:6.4rem;text-align:right}
+
+.tv-main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 31rem}
+.tv-mapwrap{position:relative;min-width:0;min-height:0;background:#dfe6ec}
+#tv-map{position:absolute;inset:0;background:#dfe6ec}
+.tv-banner{position:absolute;left:50%;top:1.2rem;transform:translateX(-50%);z-index:1200;max-width:80%;background:var(--bad);color:#fff;font-weight:600;font-size:1.3rem;padding:.7rem 1.4rem;border-radius:.7rem;box-shadow:0 .2rem 1rem rgba(0,0,0,.35)}
+.tv-banner[hidden]{display:none}
+.tv-fs{position:absolute;right:1rem;bottom:2.4rem;z-index:1200;border:0;border-radius:.6rem;background:var(--navy);color:var(--paper);font-weight:600;font-size:1rem;padding:.7rem 1.1rem;opacity:0;pointer-events:none;transition:opacity .2s}
+body:not(.idle) .tv-fs{opacity:.92;pointer-events:auto}
+body.is-fs .tv-fs{display:none}
+.tv-fs:focus-visible{outline:.2rem solid var(--warn);outline-offset:.2rem;opacity:1;pointer-events:auto}
+
+/* panneau des chauffeurs */
+.tv-panel{display:flex;flex-direction:column;min-height:0;background:var(--navy-2);border-left:1px solid var(--line);overflow:hidden}
+.tv-drv{flex:1 1 0;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:.55rem;padding:1rem 1.4rem 1rem 1.2rem;border-left:.5rem solid var(--c);border-bottom:1px solid var(--line);overflow:hidden}
+.tv-drv:last-child{border-bottom:0}
+.tv-head{display:flex;align-items:baseline;gap:.8rem}
+.tv-name{font:600 2.1rem/1.05 'Fredoka',sans-serif;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tv-veh{color:var(--mute);font-size:.95rem;margin-left:.1rem}
+.tv-count{margin-left:auto;font:600 2.7rem/1 'Fredoka',sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tv-count small{font-size:1.2rem;color:var(--mute);font-weight:500}
+.tv-count.finished{color:var(--ok);font-size:1.5rem}
+.tv-pills{display:flex;flex-wrap:wrap;gap:.35rem;list-style:none;margin:0;padding:0}
+.tv-pills li{width:1.7rem;height:1.7rem;border-radius:50%;border:.17rem solid var(--c);display:flex;align-items:center;justify-content:center;font:600 .85rem/1 'IBM Plex Sans',sans-serif;color:var(--paper)}
+.tv-pills li.done{background:var(--c);color:var(--navy)}
+.tv-pills li.next{width:2.05rem;height:2.05rem;background:var(--paper);color:var(--navy);border-color:var(--paper);box-shadow:0 0 0 .22rem var(--c);font-size:1rem}
+.tv-pills li.collect{border-radius:.4rem}
+.tv-next{font-size:1.35rem;line-height:1.2;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tv-next small{color:var(--mute);font-size:.9rem;font-weight:400;margin-right:.45rem}
+.tv-next.fin{color:var(--ok)}
+.tv-meta{color:var(--mute);font-size:1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tv-live{color:var(--ok);font-weight:600}
+.tv-panel.dense .tv-drv{gap:.3rem;padding-top:.6rem;padding-bottom:.6rem}
+.tv-panel.dense .tv-name{font-size:1.6rem}
+.tv-panel.dense .tv-count{font-size:2rem}
+.tv-panel.dense .tv-pills li{width:1.35rem;height:1.35rem;font-size:.7rem}
+.tv-panel.dense .tv-pills li.next{width:1.6rem;height:1.6rem}
+.tv-panel.dense .tv-next{font-size:1.1rem}
+.tv-panel.dense .tv-meta.pos{display:none}
+.tv-loose{flex:none;margin:0;padding:.8rem 1.4rem;background:rgba(245,166,35,.16);color:var(--warn);font-weight:600;font-size:1.1rem;border-top:1px solid rgba(245,166,35,.45)}
+.tv-none{margin:auto;padding:2rem;text-align:center;color:var(--mute);font-size:1.4rem}
+
+/* repères sur la carte */
+.tm-icon{background:none;border:0}
+.tv-depot{width:100%;height:100%;border-radius:22%;background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:center;font-size:1.25rem;box-shadow:0 .1rem .35rem rgba(14,34,54,.5);border:.14rem solid #fff}
+.tv-stop{width:100%;height:100%;border-radius:50%;background:#fff;border:.2rem solid var(--c);color:var(--c);display:flex;align-items:center;justify-content:center;font:600 .95rem/1 'IBM Plex Sans',sans-serif;box-shadow:0 .08rem .25rem rgba(14,34,54,.4)}
+.tv-stop.done{background:var(--c);color:#fff}
+.tv-stop.collect{border-radius:28%}
+.tv-stop.next{border-width:.24rem;box-shadow:0 0 0 .22rem rgba(255,255,255,.9),0 .1rem .4rem rgba(14,34,54,.5);font-size:1.1rem}
+.tv-stop.loose{border-color:#7B8EA1;color:#556779;font-size:1.1rem}
+.tv-truck{width:100%;height:100%;border-radius:50%;background:var(--c);display:flex;align-items:center;justify-content:center;border:.2rem solid #fff;box-shadow:0 .12rem .45rem rgba(14,34,54,.55)}
+.tv-truck svg{width:56%;height:56%}
+.tv-truck.live{animation:tv-pulse 1.8s ease-out infinite}
+@keyframes tv-pulse{0%{box-shadow:0 0 0 0 rgba(60,197,140,.75)}70%{box-shadow:0 0 0 1rem rgba(60,197,140,0)}100%{box-shadow:0 0 0 0 rgba(60,197,140,0)}}
+@media (prefers-reduced-motion:reduce){.tv-truck.live{animation:none;box-shadow:0 0 0 .3rem rgba(60,197,140,.75)}}
+.leaflet-tooltip.tv-tip{background:var(--navy);color:#fff;border:0;border-radius:.45rem;padding:.25rem .7rem;font:600 1.15rem/1.2 'Fredoka',sans-serif;box-shadow:0 .1rem .4rem rgba(0,0,0,.4)}
+.leaflet-tooltip.tv-tip::before{display:none}
+.leaflet-tooltip.tv-dest{background:#fff;color:var(--navy);border:.15rem solid var(--navy);border-radius:.45rem;padding:.15rem .6rem;font:600 1rem/1.2 'IBM Plex Sans',sans-serif;box-shadow:0 .1rem .3rem rgba(0,0,0,.3)}
+.leaflet-tooltip.tv-dest::before{display:none}
+.leaflet-control-attribution{font-size:.7rem !important}
+
+/* écran bloquant : lien absent, désactivé ou remplacé */
+.tv-block{position:absolute;inset:0;z-index:3000;display:flex;align-items:center;justify-content:center;text-align:center;padding:4rem;background:var(--navy)}
+.tv-block[hidden]{display:none}
+.tv-block h2{font:600 2.8rem/1.15 'Fredoka',sans-serif;margin-bottom:1rem}
+.tv-block p{font-size:1.5rem;color:var(--mute);max-width:46rem;margin:0 auto}
