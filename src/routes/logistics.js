@@ -8,6 +8,7 @@ const { buildPreparationSlipPdf } = require('../utils/pdf');
 const { legGeometry } = require('../utils/roadRoute');
 const { parisDay } = require('../utils/orderDelivery');
 const { assignPending } = require('../utils/fixedTours');
+const { recommendCarts } = require('../utils/loadPlan');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -74,30 +75,6 @@ router.patch('/orders/:id', (req, res) => {
   const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
   res.json({ order: serializeOrder(updated, itemsStmt.all(orderId)) });
 });
-
-// Recommandation gloutonne : le plus grand chariot d'abord (pour
-// minimiser le nombre total), puis les plus petits pour le reste —
-// approche simple, pas une optimisation exacte du "bin packing".
-function recommendCarts(totalVolumeL, cartTypes) {
-  if (totalVolumeL <= 0 || cartTypes.length === 0) return [];
-  let remaining = totalVolumeL;
-  const recommendation = [];
-  // cartTypes attendu trié du plus grand volume au plus petit.
-  for (const ct of cartTypes) {
-    const count = Math.floor(remaining / ct.volumeL);
-    if (count > 0) {
-      recommendation.push({ name: ct.name, count });
-      remaining -= count * ct.volumeL;
-    }
-  }
-  if (remaining > 0.01) {
-    const smallest = cartTypes[cartTypes.length - 1];
-    const existing = recommendation.find(r => r.name === smallest.name);
-    if (existing) existing.count += 1;
-    else recommendation.push({ name: smallest.name, count: 1 });
-  }
-  return recommendation;
-}
 
 // Répartition qui évite de disperser inutilement une même référence
 // entre plusieurs chariots, tout en respectant TOUJOURS les limites de
