@@ -451,6 +451,23 @@ if (driversWithoutToken.length > 0) {
   }
 }
 
+// Livraison validée par le livreur sur son lien : heure (UTC, ISO) et, si le livreur partage sa position, le point où il a validé.
+// Aussi renseignée quand l'équipe passe la commande en « livrée » depuis l'administration.
+const ordersDeliveredColumns = db.prepare(`PRAGMA table_info(orders)`).all().map(c => c.name);
+if (ordersDeliveredColumns.length > 0 && !ordersDeliveredColumns.includes('delivered_at')) {
+  db.exec(`ALTER TABLE orders ADD COLUMN delivered_at TEXT;`);
+  db.exec(`ALTER TABLE orders ADD COLUMN delivered_lat REAL;`);
+  db.exec(`ALTER TABLE orders ADD COLUMN delivered_lng REAL;`);
+}
+// Dernière position partagée par le livreur depuis son lien (uniquement s'il l'a choisi). Une seule position par livreur,
+// remplacée à chaque envoi et effacée quand il arrête le partage ou valide sa dernière livraison : aucun historique.
+if (driversColumns.length > 0 && !driversColumns.includes('last_lat')) {
+  db.exec(`ALTER TABLE drivers ADD COLUMN last_lat REAL;`);
+  db.exec(`ALTER TABLE drivers ADD COLUMN last_lng REAL;`);
+  db.exec(`ALTER TABLE drivers ADD COLUMN last_accuracy_m REAL;`);
+  db.exec(`ALTER TABLE drivers ADD COLUMN last_position_at TEXT;`);
+}
+
 // Ligne unique pour le compteur de tickets, si absente
 db.prepare(`INSERT OR IGNORE INTO order_seq (id, value) VALUES (1, 0)`).run();
 

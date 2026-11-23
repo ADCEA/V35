@@ -27,13 +27,14 @@ const conf = () => ({
 // ---------- en-têtes ----------
 // Politique de contenu des PAGES : aucun script ne peut venir d'ailleurs que de ce site (ni script en ligne, ni autre domaine),
 // de sorte qu'un texte piégé qui passerait entre les mailles de l'échappement ne s'exécuterait pas. Les styles en ligne restent
-// permis (l'interface en utilise beaucoup) ; polices de Google Fonts ; aperçus PDF dans des cadres du même site.
+// permis (l'interface en utilise beaucoup) ; polices de Google Fonts ; aperçus PDF dans des cadres du même site ;
+// fond de carte OpenStreetMap pour la carte des tournées.
 const CSP_PAGE = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
-  "img-src 'self' data: blob:",
+  "img-src 'self' data: blob: https://tile.openstreetmap.org",
   "connect-src 'self'",
   "frame-src 'self' blob:",
   "object-src 'self' blob:",
@@ -52,7 +53,8 @@ function securityHeaders(req, res, next) {
     'Content-Security-Policy': api ? "frame-ancestors 'self'" : CSP_PAGE,
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Cross-Origin-Opener-Policy': 'same-origin',
-    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()',
+    // La position n'est demandée que sur la page de tournée du livreur (partage qu'il déclenche lui-même).
+    'Permissions-Policy': `camera=(), microphone=(), geolocation=${req.path === '/tournee.html' ? '(self)' : '()'}, payment=(), usb=(), interest-cohort=()`,
   });
   if (api) res.set('Cross-Origin-Resource-Policy', 'same-origin');
   if (req.secure) res.set('Strict-Transport-Security', 'max-age=15552000');

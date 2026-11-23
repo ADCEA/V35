@@ -1,0 +1,185 @@
+// Carte des tournées (onglet Logistique) : le dépôt, l'itinéraire de chaque chauffeur, ses arrêts (faits / à faire, avec
+// l'heure de validation) et son camion. Le camion est à la position partagée par le livreur si elle est récente, sinon à
+// sa dernière livraison validée. Les données viennent de GET /api/admin/logistics/map, relue toutes les 15 secondes tant
+// que l'onglet est affiché.
+(function () {
+  const POLL_MS = 15000;
+  let map = null; let layer = null; let timer = null; let loading = false; let firstFit = true;
+  let last = null; const markers = new Map();   // orderId -> marqueur d'arrêt
+  let focus = null;                              // chauffeur dont on suit la tournée (null = toutes)
+
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const hhmm = (iso) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
+  const hhmmss = (d) => d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const ago = (iso) => {
+    const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+    if (s < 60) return `il y a ${s} s`;
+    const m = Math.round(s / 60);
+    return m < 60 ? `il y a ${m} min` : `il y a ${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}`;
+  };
+  const duration = (m) => (m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${m} min`);
+
+  const TRUCK_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 6h11v9H2zM13 9h4l3 3v3h-7"/><circle cx="6.5" cy="17.5" r="1.8" fill="#fff"/><circle cx="16.5" cy="17.5" r="1.8" fill="#fff"/></svg>';
+
+  function icon(html, size) {
+    return L.divIcon({ html, className: 'tm-icon', iconSize: [size, size], iconAnchor: [size / 2, size / 2], popupAnchor: [0, -size / 2] });
+  }
+  const depotIcon = () => icon('<div class="tm-depot" title="Dépôt">⌂</div>', 30);
+  const stopIcon = (n, color, done) => icon(
+    `<div class="tm-stop ${done ? 'done' : ''}" style="--c:${esc(color)}">${done ? '✓' : esc(n)}</div>`, 26);
+  const looseIcon = () => icon('<div class="tm-stop loose">·</div>', 18);
+  const truckIcon = (color, live) => icon(`<div class="tm-truck ${live ? 'live' : ''}" style="--c:${esc(color)}">${TRUCK_SVG}</div>`, 38);
+
+  function ensureMap() {
+    if (map) return true;
+    const el = document.getElementById('tours-map');
+    if (!el || typeof L === 'undefined') return false;
+    map = L.map(el, { zoomControl: true, attributionControl: true }).setView([44.055, 5.049], 11);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
+    }).addTo(map);
+    layer = L.layerGroup().addTo(map);
+    return true;
+  }
+
+  function stopPopup(d, s) {
+    const state = s.status === 'delivered'
+      ? `<b class="tm-ok">Livré à ${hhmm(s.deliveredAt)}</b>${s.minutesSincePrev != null ? ` · ${duration(s.minutesSincePrev)} après la précédente` : ''}`
+      : '<b>À livrer</b>';
+    return `<div class="tm-pop"><b>${esc(s.societe)}</b><br>${esc(s.adresse)}<br><span class="tm-mute">${esc(s.ticket)}${d ? ` · ${esc(d.name)}` : ''}</span><br>${state}</div>`;
+  }
+
+  function truckPopup(d) {
+    const t = d.truck;
+    const where = t.source === 'gps' ? `Position partagée ${ago(t.at)}${t.accuracyM ? ` (± ${t.accuracyM} m)` : ''}`
+      : t.source === 'delivery' ? `Dernière livraison validée : ${esc(t.label)} à ${hhmm(t.at)}`
+      : 'Au dépôt';
+    return `<div class="tm-pop"><b>${esc(d.name)}</b>${d.vehicle ? ` · ${esc(d.vehicle)}` : ''}<br>${where}<br><span class="tm-mute">${d.stats.done}/${d.stats.total} livraisons</span></div>`;
+  }
+
+  function draw(data) {
+    layer.clearLayers(); markers.clear();
+    const pts = [];
+    if (data.depot) {
+      L.marker([data.depot.lat, data.depot.lng], { icon: depotIcon(), zIndexOffset: 100 }).addTo(layer)
+        .bindPopup(`<div class="tm-pop"><b>Dépôt</b><br>${esc(data.depot.address || '')}</div>`);
+      pts.push([data.depot.lat, data.depot.lng]);
+    }
+    const shown = data.drivers.filter(d => focus == null || d.id === focus);
+    for (const d of shown) {
+      for (const leg of d.legs) {
+        L.polyline(leg.points, leg.done
+          ? { color: d.color, weight: 5, opacity: 0.9 }
+          : { color: d.color, weight: 4, opacity: 0.7, dashArray: '8 10' }).addTo(layer);
+        leg.points.forEach(p => pts.push(p));
+      }
+      d.stops.forEach((s, i) => {
+        if (s.lat == null) return;
+        const m = L.marker([s.lat, s.lng], { icon: stopIcon(s.sequence ?? i + 1, d.color, s.status === 'delivered') }).addTo(layer).bindPopup(stopPopup(d, s));
+        markers.set(s.orderId, m);
+        pts.push([s.lat, s.lng]);
+      });
+      if (d.truck) {
+        const live = d.truck.source === 'gps';
+        L.marker([d.truck.lat, d.truck.lng], { icon: truckIcon(d.color, live), zIndexOffset: 1000 }).addTo(layer)
+          .bindPopup(truckPopup(d))
+          .bindTooltip(esc(d.name), { permanent: true, direction: 'bottom', offset: [0, 14], className: 'tm-tip' });
+        pts.push([d.truck.lat, d.truck.lng]);
+      }
+    }
+    if (focus == null) {
+      for (const s of data.unassigned) {
+        if (s.lat == null) continue;
+        const m = L.marker([s.lat, s.lng], { icon: looseIcon() }).addTo(layer).bindPopup(stopPopup(null, s) + '<br><span class="tm-mute">Pas encore affectée à un chauffeur</span>');
+        markers.set(s.orderId, m); pts.push([s.lat, s.lng]);
+      }
+    }
+    if (pts.length && firstFit) { map.fitBounds(pts, { padding: [40, 40], maxZoom: 14 }); firstFit = false; }
+  }
+
+  function side(data) {
+    const box = document.getElementById('tours-side');
+    if (!box) return;
+    const cards = data.drivers.map(d => {
+      const pct = d.stats.total ? Math.round(100 * d.stats.done / d.stats.total) : 0;
+      const t = d.truck;
+      const where = !t ? 'Position inconnue'
+        : t.source === 'gps' ? `<span class="tm-live">● Position partagée</span> · ${ago(t.at)}`
+        : t.source === 'delivery' ? `Dernière livraison : ${esc(t.label)} à ${hhmm(t.at)}`
+        : 'Au dépôt';
+      const timing = d.stats.done
+        ? `1ʳᵉ livraison ${hhmm(d.stats.firstDeliveryAt)} · dernière ${hhmm(d.stats.lastDeliveryAt)}${d.stats.avgMinutesBetween != null ? ` · ${duration(d.stats.avgMinutesBetween)} en moyenne entre deux` : ''}` : '';
+      const lost = d.stops.filter(s => s.lat == null).length;
+      return `
+        <section class="tm-driver ${focus === d.id ? 'sel' : ''}" data-driver="${d.id}">
+          <button type="button" class="tm-driver-head" data-focus="${d.id}" aria-pressed="${focus === d.id}">
+            <span class="tm-dot" style="background:${esc(d.color)}"></span>
+            <span class="tm-name">${esc(d.name)}${d.vehicle ? `<small>${esc(d.vehicle)}</small>` : ''}</span>
+            <span class="tm-count">${d.stats.done}/${d.stats.total}</span>
+          </button>
+          <div class="tm-bar" aria-hidden="true"><i style="width:${pct}%;background:${esc(d.color)}"></i></div>
+          <div class="tm-where">${where}</div>
+          ${timing ? `<div class="tm-timing">${timing}</div>` : ''}
+          ${d.stops.length ? `<ol class="tm-stops">${d.stops.map((s, i) => `
+            <li class="${s.status}" data-order="${s.orderId}">
+              <span class="tm-n">${s.status === 'delivered' ? '✓' : esc(s.sequence ?? i + 1)}</span>
+              <span class="tm-s">${esc(s.societe)}</span>
+              <span class="tm-t">${s.status === 'delivered' ? `${hhmm(s.deliveredAt)}${s.minutesSincePrev != null ? `<small>+${duration(s.minutesSincePrev)}</small>` : ''}` : '<small>à faire</small>'}</span>
+            </li>`).join('')}</ol>` : '<div class="tm-none">Aucun arrêt aujourd\'hui.</div>'}
+          ${lost ? `<div class="tm-lost">${lost} adresse${lost > 1 ? 's' : ''} pas encore localisée${lost > 1 ? 's' : ''}.</div>` : ''}
+        </section>`;
+    });
+    const loose = data.unassigned.length ? `<div class="tm-loose">${data.unassigned.length} commande${data.unassigned.length > 1 ? 's' : ''} prête${data.unassigned.length > 1 ? 's' : ''} sans chauffeur (points gris sur la carte).</div>` : '';
+    box.innerHTML = (cards.join('') || '<div class="tm-none">Aucun chauffeur. Ajoutez-en un plus haut.</div>') + loose;
+  }
+
+  function status(text, bad) {
+    const el = document.getElementById('tours-status');
+    if (el) { el.textContent = text; el.classList.toggle('bad', !!bad); }
+  }
+
+  async function refresh() {
+    if (loading) return;
+    const view = document.getElementById('admin-view-logistics');
+    if (!view || view.style.display === 'none' || !ensureMap()) return;
+    loading = true;
+    try {
+      const res = await fetch('/api/admin/logistics/map', { credentials: 'same-origin' });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Erreur ${res.status}`);
+      const data = await res.json();
+      last = data;
+      draw(data); side(data);
+      status(`Mis à jour à ${hhmmss(new Date())}${data.geocoding ? ' · localisation des adresses en cours…' : ''}`);
+    } catch (err) {
+      status(`Carte indisponible : ${err.message}`, true);
+    } finally { loading = false; }
+  }
+
+  function start() {
+    if (!document.getElementById('tours-map')) return;
+    map && setTimeout(() => map.invalidateSize(), 0);
+    refresh();
+    clearInterval(timer);
+    timer = setInterval(() => { if (!document.hidden) refresh(); }, POLL_MS);
+  }
+
+  document.addEventListener('click', (e) => {
+    const head = e.target.closest('#tours-side [data-focus]');
+    if (head) {
+      const id = Number(head.dataset.focus);
+      focus = focus === id ? null : id; firstFit = true;
+      if (last) { draw(last); side(last); }
+      return;
+    }
+    const li = e.target.closest('#tours-side li[data-order]');
+    if (li) {
+      const m = markers.get(Number(li.dataset.order));
+      if (m) { map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 14), { duration: 0.6 }); m.openPopup(); }
+      return;
+    }
+    if (e.target.closest('#tours-refit')) { firstFit = true; focus = null; if (last) { draw(last); side(last); } }
+    if (e.target.closest('#tours-refresh')) refresh();
+  });
+
+  window.ToursMap = { show: start, refresh };
+})();
