@@ -4,6 +4,7 @@ const db = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const { serializeOrder } = require('../utils/serializeOrder');
 const { geocodeAddress, sleep, nearestNeighborRoute } = require('../utils/geocode');
+const { queryForOrder } = require('../utils/orderGeocode');
 const { buildPreparationSlipPdf } = require('../utils/pdf');
 const { legGeometry } = require('../utils/roadRoute');
 const { parisDay } = require('../utils/orderDelivery');
@@ -355,7 +356,7 @@ async function ensureOrdersCoords(orders) {
       continue;
     }
     try {
-      const coords = await geocodeAddress(order.adresse);
+      const coords = await geocodeAddress(queryForOrder(order));
       if (!coords) { failed.push(order); continue; }
       db.prepare('UPDATE orders SET lat = ?, lng = ? WHERE id = ?').run(coords.lat, coords.lng, order.id);
       geocoded.push({ ...order, lat: coords.lat, lng: coords.lng });
@@ -432,7 +433,7 @@ async function geocodeMissing() {
       && !(geocodeTriedAt.get(o.id) > Date.now() - GEOCODE_RETRY_MS)).slice(0, 25);
     for (const o of todo) {
       try {
-        const c = await geocodeAddress(o.adresse);
+        const c = await geocodeAddress(queryForOrder(o));
         if (c) db.prepare('UPDATE orders SET lat = ?, lng = ? WHERE id = ?').run(c.lat, c.lng, o.id);
         else geocodeTriedAt.set(o.id, Date.now());
       } catch { geocodeTriedAt.set(o.id, Date.now()); }

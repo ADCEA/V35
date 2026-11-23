@@ -461,6 +461,9 @@ function updateClient(id, body) {
     db.prepare(`
       UPDATE clients SET societe=?, contact=?, tel=?, adresse=?, code_postal=?, ville=?, email=?, email2=?, siret=?, tva_number=?, adresse_facturation=?, invoice_detail_level=?, escompte=?, client_type=? WHERE id=?
     `).run(f.societe, f.contact, f.tel, f.adresse, f.codePostal, f.ville, f.email, f.email2, f.siret, f.tvaNumber, f.adresseFacturation, f.invoiceDetailLevel, f.escompte, f.clientType, id);
+    // Adresse, code postal ou ville corrigés : les commandes pas encore livrées perdent leur point sur la carte et sont replacées
+    // (géocodage avec la fiche corrigée) ; les livrées gardent le leur.
+    if (changed.some(k => ['adresse', 'codePostal', 'ville'].includes(k))) db.prepare(`UPDATE orders SET lat = NULL, lng = NULL WHERE client_id = ? AND status != 'livree'`).run(id);
     if (changed.length) log('client_updated', { clientId: id, client: f.societe, fields: changed.map(k => CLIENT_FIELD_LABELS[k]) });
   })();
   return getClient(id);
