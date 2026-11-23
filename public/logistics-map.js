@@ -8,6 +8,41 @@
   let last = null; const markers = new Map();   // orderId -> marqueur d'arrêt
   let focus = null;                              // chauffeur dont on suit la tournée (null = toutes)
 
+  // ---- fonds de carte : changer d'un clic (choix retenu dans ce navigateur) ----
+  // Chaque serveur de tuiles doit aussi figurer dans « img-src » de la politique de contenu (src/middleware/security.js) :
+  // test/fonds-de-carte.test.js le vérifie. Les tuiles IGN sont servies sans clé par la Géoplateforme (WMTS, grille « PM » = Web Mercator).
+  const IGN = (layer, format) => `https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=normal&FORMAT=${format}&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`;
+  const IGN_ATTR = '© <a href="https://www.ign.fr/" target="_blank" rel="noopener">IGN</a>';
+  const BASEMAPS = [
+    { id: 'plan', label: 'Plan', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      opts: { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' } },
+    { id: 'ign', label: 'Plan IGN', url: IGN('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'image/png'), opts: { maxZoom: 19, maxNativeZoom: 18, attribution: IGN_ATTR } },
+    { id: 'sat', label: 'Satellite', url: IGN('ORTHOIMAGERY.ORTHOPHOTOS', 'image/jpeg'), opts: { maxZoom: 19, maxNativeZoom: 19, attribution: IGN_ATTR } },
+  ];
+  const BASE = { id: null, layer: null, loaded: 0, failed: 0 };
+  const baseStore = {
+    get() { try { const v = localStorage.getItem('cezanne.basemap'); return BASEMAPS.some(b => b.id === v) ? v : 'plan'; } catch { return 'plan'; } },
+    set(v) { try { localStorage.setItem('cezanne.basemap', v); } catch { /* pas de stockage : le choix n'est pas retenu */ } },
+  };
+
+  function setBasemap(id, { save = true } = {}) {
+    const def = BASEMAPS.find(b => b.id === id) || BASEMAPS[0];
+    if (!map) return;
+    if (BASE.layer) map.removeLayer(BASE.layer);
+    BASE.id = def.id; BASE.loaded = 0; BASE.failed = 0;
+    BASE.layer = L.tileLayer(def.url, { zIndex: 1, ...def.opts });
+    BASE.layer.on('tileload', () => { BASE.loaded++; });
+    // Un fond qui ne s'affiche pas du tout (service injoignable) : retour au plan plutôt qu'une carte vide, avec l'explication.
+    BASE.layer.on('tileerror', () => {
+      if (def.id === 'plan' || BASE.id !== def.id) return;
+      BASE.failed++;
+      if (BASE.failed >= 4 && BASE.loaded === 0) { status(`Fond « ${def.label} » indisponible : retour au plan.`, true); setBasemap('plan', { save: false }); }
+    });
+    BASE.layer.addTo(map).bringToBack();
+    if (save) baseStore.set(def.id);
+    document.querySelectorAll('#tours-basemaps [data-basemap]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.basemap === def.id)));
+  }
+
   // ---- trafic en temps réel : tout passe par le serveur (/api/admin/traffic), la page ne connaît aucune clé ----
   const TRAFFIC = { status: null, on: false, layer: null, eta: new Map(), loading: false, errTimer: null, restored: false };
   const ETA_TTL_MS = 5 * 60 * 1000;   // un itinéraire n'est recalculé qu'après 5 min (chaque calcul compte dans le plafond quotidien)
@@ -44,9 +79,7 @@
     const el = document.getElementById('tours-map');
     if (!el || typeof L === 'undefined') return false;
     map = L.map(el, { zoomControl: true, attributionControl: true }).setView([44.055, 5.049], 11);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
-    }).addTo(map);
+    setBasemap(baseStore.get(), { save: false });
     layer = L.layerGroup().addTo(map);
     map.on('click', onMapClick);
     return true;
@@ -292,6 +325,8 @@
       return;
     }
     if (e.target.closest('#tours-refit')) { firstFit = true; focus = null; if (last) { draw(last); side(last); } }
+    const bm = e.target.closest('#tours-basemaps [data-basemap]');
+    if (bm) { setBasemap(bm.dataset.basemap); return; }
     if (e.target.closest('#tours-refresh')) refresh();
     if (e.target.closest('#tours-traffic')) { const on = !TRAFFIC.on; remember.set(on); setTraffic(on); }
   });

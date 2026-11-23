@@ -351,7 +351,7 @@ test('la page ne connaît ni la clé, ni TomTom : politique de contenu inchangé
     const res = await a.s.call('GET', '/', null, true);
     const csp = res.headers.get('content-security-policy');
     assert.ok(!/tomtom/i.test(csp), csp);
-    assert.match(csp, /img-src 'self' data: blob: https:\/\/tile\.openstreetmap\.org;/);
+    assert.match(csp, /img-src 'self' data: blob: https:\/\/tile\.openstreetmap\.org https:\/\/data\.geopf\.fr;/);
     assert.match(csp, /connect-src 'self';/);
     const html = await res.text();
     assert.ok(!html.includes(KEY));
