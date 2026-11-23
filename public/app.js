@@ -1840,6 +1840,7 @@ let driversCache = [];
 let logisticsOrdersCache = [];
 
 async function renderLogisticsView() {
+  if (window.ToursMap) window.ToursMap.show();
   await ensureCartTypesCache();
   await renderTruckTypesList();
   await renderDriversList();

@@ -28,6 +28,95 @@ function formatDuration(totalMinutes){
   return h > 0 ? `${h}h${String(m).padStart(2,'0')}` : `${m} min`;
 }
 
+function hhmm(iso){ return new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' }); }
+function parisToday(){ return new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' }); }
+
+// ---------- partage de position (choisi par le livreur, jamais automatique) ----------
+// Tant que la page est ouverte et le partage actif, la position du téléphone est envoyée à l'atelier toutes les 20 secondes.
+// Une seule position est conservée côté serveur ; elle est effacée à l'arrêt et à la dernière livraison.
+const SHARE_KEY = 'cezanne-partage-position';
+const share = { on: false, watchId: null, last: null, lastSentAt: 0, wake: null, error: '' };
+const portalUrl = (path) => `/api/driver-portal/${encodeURIComponent(token)}${path}`;
+const postJson = (path, body) => fetch(portalUrl(path), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+
+function remember(on){ try { if (on) localStorage.setItem(SHARE_KEY, parisToday()); else localStorage.removeItem(SHARE_KEY); } catch (e) { /* stockage indisponible : pas de reprise automatique */ } }
+function wasSharingToday(){ try { return localStorage.getItem(SHARE_KEY) === parisToday(); } catch (e) { return false; } }
+
+async function holdScreen(){
+  try { if ('wakeLock' in navigator && !share.wake) { share.wake = await navigator.wakeLock.request('screen'); share.wake.addEventListener('release', () => { share.wake = null; }); } } catch (e) { /* facultatif */ }
+}
+document.addEventListener('visibilitychange', () => { if (share.on && document.visibilityState === 'visible') holdScreen(); });
+
+function startSharing(){
+  if (!('geolocation' in navigator)) { share.error = 'Ce téléphone ne permet pas de partager la position depuis cette page.'; paintShare(); return; }
+  if (share.watchId != null) return;
+  share.on = true; share.error = '';
+  share.watchId = navigator.geolocation.watchPosition((pos) => {
+    share.last = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy, at: Date.now() };
+    share.error = '';
+    if (Date.now() - share.lastSentAt >= 20000) {
+      share.lastSentAt = Date.now();
+      postJson('/position', { lat: share.last.lat, lng: share.last.lng, accuracy: share.last.accuracy }).catch(() => {});
+    }
+    paintShare();
+  }, (err) => {
+    if (err.code === 1) { share.error = 'Position refusée. Autorisez la localisation pour ce site dans les réglages du téléphone, puis relancez le partage.'; stopSharing(); }
+    else { share.error = 'Position indisponible pour le moment (pas de signal GPS ?). Le partage reprend dès qu\'il revient.'; paintShare(); }
+  }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 });
+  remember(true);
+  holdScreen();
+  paintShare();
+}
+
+function stopSharing(){
+  if (share.watchId != null) navigator.geolocation.clearWatch(share.watchId);
+  const wasOn = share.on;
+  share.watchId = null; share.on = false; share.last = null; share.lastSentAt = 0;
+  if (share.wake) { share.wake.release().catch(() => {}); share.wake = null; }
+  remember(false);
+  if (wasOn) postJson('/position/stop').catch(() => {});
+  paintShare();
+}
+
+function paintShare(){
+  const box = document.getElementById('share-card');
+  if (!box) return;
+  const fix = share.last ? `Dernière position envoyée il y a ${Math.max(0, Math.round((Date.now() - share.lastSentAt) / 1000))} s${share.last.accuracy ? ` · précision ≈ ${Math.round(share.last.accuracy)} m` : ''}.` : 'En attente du signal GPS…';
+  box.className = 'share-card' + (share.on ? ' on' : '');
+  box.innerHTML = share.on ? `
+    <div class="share-head"><span class="share-dot" aria-hidden="true"></span><b>Position partagée avec l'atelier</b></div>
+    <p>${esc(fix)} Gardez cette page ouverte et l'écran allumé.</p>
+    ${share.error ? `<p class="share-error">${esc(share.error)}</p>` : ''}
+    <button type="button" class="share-btn stop" id="share-toggle">Arrêter le partage</button>`
+  : `
+    <div class="share-head"><b>📍 Partager ma position</b></div>
+    <p>L'atelier voit où vous en êtes sur la carte. Rien n'est envoyé tant que vous n'appuyez pas ; le partage s'arrête quand vous cliquez sur « Arrêter » ou après votre dernière livraison. Seule votre dernière position est conservée.</p>
+    ${share.error ? `<p class="share-error">${esc(share.error)}</p>` : ''}
+    <button type="button" class="share-btn" id="share-toggle">Partager ma position</button>`;
+  document.getElementById('share-toggle').addEventListener('click', () => (share.on ? stopSharing() : startSharing()));
+}
+
+async function resumeSharing(){
+  if (share.on || !wasSharingToday() || !navigator.permissions?.query) return;
+  try { const st = await navigator.permissions.query({ name: 'geolocation' }); if (st.state === 'granted') startSharing(); } catch (e) { /* pas de reprise */ }
+}
+
+// ---------- validation d'une livraison ----------
+async function deliver(orderId, btn){
+  btn.disabled = true; btn.textContent = 'Validation…';
+  const fresh = share.on && share.last && Date.now() - share.last.at < 2 * 60 * 1000;
+  try {
+    const res = await postJson(`/orders/${encodeURIComponent(orderId)}/deliver`, fresh ? { lat: share.last.lat, lng: share.last.lng, accuracy: share.last.accuracy } : {});
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(out.error || 'La validation a échoué.');
+    if (out.remaining === 0 && share.on) stopSharing();
+    await load();
+  } catch (err) {
+    alert(err.message);
+    btn.disabled = false; btn.textContent = 'Oui, c\'est livré';
+  }
+}
+
 async function load(){
   if (!token) {
     app.innerHTML = '<div class="error">Lien invalide — il manque le jeton d\'accès dans l\'adresse.</div>';
@@ -77,6 +166,19 @@ function render(data){
 
   const totalStops = data.stops.length;
 
+  const doneList = data.deliveredToday || [];
+  const doneHtml = doneList.length ? `
+    <section class="done-box" aria-label="Livraisons validées aujourd'hui">
+      <h3>Livré aujourd'hui · ${doneList.length}</h3>
+      <ul>${doneList.map(d => `
+        <li>
+          <span class="done-check" aria-hidden="true">✓</span>
+          <span class="done-name">${esc(d.societe)}<small>${esc(d.ticket)}</small></span>
+          <span class="done-time">${hhmm(d.deliveredAt)}${d.minutesSincePrev != null ? `<small>+${formatDuration(d.minutesSincePrev)}</small>` : ''}</span>
+        </li>`).join('')}
+      </ul>
+    </section>` : '';
+
   if (totalStops === 0) {
     app.innerHTML = `
       <header><div class="wrap">
@@ -85,10 +187,12 @@ function render(data){
         <div class="date">${dateLabel}</div>
       </div></header>
       <div class="wrap">${weatherHtml}${safetyHtml}
-        <div class="empty">Aucun arrêt pour le moment.<br>Revenez un peu plus tard.</div>
+        ${doneList.length ? '<div class="finished">Tournée terminée. Merci !</div>' : '<div class="empty">Aucun arrêt pour le moment.<br>Revenez un peu plus tard.</div>'}
+        ${doneHtml}
       </div>
       <footer>Blanchisserie Cézanne</footer>
     `;
+    if (share.on) stopSharing();
     return;
   }
 
@@ -108,6 +212,16 @@ function render(data){
           <a class="bl" href="${esc(safeUrl(s.deliveryNoteUrl))}" target="_blank" rel="noopener">📄 Bon de livraison</a>
         </div>
         <div class="stop-items">${s.items.map(it => `<span>${esc(it.name)} ×${it.qty}</span>`).join('')}</div>
+        <div class="deliver-zone" id="deliver-zone-${s.orderId}">
+          <button type="button" class="deliver-btn" data-deliver-ask="${s.orderId}">✓ Livraison effectuée</button>
+          <div class="deliver-confirm" hidden>
+            <p>Confirmer la livraison chez <b>${esc(s.societe)}</b> ?</p>
+            <div class="deliver-row">
+              <button type="button" class="deliver-yes" data-deliver-yes="${s.orderId}">Oui, c'est livré</button>
+              <button type="button" class="deliver-no" data-deliver-no="${s.orderId}">Annuler</button>
+            </div>
+          </div>
+        </div>
         <button type="button" class="comment-toggle" data-comment-toggle="${s.orderId}">💬 Laisser un commentaire</button>
         <div class="comment-box" id="comment-box-${s.orderId}">
           <textarea id="comment-text-${s.orderId}" placeholder="Ex. Client absent, linge laissé à la réception. Ou : demande plus de serviettes la prochaine fois."></textarea>
@@ -126,6 +240,7 @@ function render(data){
     </div></header>
     <div class="wrap">
       ${weatherHtml}
+      <div id="share-card" class="share-card"></div>
       ${safetyHtml}
       <div class="route-summary">
         <div class="stat"><b>${totalStops}</b><span>Arrêt${totalStops > 1 ? 's' : ''}</span></div>
@@ -136,10 +251,27 @@ function render(data){
       </div>
       ${!data.routeSummary ? '<p style="font-size:11.5px;color:var(--steel-light);margin:-12px 0 16px;">Distance et durée non disponibles — la tournée n\'a pas encore été optimisée côté admin.</p>' : ''}
       <div class="route">${stopsHtml}</div>
+      ${doneHtml}
     </div>
     <footer>Blanchisserie Cézanne — bonne route</footer>
   `;
 
+  paintShare();
+  document.querySelectorAll('[data-deliver-ask]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const zone = document.getElementById(`deliver-zone-${btn.dataset.deliverAsk}`);
+      btn.hidden = true; zone.querySelector('.deliver-confirm').hidden = false;
+    });
+  });
+  document.querySelectorAll('[data-deliver-no]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const zone = document.getElementById(`deliver-zone-${btn.dataset.deliverNo}`);
+      zone.querySelector('.deliver-confirm').hidden = true; zone.querySelector('.deliver-btn').hidden = false;
+    });
+  });
+  document.querySelectorAll('[data-deliver-yes]').forEach(btn => {
+    btn.addEventListener('click', () => deliver(btn.dataset.deliverYes, btn));
+  });
   document.querySelectorAll('[data-comment-toggle]').forEach(btn => {
     btn.addEventListener('click', () => {
       document.getElementById(`comment-box-${btn.dataset.commentToggle}`).classList.toggle('open');
@@ -174,4 +306,4 @@ function render(data){
   });
 }
 
-load();
+load().then(resumeSharing);

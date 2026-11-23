@@ -126,6 +126,14 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
 - **Logistique livraison** — gérez vos chauffeurs (nom + véhicule optionnel),
   puis glissez les commandes "prêtes" vers le chauffeur qui les livrera.
   Une colonne "Non assigné" regroupe celles pas encore prises en charge.
+  **Carte des tournées** (en haut de l'onglet, rafraîchie toutes les 15 s) : le dépôt, l'itinéraire de chaque chauffeur
+  (trait plein = déjà fait, pointillé = à faire), ses arrêts avec l'heure de validation et le temps écoulé entre deux
+  livraisons, et son camion. Le chauffeur valide chaque arrêt avec « Livraison effectuée » sur son lien de tournée : la
+  commande passe à « Livrée » et l'heure est enregistrée (`orders.delivered_at`). Il peut aussi **partager sa position**
+  (bouton sur son lien, jamais automatique, seule la dernière position est conservée et elle est effacée à l'arrêt ou à
+  la dernière livraison) : le camion est alors à cette position tant qu'elle date de moins de 10 min, sinon à sa dernière
+  livraison validée. Fond de carte OpenStreetMap, tracés routiers OSRM (`ROAD_ROUTING=off` pour les désactiver : lignes
+  droites), adresses géocodées en arrière-plan par Nominatim.
 - **Équipe** — collaborateurs rattachés à une BU ou à une machine, badgeuse de l'atelier, présence en direct et heures
   pointées par poste (voir « Équipe (RH) et badgeuse »).
 - **Statistiques** — un seul filtre de dates en haut de page pilote tout :

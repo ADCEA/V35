@@ -817,7 +817,11 @@ router.patch('/orders/:id/status', (req, res) => {
     livraisonPrevue = new Date().toISOString().slice(0, 10);
   }
 
-  db.prepare('UPDATE orders SET status = ?, livraison_prevue = ? WHERE id = ?').run(status, livraisonPrevue, order.id);
+  // L'heure de livraison suit le statut : posée au passage en « livrée » (celle du livreur est conservée si elle existe),
+  // effacée si la commande repasse à un statut antérieur.
+  const deliveredAt = status === 'livree' ? (order.delivered_at || new Date().toISOString()) : null;
+  db.prepare('UPDATE orders SET status = ?, livraison_prevue = ?, delivered_at = ?, delivered_lat = ?, delivered_lng = ? WHERE id = ?')
+    .run(status, livraisonPrevue, deliveredAt, status === 'livree' ? (order.delivered_lat ?? null) : null, status === 'livree' ? (order.delivered_lng ?? null) : null, order.id);
 
   // Notifie le logiciel du client (si intégré via API et webhook
   // configuré) avec les quantités définitives, sans jamais bloquer la

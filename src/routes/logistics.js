@@ -5,6 +5,8 @@ const { requireAdmin } = require('../middleware/auth');
 const { serializeOrder } = require('../utils/serializeOrder');
 const { geocodeAddress, sleep, nearestNeighborRoute } = require('../utils/geocode');
 const { buildPreparationSlipPdf } = require('../utils/pdf');
+const { legGeometry } = require('../utils/roadRoute');
+const { parisDay } = require('../utils/orderDelivery');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -418,6 +420,133 @@ router.post('/optimize-route', async (req, res) => {
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
+});
+
+// ---------- carte des tournées ----------
+
+const DRIVER_COLORS = ['#1D91FF', '#E0574B', '#2FB27A', '#F5A623', '#8A5CF6', '#0EA5A5', '#D6459E', '#6B7C3A'];
+const GPS_FRESH_MS = 10 * 60 * 1000;   // au-delà, la position partagée est jugée périmée : on retombe sur la dernière livraison
+const GEOCODE_RETRY_MS = 10 * 60 * 1000;
+
+// Adresses de la carte qui n'ont pas encore de coordonnées : géocodées EN ARRIÈRE-PLAN (une par seconde, comme l'exige
+// Nominatim), pour que la carte s'affiche tout de suite et se complète aux rafraîchissements suivants.
+const geocodeTriedAt = new Map();   // id de commande -> instant du dernier essai infructueux
+let geocoding = false;
+let depotTriedAt = 0;
+
+function mapOrders() {
+  const since = new Date(Date.now() - 36 * 3600 * 1000).toISOString();
+  const today = parisDay();
+  return db.prepare(`
+    SELECT * FROM orders
+    WHERE status = 'prete' OR (status = 'livree' AND driver_id IS NOT NULL AND delivered_at IS NOT NULL AND delivered_at >= ?)
+  `).all(since).filter(o => o.status === 'prete' || parisDay(o.delivered_at) === today);
+}
+
+async function geocodeMissing() {
+  if (geocoding) return;
+  geocoding = true;
+  try {
+    const todo = mapOrders().filter(o => o.lat == null && !(o.delivered_lat != null) && o.adresse
+      && !(geocodeTriedAt.get(o.id) > Date.now() - GEOCODE_RETRY_MS)).slice(0, 25);
+    for (const o of todo) {
+      try {
+        const c = await geocodeAddress(o.adresse);
+        if (c) db.prepare('UPDATE orders SET lat = ?, lng = ? WHERE id = ?').run(c.lat, c.lng, o.id);
+        else geocodeTriedAt.set(o.id, Date.now());
+      } catch { geocodeTriedAt.set(o.id, Date.now()); }
+      await sleep(1100);
+    }
+  } finally { geocoding = false; }
+}
+
+const minutesBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 60000);
+
+// GET /api/admin/logistics/map — tout ce qu'il faut pour dessiner les tournées du jour : le dépôt, et pour chaque chauffeur
+// ses arrêts dans l'ordre de passage (livrés / à faire, avec l'heure de validation), les tronçons de l'itinéraire (faits ou
+// restants) et la position du camion : position partagée par le livreur si elle est récente, sinon dernière livraison
+// validée, sinon dépôt.
+router.get('/map', (req, res) => {
+  const adm = db.prepare('SELECT depot_address, depot_lat, depot_lng FROM admin WHERE id = 1').get() || {};
+  let depot = null;
+  if (adm.depot_lat != null && adm.depot_lng != null) depot = { lat: adm.depot_lat, lng: adm.depot_lng, address: adm.depot_address || null };
+  else if (adm.depot_address && Date.now() - depotTriedAt > GEOCODE_RETRY_MS) { depotTriedAt = Date.now(); ensureDepotCoords().catch(() => {}); }
+
+  const orders = mapOrders();
+  const drivers = db.prepare('SELECT id, name, vehicle, last_lat, last_lng, last_accuracy_m, last_position_at FROM drivers ORDER BY name').all();
+
+  const stopOf = (o) => {
+    const done = o.status === 'livree';
+    const lat = done && o.delivered_lat != null ? o.delivered_lat : o.lat;
+    const lng = done && o.delivered_lat != null ? o.delivered_lng : o.lng;
+    return {
+      orderId: o.id, ticket: o.ticket, societe: o.societe, adresse: o.adresse,
+      status: done ? 'delivered' : 'pending',
+      sequence: o.delivery_sequence ?? null,
+      lat: lat ?? null, lng: lng ?? null,
+      deliveredAt: done ? o.delivered_at : null,
+      minutesSincePrev: null,
+      _order: o,
+    };
+  };
+  const rank = (s) => (s.sequence == null ? Number.MAX_SAFE_INTEGER : s.sequence);
+  const clean = (s) => { const { _order, ...rest } = s; return rest; };
+
+  let missing = 0;
+  const outDrivers = drivers.map((d, i) => {
+    const stops = orders.filter(o => o.driver_id === d.id).map(stopOf)
+      .sort((a, b) => rank(a) - rank(b) || Date.parse(a._order.created_at) - Date.parse(b._order.created_at));
+
+    // Temps écoulé entre deux livraisons validées successives (dans l'ordre où elles ont eu lieu, pas celui de la tournée).
+    const doneByTime = stops.filter(s => s.status === 'delivered').sort((a, b) => Date.parse(a.deliveredAt) - Date.parse(b.deliveredAt));
+    doneByTime.forEach((s, k) => { if (k > 0) s.minutesSincePrev = minutesBetween(doneByTime[k - 1].deliveredAt, s.deliveredAt); });
+
+    const located = stops.filter(s => s.lat != null);
+    missing += stops.length - located.length;
+    const legs = [];
+    let from = depot;
+    for (const s of located) {
+      if (from) {
+        const road = legGeometry(from, s);
+        legs.push({ done: s.status === 'delivered', road: !!road, points: road || [[from.lat, from.lng], [s.lat, s.lng]] });
+      }
+      from = s;
+    }
+
+    const gpsFresh = d.last_lat != null && d.last_position_at && Date.now() - Date.parse(d.last_position_at) <= GPS_FRESH_MS;
+    const lastDone = doneByTime.length ? doneByTime[doneByTime.length - 1] : null;
+    let truck = null;
+    if (gpsFresh) truck = { lat: d.last_lat, lng: d.last_lng, source: 'gps', at: d.last_position_at, accuracyM: d.last_accuracy_m };
+    else if (lastDone && lastDone.lat != null) truck = { lat: lastDone.lat, lng: lastDone.lng, source: 'delivery', at: lastDone.deliveredAt, label: lastDone.societe };
+    else if (depot) truck = { lat: depot.lat, lng: depot.lng, source: 'depot', at: null };
+
+    const gaps = doneByTime.map(s => s.minutesSincePrev).filter(m => m != null);
+    return {
+      id: d.id, name: d.name, vehicle: d.vehicle || null, color: DRIVER_COLORS[i % DRIVER_COLORS.length],
+      sharing: !!gpsFresh,
+      truck,
+      stats: {
+        total: stops.length, done: doneByTime.length,
+        firstDeliveryAt: doneByTime.length ? doneByTime[0].deliveredAt : null,
+        lastDeliveryAt: lastDone ? lastDone.deliveredAt : null,
+        avgMinutesBetween: gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length) : null,
+      },
+      stops: stops.map(clean),
+      legs,
+    };
+  });
+
+  const unassigned = orders.filter(o => o.status === 'prete' && o.driver_id == null).map(stopOf).map(clean);
+  const unassignedMissing = unassigned.filter(s => s.lat == null).length;
+  if (missing + unassignedMissing > 0) geocodeMissing().catch(() => {});
+
+  res.json({
+    depot,
+    drivers: outDrivers,
+    unassigned,
+    geocoding: missing + unassignedMissing > 0,
+    generatedAt: new Date().toISOString(),
+  });
 });
 
 module.exports = router;
