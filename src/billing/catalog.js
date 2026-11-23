@@ -464,6 +464,9 @@ function updateClient(id, body) {
     // Adresse, code postal ou ville corrigés : les commandes pas encore livrées perdent leur point sur la carte et sont replacées
     // (géocodage avec la fiche corrigée) ; les livrées gardent le leur.
     if (changed.some(k => ['adresse', 'codePostal', 'ville'].includes(k))) db.prepare(`UPDATE orders SET lat = NULL, lng = NULL WHERE client_id = ? AND status != 'livree'`).run(id);
+    // L'adresse d'une commande est la copie de celle de la fiche : les commandes pas encore livrées prennent la nouvelle (carte,
+    // bon de livraison, chauffeur). Une adresse vidée ne remplace rien.
+    if (changed.includes('adresse') && f.adresse) db.prepare(`UPDATE orders SET adresse = ? WHERE client_id = ? AND status != 'livree'`).run(f.adresse, id);
     if (changed.length) log('client_updated', { clientId: id, client: f.societe, fields: changed.map(k => CLIENT_FIELD_LABELS[k]) });
   })();
   return getClient(id);

@@ -12,11 +12,28 @@ const { parisDay } = require('./orderDelivery');
 
 const RETRY_MS = 10 * 60 * 1000;        // une adresse introuvable n'est pas redemandée avant 10 min
 const PER_PASS = 25;                    // adresses recalculées par passage
-const triedAt = new Map();              // id de commande -> instant du dernier essai infructueux
+const triedAt = new Map();              // « id|texte géocodé » -> instant du dernier essai infructueux (un texte différent est retenté aussitôt)
 let running = false;
+const tryKey = (o) => `${o.id}|${queryForOrder(o)}`;
+const recentlyTried = (o) => triedAt.get(tryKey(o)) > Date.now() - RETRY_MS;
+
+/**
+ * L'adresse d'une commande est une copie de celle de la fiche client au moment de la commande. Quand la fiche est corrigée
+ * (ou l'a été avant que cette règle existe), les commandes pas encore livrées reprennent l'adresse de la fiche : sinon la
+ * carte, le bon de livraison et le chauffeur continuent d'afficher l'ancienne, et un point faux ne se corrige jamais. Les
+ * commandes livrées gardent l'adresse du jour de la livraison. Renvoie le nombre de commandes mises à jour.
+ */
+function syncOpenOrderAddresses() {
+  const fiche = `(SELECT TRIM(c.adresse) FROM clients c WHERE c.id = orders.client_id)`;
+  return db.prepare(`
+    UPDATE orders SET adresse = ${fiche}
+    WHERE status != 'livree' AND client_id IS NOT NULL AND COALESCE(${fiche}, '') != '' AND COALESCE(adresse, '') != ${fiche}
+  `).run().changes;
+}
 
 /** Commandes à placer sur les cartes : les « prêtes », et celles livrées aujourd'hui par un chauffeur. */
 function mapOrders() {
+  syncOpenOrderAddresses();
   const since = new Date(Date.now() - 36 * 3600 * 1000).toISOString();
   const today = parisDay();
   return db.prepare(`
@@ -43,7 +60,7 @@ async function geocodeOrder(o) {
 
 /** Nombre de points de la carte à calculer ou à recalculer (hors adresses récemment introuvables). */
 function pendingCount(orders = mapOrders()) {
-  return orders.filter(o => needsCoords(o) && !(triedAt.get(o.id) > Date.now() - RETRY_MS)).length;
+  return orders.filter(o => needsCoords(o) && !recentlyTried(o)).length;
 }
 
 /** Recalcule, en arrière-plan, les points manquants ou périmés. Un seul passage à la fois. */
@@ -52,11 +69,12 @@ async function refreshOrderCoords() {
   running = true;
   let done = 0;
   try {
-    const todo = mapOrders().filter(o => needsCoords(o) && !(triedAt.get(o.id) > Date.now() - RETRY_MS)).slice(0, PER_PASS);
+    const todo = mapOrders().filter(o => needsCoords(o) && !recentlyTried(o)).slice(0, PER_PASS);
     for (const o of todo) {
+      const key = tryKey(o);
       try {
-        if (await geocodeOrder(o)) { done++; triedAt.delete(o.id); } else triedAt.set(o.id, Date.now());
-      } catch { triedAt.set(o.id, Date.now()); }
+        if (await geocodeOrder(o)) { done++; triedAt.delete(key); } else triedAt.set(key, Date.now());
+      } catch { triedAt.set(key, Date.now()); }
       await sleep(1100);
     }
   } finally { running = false; }
@@ -71,4 +89,4 @@ function startScheduler() {
   setInterval(tick, RETRY_MS).unref();
 }
 
-module.exports = { mapOrders, needsCoords, geocodeOrder, pendingCount, refreshOrderCoords, startScheduler };
+module.exports = { syncOpenOrderAddresses, mapOrders, needsCoords, geocodeOrder, pendingCount, refreshOrderCoords, startScheduler };
