@@ -101,6 +101,7 @@
       state = await req('GET', BASE);
       status(state.tours.length ? `${state.tours.filter(t => t.active).length} active${state.tours.filter(t => t.active).length > 1 ? 's' : ''} sur ${state.tours.length}` : '');
       renderTours(); await renderPlan();
+      if (window.TourForecast) window.TourForecast.refresh();
     } catch (err) { status(`Tournées indisponibles : ${err.message}`, true); }
   }
 
@@ -116,6 +117,7 @@
       errors[id] = err.message; status('Non enregistré', true);
     } finally { busy = false; }
     renderTours(); renderPlan();
+    if (window.TourForecast) window.TourForecast.refresh();
   }
 
   const tourOf = (el) => { const sec = el.closest('[data-tour]'); return sec ? state.tours.find(t => t.id === Number(sec.dataset.tour)) : null; };

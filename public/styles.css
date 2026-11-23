@@ -1007,3 +1007,81 @@ details.bon[open] .esp-chev{transform:rotate(180deg);}
 .ft-add select{padding:7px 10px;font-size:13px;}
 .ft-plan-bar input[type=date]{padding:6px 10px;font-size:13px;}
 .ft-row select:focus-visible,.ft-add select:focus-visible{outline:2px solid var(--amber);outline-offset:1px;}
+
+/* ---- Tournées fixes : prochains passages et capacité du camion ---- */
+.ft-fc{--v-ok:#1F7A52;--v-ok-bg:#E6F6EE;--v-ok-line:#BFE6D2;--v-juste:#8A5200;--v-juste-bg:#FFF1D6;--v-juste-line:#F1D08E;--v-depasse:#B3321F;--v-depasse-bg:#FDE8E5;--v-depasse-line:#F3B9B1;--v-inconnu:var(--steel);--v-inconnu-bg:var(--bg);--v-inconnu-line:var(--line);
+  border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:10px 14px;margin-bottom:14px;}
+.ft-fc summary{cursor:pointer;font-weight:600;font-size:13.5px;color:var(--ink);}
+.ft-fc summary span{font-weight:400;font-size:12px;color:var(--steel);margin-left:8px;}
+.ft-fc-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0;font-size:12.5px;color:var(--steel);}
+.ft-fc-bar select{border:1px solid var(--line);border-radius:4px;padding:6px 10px;font-family:inherit;font-size:13px;background:var(--bg);color:var(--ink);}
+.ft-fc-legend{display:inline-flex;gap:6px;flex-wrap:wrap;margin-left:auto;}
+.ft-badge{display:inline-flex;align-items:center;gap:5px;border-radius:10px;padding:2px 9px;font-size:11.5px;font-weight:600;border:1px solid;white-space:nowrap;}
+.ft-badge i{font-style:normal;font-weight:700;}
+.ft-badge.ok,.ft-chip.ok{color:var(--v-ok);background:var(--v-ok-bg);border-color:var(--v-ok-line);}
+.ft-badge.juste,.ft-chip.juste{color:var(--v-juste);background:var(--v-juste-bg);border-color:var(--v-juste-line);}
+.ft-badge.depasse,.ft-chip.depasse{color:var(--v-depasse);background:var(--v-depasse-bg);border-color:var(--v-depasse-line);}
+.ft-badge.inconnu,.ft-chip.inconnu{color:var(--v-inconnu);background:var(--v-inconnu-bg);border-color:var(--v-inconnu-line);}
+.ft-cal-head,.ft-cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;}
+.ft-cal-head span{font-size:11.5px;color:var(--steel);text-align:center;padding-bottom:4px;}
+.ft-cal-d{min-height:74px;border:1px solid var(--line);border-radius:5px;background:var(--bg);padding:4px 5px 5px;display:flex;flex-direction:column;gap:3px;min-width:0;}
+.ft-cal-d.past{background:transparent;border-style:dashed;opacity:.55;}
+.ft-cal-d.today{border-color:var(--brand);box-shadow:inset 0 0 0 1px var(--brand);}
+.ft-cal-n{display:flex;align-items:baseline;gap:4px;font-size:12px;color:var(--steel);}
+.ft-cal-n b{color:var(--ink);font-weight:600;}
+.ft-cal-n small{font-size:10.5px;}
+.ft-cal-wd{display:none;}
+.ft-chip{display:flex;align-items:center;gap:4px;width:100%;border:1px solid;border-radius:4px;padding:3px 5px;font:inherit;font-size:11.5px;line-height:1.25;text-align:left;cursor:pointer;min-width:0;}
+.ft-chip i{font-style:normal;font-weight:700;flex:0 0 auto;}
+.ft-chip-name{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ft-chip-pct{flex:0 0 auto;font-weight:600;}
+.ft-chip.sel{box-shadow:0 0 0 2px var(--ink);}
+.ft-chip:focus-visible{outline:2px solid var(--ink);outline-offset:1px;}
+.ft-fc-detail{margin-top:14px;}
+.ft-det{border:1px solid var(--line);border-left:4px solid var(--v-ok);border-radius:6px;background:var(--paper);padding:12px 14px;}
+.ft-det.juste{border-left-color:var(--v-juste);}
+.ft-det.depasse{border-left-color:var(--v-depasse);}
+.ft-det.inconnu{border-left-color:var(--steel-light);}
+.ft-det-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between;}
+.ft-det-head h5{margin:0;font-size:14.5px;font-weight:600;}
+.ft-det-head h5::first-letter{text-transform:uppercase;}
+.ft-det-sub{margin:4px 0 8px;font-size:12.5px;color:var(--steel);}
+.ft-det-lim{margin:0 0 8px;font-size:13px;font-weight:600;color:var(--ink);}
+.ft-det-basis{margin:0 0 10px;font-size:12.5px;color:var(--ink);max-width:80ch;}
+.ft-det-basis span{display:block;color:var(--steel);font-size:11.5px;margin-top:2px;}
+.ft-det-note,.ft-det-sug{margin:10px 0 0;font-size:12.5px;max-width:80ch;}
+.ft-det-sug{color:var(--ink);}
+.ft-g{margin:0 0 12px;max-width:560px;}
+.ft-g-top{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;}
+.ft-g-top span{color:var(--steel);}
+.ft-g-bar{position:relative;height:12px;border-radius:6px;background:var(--bg);border:1px solid var(--line);margin:4px 0 3px;overflow:visible;}
+.ft-g-fill{position:absolute;left:0;top:0;bottom:0;border-radius:6px 0 0 6px;}
+.ft-g-fill.ok{background:var(--v-ok);}
+.ft-g-fill.juste{background:#D98A00;}
+.ft-g-fill.depasse{background:var(--v-depasse);}
+.ft-g-typ,.ft-g-max,.ft-g-cap{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;}
+.ft-g-typ{background:#fff;top:0;bottom:0;box-shadow:0 0 0 1px rgba(22,50,79,.35);}
+.ft-g-max{background:var(--ink);opacity:.55;}
+.ft-g-cap{background:var(--ink);width:2px;}
+.ft-g-vals{font-size:12px;color:var(--steel);}
+.ft-g-vals b{color:var(--ink);font-weight:600;}
+.ft-g-note{font-size:11.5px;color:var(--v-depasse);margin-top:2px;}
+.ft-det-known{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);}
+.ft-det-known h6{margin:0 0 4px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.ft-det-known p{margin:0 0 8px;font-size:12.5px;}
+.ft-det-cl{margin-top:12px;font-size:12.5px;}
+.ft-det-cl summary{cursor:pointer;font-weight:600;color:var(--ink);}
+.ft-det-cl table{border-collapse:collapse;width:100%;max-width:640px;margin-top:8px;}
+.ft-det-cl th,.ft-det-cl td{text-align:left;padding:4px 8px;border-top:1px solid var(--line);font-weight:400;}
+.ft-det-cl thead th{font-weight:600;color:var(--steel);border-top:none;font-size:11.5px;}
+.ft-det-cl tbody th{font-weight:600;}
+@media (max-width:640px){
+  .ft-cal-head{display:none;}
+  .ft-cal{grid-template-columns:1fr;}
+  .ft-cal-d:not(.has){display:none;}
+  .ft-cal-d{min-height:0;flex-direction:row;flex-wrap:wrap;align-items:center;}
+  .ft-cal-n{flex:0 0 70px;}
+  .ft-cal-wd{display:inline;}
+  .ft-chip{flex:1 1 150px;width:auto;}
+  .ft-fc-legend{margin-left:0;}
+}

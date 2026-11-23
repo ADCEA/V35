@@ -5,10 +5,12 @@
 // DELETE /api/admin/logistics/tours/:id        suppression (les commandes qu'elle avait affectées redeviennent « non assigné »)
 // GET    /api/admin/logistics/tours/plan?date  ce qui roule un jour donné (par défaut demain) et les commandes des hôtels concernés
 // POST   /api/admin/logistics/tours/apply      affecte maintenant les commandes en attente à leur tournée
+// GET    /api/admin/logistics/tours/forecast?days  prochains passages + le camion sera-t-il assez grand (poids, volume, chariots), d'après l'historique
 const express = require('express');
 const db = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const ft = require('../utils/fixedTours');
+const { forecast } = require('../utils/tourForecast');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -119,6 +121,12 @@ router.get('/plan', (req, res) => {
       };
     }),
   });
+});
+
+// Prévision de charge : doit rester AVANT les routes /:id.
+router.get('/forecast', (req, res) => {
+  const days = Math.min(60, Math.max(7, parseInt(req.query.days, 10) || 28));
+  res.json(forecast({ days }));
 });
 
 router.post('/apply', (req, res) => {

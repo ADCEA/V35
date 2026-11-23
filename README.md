@@ -150,7 +150,18 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
   « Non assigné ») est définitif : l'automatisme ne le déplace plus (`orders.tour_manual`). Modifier, désactiver ou supprimer
   une tournée replace ses commandes (`orders.tour_id`). Un hôtel ne peut être que dans une tournée active par jour. Le
   planning d'un jour (demain par défaut) liste qui passe où, avec les commandes en cours de chaque hôtel.
-  API : `GET/POST /api/admin/logistics/tours`, `PUT/DELETE …/tours/:id`, `GET …/tours/plan?date=AAAA-MM-JJ`, `POST …/tours/apply`.
+  **Prochains passages** (au-dessus du planning) : calendrier des tournées à venir (2, 4 ou 8 semaines) où chaque passage est
+  noté *Large / Juste / Trop chargé* selon que le camion du chauffeur suffit en **poids** (charge utile réglée dans
+  Logistique : linge + chariots vides), en **volume** (volume intérieur du type de camion) et en **nombre de chariots**
+  (combien tiennent debout sur le plancher, hauteur comprise). L'estimation rejoue les 12 dernières semaines de livraisons
+  des hôtels de la tournée (chaque commande est rattachée au passage suivant) : charge normale (moyenne), forte (9 passages
+  sur 10) et pic. « Juste » dès 85 % de la capacité en charge forte ou si seul un pic isolé dépasse ; « Trop chargé » si la
+  charge normale ou forte dépasse. Le prochain passage ajoute les commandes déjà reçues. Le détail signale les articles sans
+  poids ni dimensions, les hôtels sans historique, l'absence de camion ou de chariot compatible, et propose les camions du
+  parc qui feraient mieux. Limites : la charge utile est un réglage unique (pas par camion) ; deux tournées du même
+  chauffeur le même jour sont évaluées séparément.
+  API : `GET/POST /api/admin/logistics/tours`, `PUT/DELETE …/tours/:id`, `GET …/tours/plan?date=AAAA-MM-JJ`, `POST …/tours/apply`,
+  `GET …/tours/forecast?days=28` (14 à 60 jours).
 - **Équipe** — collaborateurs rattachés à une BU ou à une machine, badgeuse de l'atelier, présence en direct et heures
   pointées par poste (voir « Équipe (RH) et badgeuse »).
 - **Statistiques** — un seul filtre de dates en haut de page pilote tout :
