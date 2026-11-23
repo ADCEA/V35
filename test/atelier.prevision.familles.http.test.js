@@ -9,7 +9,7 @@ const { startServer } = require('./helpers');
 const A = '/api/admin/atelier';
 const parisDate = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Europe/Paris' });
 const plus = (n) => parisDate(Date.now() + n * 86400000);
-let s, db, M, types, hotel, prog, sech3;
+let s, db, M, types, hotel, prog, sech4;
 const admin = (...a) => s.call(...a);
 const mach = (name) => M.find(m => m.name === name).id;
 const base = (extra = {}) => ({ day: plus(1), linenTypeId: types[0].id, clients: [{ clientId: hotel }], ...extra });
@@ -31,8 +31,8 @@ test.before(async () => {
   // cadences des sécheuses (les calandres ont déjà les leurs : 45 et 35 kg/h)
   await admin('PUT', `/api/admin/rh/machines/${mach('Séchoir 1')}`, { throughputKgh: 24 });
   await admin('PUT', `/api/admin/rh/machines/${mach('Séchoir 2')}`, { throughputKgh: 12 });
-  // une sécheuse sans cadence renseignée
-  sech3 = (await admin('POST', '/api/admin/rh/machines', { name: 'Séchoir 3', bu: 'sechage', capacityKg: 20 })).data.machine.id;
+  // une sécheuse sans capacité ni cadence
+  sech4 = (await admin('POST', '/api/admin/rh/machines', { name: 'Séchoir 4', bu: 'sechage' })).data.machine.id;
 });
 test.after(async () => { if (db) db.close(); if (s) await s.stop(); });
 
@@ -79,16 +79,19 @@ test('plusieurs machines par étape : durée du lavage, puis du séchage, puis d
   assert.deepEqual(l.lines.map(x => x.minutes), [110, 110, 110]);
   assert.equal(l.minutes, 110);
   assert.ok(l.lines.every(x => x.auto && x.source === 'programme'));
-  // séchage : au prorata des cadences (24 / 12 kg/h) → 60 / 30 kg, 150 min chacune : elles finissent ensemble
+  // séchage : seuls les 40 kg d'éponges et de divers passent au séchoir (le plat va en calandre) ; au prorata des cadences
+  // (24 / 12 kg/h) → 26,7 / 13,3 kg, environ 67 min chacune : elles finissent ensemble
   const d = p.stages.sechage;
-  assert.deepEqual(d.lines.map(x => x.weightKg), [60, 30]);
-  assert.deepEqual(d.lines.map(x => x.minutes), [150, 150]);
-  assert.equal(d.minutes, 150);
-  // finition : calandres à 45 et 35 kg/h → 50,6 / 39,4 kg, environ 67-68 min
+  assert.equal(d.routedKg, 40);
+  assert.deepEqual(d.lines.map(x => x.weightKg), [26.7, 13.3]);
+  assert.deepEqual(d.lines.map(x => x.minutes), [67, 67]);
+  assert.equal(d.minutes, 67);
+  // finition : seuls les 60 kg de plat (et de divers) passent en calandre, à 45 et 35 kg/h → 33,8 / 26,2 kg, 45 min chacune
   const fi = p.stages.finition;
-  assert.deepEqual(fi.lines.map(x => x.weightKg), [50.6, 39.4]);
-  assert.equal(fi.minutes, 68);
-  assert.deepEqual([p.minutes.lavage, p.minutes.sechage, p.minutes.finition, p.minutes.total], [110, 150, 68, 328]);
+  assert.equal(fi.routedKg, 60);
+  assert.deepEqual(fi.lines.map(x => x.weightKg), [33.8, 26.2]);
+  assert.equal(fi.minutes, 45);
+  assert.deepEqual([p.minutes.lavage, p.minutes.sechage, p.minutes.finition, p.minutes.total], [110, 67, 45, 222]);
   assert.equal(p.incomplete, false);
   assert.deepEqual(p.missingStages, []);
   assert.equal(p.families.length, 4);
@@ -129,16 +132,17 @@ test('contrôles des machines prévues', async () => {
 
 test('durée inconnue ou tirée de l\'historique de la machine : on le dit', async () => {
   const est = async (body) => (await admin('POST', `${A}/forecasts/estimate`, body)).data.plan;
-  // sécheuse sans cadence ni historique
-  let p = await est({ weightKg: 30, machines: { sechage: [{ machineId: sech3 }] } });
+  // sécheuse sans capacité, sans cadence ni historique : rien à calculer
+  let p = await est({ weightKg: 30, machines: { sechage: [{ machineId: sech4 }] } });
   assert.equal(p.stages.sechage.lines[0].minutes, null);
   assert.equal(p.incomplete, true);
   assert.equal(p.minutes.total, 0);
-  assert.ok(p.warnings.some(w => /Séchoir 3/.test(w) && /cadence/i.test(w)), p.warnings.join(' | '));
-  // laveuse sans programme ni historique
+  assert.ok(p.warnings.some(w => /Séchoir 4/.test(w) && /cadence/i.test(w)), p.warnings.join(' | '));
+  // laveuse sans programme : le cycle de lavage de l'atelier (50 min) sert, sans avertissement
   p = await est({ weightKg: 20, machines: { lavage: [{ machineId: mach('Laveuse 2') }] } });
-  assert.equal(p.stages.lavage.lines[0].minutes, null);
-  assert.ok(p.warnings.some(w => /programme/i.test(w)));
+  assert.equal(p.stages.lavage.lines[0].minutes, 50);
+  assert.equal(p.stages.lavage.lines[0].source, 'cycle');
+  assert.ok(!p.warnings.some(w => /programme/i.test(w)), p.warnings.join(' | '));
   // poids du lot inconnu : répartition automatique impossible
   p = await est({ machines: { lavage: [{ machineId: mach('Laveuse 2'), programId: prog }] } });
   assert.equal(p.stages.lavage.lines[0].weightKg, null);
@@ -148,9 +152,9 @@ test('durée inconnue ou tirée de l\'historique de la machine : on le dit', asy
   const lot = Number(db.prepare(`INSERT INTO lots (code, day, status, created_at) VALUES ('T-HIST', ?, 'termine', datetime('now'))`).run(plus(-3)).lastInsertRowid);
   for (let i = 0; i < 3; i += 1) {
     const start = Date.now() - (3 + i) * 3600e3 * 24;
-    db.prepare(`INSERT INTO lot_steps (lot_id, stage, machine_id, weight_kg, started_at, ended_at) VALUES (?, 'sechage', ?, 15, ?, ?)`).run(lot, sech3, new Date(start).toISOString(), new Date(start + 3600e3).toISOString());
+    db.prepare(`INSERT INTO lot_steps (lot_id, stage, machine_id, weight_kg, started_at, ended_at) VALUES (?, 'sechage', ?, 15, ?, ?)`).run(lot, sech4, new Date(start).toISOString(), new Date(start + 3600e3).toISOString());
   }
-  p = await est({ weightKg: 30, machines: { sechage: [{ machineId: sech3 }] } });
+  p = await est({ weightKg: 30, machines: { sechage: [{ machineId: sech4 }] } });
   assert.equal(p.stages.sechage.lines[0].minutes, 120);
   assert.equal(p.stages.sechage.lines[0].source, 'historique');
   assert.equal(p.incomplete, false);
@@ -163,10 +167,10 @@ test('enregistrement, modification, ancienne laveuse prévue, recopie', async ()
   const f = r.data.forecast;
   assert.equal(f.machineName, 'Laveuse 1', 'la première laveuse prévue reste la laveuse du lot');
   assert.equal(f.machines.length, 7);
-  assert.equal(f.plan.minutes.total, 328);
+  assert.equal(f.plan.minutes.total, 222);
   // lu dans l'écran du jour
   const day1 = (await admin('GET', `${A}/forecast?day=${day}`)).data.forecasts.find(x => x.id === f.id);
-  assert.equal(day1.plan.minutes.total, 328);
+  assert.equal(day1.plan.minutes.total, 222);
   assert.equal(day1.plan.stages.sechage.lines.length, 2);
 
   // changer les machines remplace toutes les lignes ; le poids reste
@@ -196,7 +200,7 @@ test('enregistrement, modification, ancienne laveuse prévue, recopie', async ()
   assert.equal(copied.length, 2);
   const withFam = copied.find(x => x.families.length);
   assert.equal(withFam.weightKg, 90);
-  assert.equal(withFam.plan.minutes.total, 328);
+  assert.equal(withFam.plan.minutes.total, 222);
   assert.ok(g.data.forecast.id);
 
   // supprimer la prévision supprime ses lignes

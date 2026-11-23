@@ -4,6 +4,7 @@ const db = require('../db');
 const rh = require('./rh');
 const rhStore = require('./rhStore');
 const { buildHours } = require('./rhHours');
+const washPlan = require('./washPlan');
 
 const STAGES = { lavage: 'Lavage', sechage: 'Séchage', finition: 'Finition' };
 const STAGE_BU = { lavage: 'lavage', sechage: 'sechage', finition: 'finition' };
@@ -30,9 +31,11 @@ function parseKg(v, label = 'Le poids') {
 function getSettings() {
   const r = Object.fromEntries(db.prepare('SELECT key, value FROM prod_settings').all().map(x => [x.key, x.value]));
   const num = (k) => (r[k] === undefined || r[k] === '' || !Number.isFinite(Number(r[k])) ? null : Number(r[k]));
+  const cyc = washPlan.cycles();
   return {
     targetCentsPerKg: num('target_cost_cents_per_kg'), waterCentsPerM3: num('water_price_cents_per_m3'), energyCentsPerKwh: num('energy_price_cents_per_kwh'),
     openFrom: r.open_from || '05:00', openTo: r.open_to || '21:00', tolerancePct: num('weight_tolerance_pct') ?? 5,
+    washCycleMin: cyc.washMin, dryCycleMin: cyc.dryMin,
   };
 }
 /** Réglages en euros côté interface (objectif €/kg, eau €/m³, énergie €/kWh) ; chaîne vide = non renseigné. */
@@ -58,6 +61,16 @@ function saveSettings(b) {
     if (!Number.isFinite(n) || n < 0 || n > 50) throw bad('Tolérance de poids invalide (0 à 50 %).');
     up.run('weight_tolerance_pct', String(n));
   }
+  // durée d'un cycle de lavage / de séchage, en minutes entières ; vide = valeur par défaut (50 et 30)
+  const cycle = (v, key, label) => {
+    if (v === undefined) return;
+    if (v === '' || v === null) { db.prepare('DELETE FROM prod_settings WHERE key = ?').run(key); return; }
+    const n = Number(String(v).replace(',', '.'));
+    if (!Number.isFinite(n) || n < washPlan.CYCLE_RANGE.min || n > washPlan.CYCLE_RANGE.max) throw bad(`${label} invalide (${washPlan.CYCLE_RANGE.min} à ${washPlan.CYCLE_RANGE.max} minutes).`);
+    up.run(key, String(Math.round(n)));
+  };
+  cycle(b.washCycleMin, 'wash_cycle_min', 'Durée du cycle de lavage');
+  cycle(b.dryCycleMin, 'dry_cycle_min', 'Durée du cycle de séchage');
   return getSettings();
 }
 

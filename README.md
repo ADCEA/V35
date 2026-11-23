@@ -705,7 +705,8 @@ gardé 90 s en mémoire du navigateur seulement ; 5 mauvais codes bloquent (mêm
 *Lots* (recherche par période, statut, client), *Machines* (30 jours : passages, kilos, charge moyenne, utilisation, cadence réelle,
 arrêts), *Heures* (par BU et par poste : heures, kilos, kg/h, coût, coût au kilo), *Tableau de bord* (coût au kilo comparé à
 l'objectif, kilos par jour, main-d'œuvre par étape, utilisation, kilos par type de linge et par client), *Réglages* (objectif, prix
-de l'eau et de l'énergie, tolérance de poids, horaires d'ouverture, programmes de lavage, types de linge). La cadence (kg/h) des
+de l'eau et de l'énergie, tolérance de poids, horaires d'ouverture, **durée d'un cycle de lavage (50 min) et de séchage (30 min)**,
+programmes de lavage, types de linge). La cadence (kg/h) des
 calandres se règle dans Équipe → Machines (départ : 45 kg/h pour 320 cm, 35 kg/h pour 250 cm).
 
 **Prévision de production** (onglet *Prévision*) : l'équipe saisit à l'avance les lots d'un jour à venir (jusqu'à 60 jours), par exemple
@@ -725,11 +726,16 @@ plus. API : `GET /api/admin/atelier/forecast?day=`, `POST/PUT/DELETE …/forecas
 on affecte **plusieurs machines** (`lot_forecast_machines`, 6 au plus par étape, une fois chacune) ; kilos laissés vides = part automatique du
 poids restant, répartie au prorata de la capacité des laveuses ou de la cadence des sécheuses et des machines de finition (les machines d'une
 étape finissent ainsi ensemble). Durées : lavage = passages (kilos ÷ capacité, arrondi au-dessus — une machine peut donc recevoir plus que sa
-capacité, elle enchaîne les charges) × durée du programme ; séchage et finition = kilos ÷ cadence (kg/h). Les machines d'une même étape
+capacité, elle enchaîne les charges) × durée du cycle : celle du programme choisi, à défaut le **cycle de lavage de l'atelier (50 min,
+Réglages)** ; séchage = cadence (kg/h) de la fiche machine si elle existe, sinon charges × **cycle de séchage (30 min, Réglages)** ;
+finition = kilos ÷ cadence (kg/h), à défaut la médiane des passages terminés de la machine sur 90 jours (3 au moins). Sans rien de tout cela
+la ligne est « durée inconnue » et le total est marqué « au moins ». **Chemin des pièces** (`ROUTES` dans `src/utils/washPlan.js`) : quand le
+lot est détaillé par type de pièce, chaque étape ne compte que les kilos qui y passent — le **plat (grand et petit) va du lavage à la
+calandre sans séchoir**, les **éponges** vont au séchoir (pas en calandre), « divers » passe partout (hypothèse prudente) ; un lot saisi
+avec son seul poids passe tout entier par chaque étape. Les kilos saisis à la main sont comparés aux kilos de l'étape, et une étape où
+aucune pièce ne passe est signalée (durée nulle). Les machines d'une même étape
 travaillent en même temps (l'étape dure autant que la plus longue), les étapes s'enchaînent : **total = lavage + séchage + finition**
-(estimation prudente, sans chevauchement des charges ; une étape sans machine n'est pas comptée). Sans programme ou sans cadence renseignés,
-la médiane des passages terminés de la machine sur 90 jours est utilisée (3 passages au moins), sinon la ligne est « durée inconnue » et le
-total est marqué « au moins ». Le formulaire recalcule en direct (`POST …/forecasts/estimate`, rien n'est enregistré) ; les cartes de la liste
+(estimation prudente, sans chevauchement des charges ; une étape sans machine n'est pas comptée). Le formulaire recalcule en direct (`POST …/forecasts/estimate`, rien n'est enregistré) ; les cartes de la liste
 montrent les types de pièces et « Lavage → Séchage → Finition ». Une prévision ne réserve toujours aucune machine. Au lancement, on démarre
 la **première charge de la première laveuse** prévue (au plus sa capacité, programme repris) ; les kilos des clients portent sur tout le lot, et
 les autres charges se lancent ensuite passage par passage. L'ancienne saisie d'une seule laveuse (`machineId`, `programId`) reste acceptée
@@ -1225,7 +1231,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (454 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (462 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 
