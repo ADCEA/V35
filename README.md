@@ -135,6 +135,9 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
   livraison validée. Fond de carte OpenStreetMap, tracés routiers OSRM (`ROAD_ROUTING=off` pour les désactiver : lignes
   droites), adresses géocodées en arrière-plan par Nominatim. **Trafic en temps réel** (bouton « Trafic » de la carte et
   durée avec trafic par tournée) : voir « Trafic en temps réel (TomTom) » plus bas ; sans clé TomTom, rien ne change.
+  **Fond de carte** : Plan (OpenStreetMap), Plan IGN ou Satellite (photos aériennes IGN, sans clé, via la Géoplateforme
+  `data.geopf.fr`) ; le choix est retenu dans le navigateur, et si un fond ne s'affiche pas du tout la carte revient au plan avec un message.
+  Chaque fond doit avoir son serveur dans `img-src` de la politique de contenu (`src/middleware/security.js`) : un test le vérifie.
 - **Non-conformités** — dans l'espace client, onglet Livraisons : « Signaler un problème » sur une livraison (il manque du
   linge, linge en trop, sale, abîmé, autre), avec les articles et quantités concernés et un commentaire. L'équipe est
   prévenue (WhatsApp si configuré, et dans la discussion de la commande), retrouve les signalements dans l'onglet

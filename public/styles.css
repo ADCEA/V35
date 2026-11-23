@@ -895,6 +895,13 @@ details.bon[open] .esp-chev{transform:rotate(180deg);}
 .tm-pop{font-size:12.5px;line-height:1.45;}
 .tm-mute{color:var(--steel);font-size:11.5px;}
 .tm-ok{color:var(--teal);}
+/* fond de carte */
+.tm-basemaps{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--paper);}
+.tm-basemaps button{all:unset;box-sizing:border-box;cursor:pointer;padding:6px 10px;font-size:11px;line-height:1.2;color:var(--ink);border-right:1px solid var(--line);}
+.tm-basemaps button:last-child{border-right:0;}
+.tm-basemaps button:hover{background:var(--bg);}
+.tm-basemaps button[aria-pressed="true"]{background:var(--ink);color:#fff;}
+.tm-basemaps button:focus-visible{outline:2px solid var(--brand);outline-offset:-2px;}
 /* trafic en temps réel (couche TomTom, durées avec trafic) */
 .tm-traffic-btn[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink);}
 .tm-tnote{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 0;font-size:11.5px;color:var(--steel);}

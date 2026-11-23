@@ -432,6 +432,11 @@
             <div class="tm-card-head">
               <h4 class="card-subhead">Carte des tournées</h4>
               <span class="tm-status" id="tours-status" role="status"></span>
+              <div class="tm-basemaps" id="tours-basemaps" role="group" aria-label="Fond de carte">
+                <button type="button" data-basemap="plan" aria-pressed="true">Plan</button>
+                <button type="button" data-basemap="ign" aria-pressed="false">Plan IGN</button>
+                <button type="button" data-basemap="sat" aria-pressed="false">Satellite</button>
+              </div>
               <button class="btn-secondary tm-traffic-btn" id="tours-traffic" type="button" aria-pressed="false" hidden style="width:auto;padding:6px 10px;font-size:11px;" title="Affiche la vitesse de circulation en temps réel sur la carte">Trafic</button>
               <button class="btn-secondary" id="tours-refit" type="button" style="width:auto;padding:6px 10px;font-size:11px;">Tout afficher</button>
               <button class="btn-secondary" id="tours-refresh" type="button" style="width:auto;padding:6px 10px;font-size:11px;">Actualiser</button>
