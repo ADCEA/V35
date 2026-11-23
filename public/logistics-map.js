@@ -8,6 +8,15 @@
   let last = null; const markers = new Map();   // orderId -> marqueur d'arrêt
   let focus = null;                              // chauffeur dont on suit la tournée (null = toutes)
 
+  // ---- trafic en temps réel : tout passe par le serveur (/api/admin/traffic), la page ne connaît aucune clé ----
+  const TRAFFIC = { status: null, on: false, layer: null, eta: new Map(), loading: false, errTimer: null, restored: false };
+  const ETA_TTL_MS = 5 * 60 * 1000;   // un itinéraire n'est recalculé qu'après 5 min (chaque calcul compte dans le plafond quotidien)
+  const FATAL = ['budget', 'key_rejected', 'paused', 'disabled', 'key_invalid', 'bad_config'];
+  const remember = {
+    get() { try { return localStorage.getItem('cezanne.traffic') === '1'; } catch { return false; } },
+    set(v) { try { localStorage.setItem('cezanne.traffic', v ? '1' : '0'); } catch { /* pas de stockage : le choix n'est pas retenu */ } },
+  };
+
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const hhmm = (iso) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
   const hhmmss = (d) => d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -39,7 +48,109 @@
       maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
     }).addTo(map);
     layer = L.layerGroup().addTo(map);
+    map.on('click', onMapClick);
     return true;
+  }
+
+  function renderTrafficNote() {
+    const el = document.getElementById('tours-traffic-note');
+    if (!el) return;
+    const st = TRAFFIC.status;
+    if (!st || !st.enabled || !TRAFFIC.on) { el.hidden = true; el.textContent = ''; return; }
+    el.hidden = false;
+    if (st.message) { el.className = 'tm-tnote bad'; el.textContent = st.message; return; }
+    el.className = 'tm-tnote';
+    el.innerHTML = `<span>Circulation en direct :</span><span>fluide</span><i class="tm-grad" aria-hidden="true"></i><span>bouché</span>
+      <span>Cliquez sur la carte pour la vitesse à cet endroit.</span>
+      <span class="tm-mute">Aujourd'hui : ${esc(st.usage.tiles.used)}/${esc(st.usage.tiles.limit)} tuiles, ${esc(st.usage.api.used)}/${esc(st.usage.api.limit)} calculs.</span>`;
+  }
+
+  async function loadTrafficStatus() {
+    try {
+      const res = await fetch('/api/admin/traffic/status', { credentials: 'same-origin' });
+      TRAFFIC.status = res.ok ? await res.json() : null;
+    } catch { TRAFFIC.status = null; }
+    const btn = document.getElementById('tours-traffic');
+    const available = !!(TRAFFIC.status && TRAFFIC.status.enabled);
+    if (btn) btn.hidden = !available;
+    if (available && !TRAFFIC.restored) { TRAFFIC.restored = true; if (remember.get()) setTraffic(true); }
+    if (!available && TRAFFIC.on) setTraffic(false);
+    renderTrafficNote();
+  }
+
+  function setTraffic(on) {
+    TRAFFIC.on = !!on && !!(TRAFFIC.status && TRAFFIC.status.enabled);
+    const btn = document.getElementById('tours-traffic');
+    if (btn) btn.setAttribute('aria-pressed', String(TRAFFIC.on));
+    if (map) {
+      if (TRAFFIC.on && !TRAFFIC.layer) {
+        TRAFFIC.layer = L.tileLayer('/api/admin/traffic/tiles/relative0/{z}/{x}/{y}.png', {
+          minZoom: 6, maxZoom: 19, maxNativeZoom: 18, opacity: 0.85, zIndex: 5,
+          attribution: '© <a href="https://www.tomtom.com/" target="_blank" rel="noopener">TomTom</a>',
+        });
+        // Tuiles refusées (clé, plafond, panne) : on relit l'état pour dire pourquoi au lieu de laisser une carte sans couche.
+        TRAFFIC.layer.on('tileerror', () => { clearTimeout(TRAFFIC.errTimer); TRAFFIC.errTimer = setTimeout(loadTrafficStatus, 1500); });
+      }
+      if (TRAFFIC.on) TRAFFIC.layer.addTo(map); else if (TRAFFIC.layer) map.removeLayer(TRAFFIC.layer);
+    }
+    renderTrafficNote();
+    if (TRAFFIC.on) loadEtas(); else if (last) side(last);
+  }
+
+  async function onMapClick(e) {
+    if (!TRAFFIC.on) return;
+    const at = e.latlng.wrap();
+    const pop = L.popup({ maxWidth: 240 }).setLatLng(at).setContent('<div class="tm-speed tm-mute">Mesure de la vitesse…</div>').openOn(map);
+    try {
+      const res = await fetch(`/api/admin/traffic/speed?lat=${at.lat.toFixed(5)}&lng=${at.lng.toFixed(5)}`, { credentials: 'same-origin' });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `Erreur ${res.status}`);
+      const pct = d.ratio != null ? Math.round(d.ratio * 100) : null;
+      pop.setContent(d.closed ? '<div class="tm-speed"><b>Route fermée</b></div>'
+        : `<div class="tm-speed"><b>${esc(d.currentKmh)} km/h</b> en ce moment<br><span class="tm-mute">Habituellement ${esc(d.freeFlowKmh)} km/h${pct != null ? ` · ${esc(pct)} % de la normale` : ''}</span></div>`);
+    } catch (err) { pop.setContent(`<div class="tm-speed tm-mute">${esc(err.message)}</div>`); }
+  }
+
+  /** Heures de passage avec le trafic du moment, par chauffeur (rechargées au plus toutes les 5 min). */
+  async function loadEtas() {
+    if (!TRAFFIC.on || !last || TRAFFIC.loading) return;
+    const due = last.drivers.filter(d => d.stats.total > d.stats.done).filter(d => { const e = TRAFFIC.eta.get(d.id); return !e || Date.now() - e.at > ETA_TTL_MS; });
+    if (!due.length) return;
+    TRAFFIC.loading = true;
+    try {
+      for (let i = 0; i < due.length; i++) {
+        const d = due[i]; const e = { at: Date.now() };
+        try {
+          const res = await fetch(`/api/admin/traffic/driver/${encodeURIComponent(d.id)}/eta`, { credentials: 'same-origin' });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) { e.error = data.error || `Erreur ${res.status}`; e.fatal = FATAL.includes(data.code); }
+          else { e.data = data; e.byOrder = new Map(); for (const st of data.stops) for (const it of st.items || []) if (it.orderId != null) e.byOrder.set(it.orderId, st); }
+        } catch { e.error = 'Trafic indisponible.'; }
+        TRAFFIC.eta.set(d.id, e);
+        if (e.fatal) { for (const rest of due.slice(i + 1)) TRAFFIC.eta.set(rest.id, { at: e.at, error: e.error, fatal: true }); break; }   // inutile d'insister
+      }
+    } finally { TRAFFIC.loading = false; }
+    if (last) side(last);
+    loadTrafficStatus();   // met à jour le compteur d'appels du jour
+  }
+
+  function etaHtml(d) {
+    if (!TRAFFIC.on || d.stats.total <= d.stats.done) return '';
+    const e = TRAFFIC.eta.get(d.id);
+    if (!e) return '<div class="tm-eta tm-mute">Calcul du trafic…</div>';
+    if (e.error) return e.fatal ? `<div class="tm-eta bad">${esc(e.error)}</div>` : '';
+    const x = e.data;
+    if (!x.stops.length || !x.totals) return x.note ? `<div class="tm-eta">${esc(x.note)}</div>` : '';
+    const lastStop = x.stops[x.stops.length - 1]; const t = x.totals;
+    return `<div class="tm-eta" title="Calculé à ${esc(hhmmss(new Date(e.at)))} avec le trafic du moment. Conduite seule : le temps passé chez chaque hôtel n'est pas compté.">
+      Dernier arrêt vers <b>${esc(hhmm(lastStop.etaAt))}</b>${x.backToDepot ? ` · retour au dépôt <b>${esc(hhmm(x.backToDepot.etaAt))}</b>` : ''}<br>
+      ${esc(duration(t.driveMin))} de route${t.delayMin >= 2 ? ` <span class="late">dont +${esc(t.delayMin)} min de trafic</span>` : ' · circulation fluide'}</div>`;
+  }
+
+  function stopEta(d, s) {
+    const e = TRAFFIC.on ? TRAFFIC.eta.get(d.id) : null;
+    const st = e && e.byOrder ? e.byOrder.get(s.orderId) : null;
+    return st ? `<small class="eta">≈ ${esc(hhmm(st.etaAt))}</small>` : '<small>à faire</small>';
   }
 
   function stopPopup(d, s) {
@@ -119,12 +230,13 @@
           </button>
           <div class="tm-bar" aria-hidden="true"><i style="width:${pct}%;background:${esc(d.color)}"></i></div>
           <div class="tm-where">${where}</div>
+          ${etaHtml(d)}
           ${timing ? `<div class="tm-timing">${timing}</div>` : ''}
           ${d.stops.length ? `<ol class="tm-stops">${d.stops.map((s, i) => `
             <li class="${s.status}" data-order="${s.orderId}">
               <span class="tm-n">${s.status === 'delivered' ? '✓' : esc(s.sequence ?? i + 1)}</span>
               <span class="tm-s">${esc(s.societe)}</span>
-              <span class="tm-t">${s.status === 'delivered' ? `${hhmm(s.deliveredAt)}${s.minutesSincePrev != null ? `<small>+${duration(s.minutesSincePrev)}</small>` : ''}` : '<small>à faire</small>'}</span>
+              <span class="tm-t">${s.status === 'delivered' ? `${hhmm(s.deliveredAt)}${s.minutesSincePrev != null ? `<small>+${duration(s.minutesSincePrev)}</small>` : ''}` : stopEta(d, s)}</span>
             </li>`).join('')}</ol>` : '<div class="tm-none">Aucun arrêt aujourd\'hui.</div>'}
           ${lost ? `<div class="tm-lost">${lost} adresse${lost > 1 ? 's' : ''} pas encore localisée${lost > 1 ? 's' : ''}.</div>` : ''}
         </section>`;
@@ -149,6 +261,7 @@
       const data = await res.json();
       last = data;
       draw(data); side(data);
+      if (TRAFFIC.on) loadEtas();
       status(`Mis à jour à ${hhmmss(new Date())}${data.geocoding ? ' · localisation des adresses en cours…' : ''}`);
     } catch (err) {
       status(`Carte indisponible : ${err.message}`, true);
@@ -158,6 +271,7 @@
   function start() {
     if (!document.getElementById('tours-map')) return;
     map && setTimeout(() => map.invalidateSize(), 0);
+    loadTrafficStatus();
     refresh();
     clearInterval(timer);
     timer = setInterval(() => { if (!document.hidden) refresh(); }, POLL_MS);
@@ -179,6 +293,7 @@
     }
     if (e.target.closest('#tours-refit')) { firstFit = true; focus = null; if (last) { draw(last); side(last); } }
     if (e.target.closest('#tours-refresh')) refresh();
+    if (e.target.closest('#tours-traffic')) { const on = !TRAFFIC.on; remember.set(on); setTraffic(on); }
   });
 
   window.ToursMap = { show: start, refresh };

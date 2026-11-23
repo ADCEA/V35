@@ -1366,6 +1366,7 @@ const SEC_EVENTS = {
   admin_blocked: 'Connexion bloquée (trop d\'essais)', admin_logout: 'Déconnexion', admin_password_changed: 'Mot de passe changé',
   admin_setup: 'Mot de passe créé', admin_2fa_enabled: 'Double authentification activée', admin_2fa_disabled: 'Double authentification désactivée',
   admin_2fa_recovery_renewed: 'Nouveaux codes de secours', admin_reauth_fail: 'Ressaisie refusée', admin_password_check_fail: 'Ancien mot de passe incorrect',
+  traffic_key_rejected: 'Clé TomTom refusée (trafic suspendu)', traffic_budget_reached: 'Plafond quotidien TomTom atteint',
   claude_token_created: 'Accès Claude créé', claude_token_revoked: 'Accès Claude révoqué', claude_token_revoked_all: 'Tous les accès Claude révoqués', claude_access: 'Accès Claude utilisé',
 };
 const secNote = (id, msg, bad) => { const n = document.getElementById(id); if (!n) return; n.classList.toggle('error', Boolean(bad)); n.textContent = msg; n.classList.add('show'); };

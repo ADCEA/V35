@@ -133,7 +133,8 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
   (bouton sur son lien, jamais automatique, seule la dernière position est conservée et elle est effacée à l'arrêt ou à
   la dernière livraison) : le camion est alors à cette position tant qu'elle date de moins de 10 min, sinon à sa dernière
   livraison validée. Fond de carte OpenStreetMap, tracés routiers OSRM (`ROAD_ROUTING=off` pour les désactiver : lignes
-  droites), adresses géocodées en arrière-plan par Nominatim.
+  droites), adresses géocodées en arrière-plan par Nominatim. **Trafic en temps réel** (bouton « Trafic » de la carte et
+  durée avec trafic par tournée) : voir « Trafic en temps réel (TomTom) » plus bas ; sans clé TomTom, rien ne change.
 - **Non-conformités** — dans l'espace client, onglet Livraisons : « Signaler un problème » sur une livraison (il manque du
   linge, linge en trop, sale, abîmé, autre), avec les articles et quantités concernés et un commentaire. L'équipe est
   prévenue (WhatsApp si configuré, et dans la discussion de la commande), retrouve les signalements dans l'onglet
@@ -249,6 +250,7 @@ ne permet pas d'attacher de disque persistant — à éviter pour un usage réel
    - `SESSION_SECRET` — une chaîne aléatoire longue
    - `DATA_DIR` — le chemin du disque monté, ex. `/var/data`
    - les variables `SMTP_*` si vous voulez l'envoi réel des bons de livraison
+   - `TOMTOM_API_KEY` si vous voulez le trafic en temps réel (voir « Trafic en temps réel (TomTom) »)
 5. Une fois le service en ligne, allez dans **Settings → Custom Domains**,
    ajoutez votre (sous-)domaine, puis créez l'enregistrement DNS demandé
    (CNAME pour un sous-domaine type `commande.votredomaine.fr` — c'est
@@ -926,6 +928,55 @@ juste en dessous.
 Réglages → « Sécurité » affiche l'adresse que le serveur voit : elle doit être **la vôtre**, pas celle d'un relais (Cloudflare) ; sinon,
 ajustez `TRUST_PROXY`.
 Les jetons d'API des hôtels (`/api/v1`) sont encore stockés en clair : à passer en empreinte dans une prochaine étape.
+
+### Trafic en temps réel (TomTom)
+
+Optionnel : sans clé, le bouton « Trafic » n'apparaît pas et le reste de l'application est inchangé.
+
+**Ce que ça apporte** (Logistique → carte des tournées, et tournées fixes) :
+- bouton **Trafic** : couche de vitesse de circulation en direct sur la carte (vert = fluide, rouge = bouché), mémorisée dans
+  le navigateur ; **un clic sur la carte** donne la vitesse actuelle et la vitesse habituelle de la route la plus proche ;
+- sous chaque chauffeur : l'heure estimée de **chaque arrêt restant**, du dernier arrêt et du retour au dépôt, avec le
+  retard dû au trafic (« dont +11 min de trafic »). Départ de la position partagée du livreur (si elle a moins de 10 min), sinon
+  de sa dernière livraison, sinon du dépôt. Recalculé au plus toutes les 5 min ;
+- dans chaque **tournée fixe** : « Durée avec le trafic » pour une date et une heure de départ du dépôt (le prochain jour de
+  passage et 7 h sont proposés) : heure de passage chez chaque hôtel et retour. Pour un départ à venir, TomTom donne le trafic
+  prévu à cette heure ; si l'heure est passée, le calcul part de maintenant. Les adresses viennent des dernières commandes
+  de chaque hôtel (un hôtel jamais localisé est signalé et laissé de côté). Conduite seule : le temps passé chez chaque hôtel
+  n'est pas compté.
+
+**Mise en place**
+1. Créez un compte sur developer.tomtom.com et une clé d'API. Dans l'espace TomTom, n'activez sur cette clé que les services
+   utilisés (Traffic API et Routing API), et réglez si possible une alerte de consommation.
+2. Sur Render : *Environment* → ajoutez `TOMTOM_API_KEY` (la clé), puis redéployez. **Ne l'écrivez jamais dans le code, dans
+   un message ou dans un fichier du dépôt** : elle ne doit exister que dans cette variable (et dans votre `.env` local, qui n'est
+   pas versionné).
+3. Réglages facultatifs : `TOMTOM_REQUESTS_PER_DAY` (1 500 : itinéraires et vitesses) et `TOMTOM_TILES_PER_DAY` (15 000 : tuiles de
+   la couche) — à ajuster selon l'offre de votre compte TomTom ; `TOMTOM_TRAVEL_MODE` (`car`, `van` ou `truck`, défaut `car`) ;
+   `TRAFFIC=off` coupe tout sans retirer la clé.
+
+**Sécurité** (la clé se paie à l'usage et TomTom l'attend dans l'adresse de chaque requête, d'où ces précautions)
+- la clé reste **sur le serveur** : le navigateur ne parle qu'à `/api/admin/traffic/*` (réservé à l'administrateur connecté,
+  comme tout `/api/admin`) ; les tuiles de la couche sont relayées par le serveur, donc la politique de contenu du site
+  **n'est pas ouverte** à TomTom et aucun fichier de la page ne contient la clé ni l'adresse de TomTom ;
+- `GET /api/admin/traffic/status` ne renvoie jamais la clé : seulement « activé ou non », la raison d'une panne et le compteur d'appels du jour ;
+- la page n'envoie **aucune coordonnée** à calculer, seulement un numéro de chauffeur ou de tournée : le serveur lit dépôt et
+  adresses dans sa base. La vitesse en un point et les tuiles sont limitées à la France métropolitaine et à la Corse ; tuiles
+  seulement aux zooms 6 à 18, style choisi dans une liste ; chiffres et dates strictement contrôlés avant toute requête ;
+- adresse de TomTom **fixe** (seule la variable `TOMTOM_BASE_URL`, réservée aux tests, peut la remplacer : https obligatoire,
+  http seulement vers la machine même en test) ; redirections jamais suivies ; délai de 6 s, réponse limitée à 1,5 Mo, tuile
+  vérifiée comme image PNG avant d'être gardée ou servie ;
+- **plafond quotidien** d'appels réellement envoyés (jour UTC : remise à zéro à 1 h ou 2 h du matin à Paris), conservé en base (il
+  survit aux redémarrages) : une fois atteint, plus rien ne part et la carte l'indique. Les réponses sont gardées en mémoire (tuiles 2 min, vitesses 1 min, itinéraires 5 min), les
+  demandes identiques simultanées sont regroupées ; cadence limitée par session (900 tuiles/min, 40 calculs/min) ;
+- **coupe-circuit** : clé refusée (401/403) → suspension 30 min et ligne « Clé TomTom refusée » dans Réglages → Sécurité ;
+  trop de demandes (429) ou 5 pannes de suite → pause de 2 min ; plafond atteint → ligne « Plafond quotidien TomTom atteint » ;
+- tout texte d'erreur est **nettoyé de la clé** avant d'être écrit dans un journal, et les erreurs renvoyées à la page sont des
+  phrases fixes (jamais l'adresse appelée) ;
+- clé au mauvais format (autre chose que 16 à 128 lettres, chiffres, `_`, `-`) : trafic désactivé, et la clé n'est jamais répétée.
+
+Si la clé a fuité (message, capture d'écran, dépôt) : la **révoquer dans l'espace TomTom** et en créer une autre ; la changer
+sur Render suffit ensuite.
 
 ### Accès Claude (lecture seule)
 

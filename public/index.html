@@ -431,6 +431,7 @@
             <div class="tm-card-head">
               <h4 class="card-subhead">Carte des tournées</h4>
               <span class="tm-status" id="tours-status" role="status"></span>
+              <button class="btn-secondary tm-traffic-btn" id="tours-traffic" type="button" aria-pressed="false" hidden style="width:auto;padding:6px 10px;font-size:11px;" title="Affiche la vitesse de circulation en temps réel sur la carte">Trafic</button>
               <button class="btn-secondary" id="tours-refit" type="button" style="width:auto;padding:6px 10px;font-size:11px;">Tout afficher</button>
               <button class="btn-secondary" id="tours-refresh" type="button" style="width:auto;padding:6px 10px;font-size:11px;">Actualiser</button>
             </div>
@@ -438,6 +439,7 @@
               <div id="tours-map" role="application" aria-label="Carte des tournées de livraison"></div>
               <div id="tours-side"></div>
             </div>
+            <div class="tm-tnote" id="tours-traffic-note" role="status" hidden></div>
             <p class="tm-legend">Trait plein : tronçon déjà fait · pointillé : à faire. Le camion est à la position partagée par le livreur depuis son lien (point qui pulse) ; sans partage, à sa dernière livraison validée.</p>
           </div>
           <p style="font-size:12.5px;color:var(--steel);margin:0 0 14px;">Commandes prêtes à livrer. Glissez une étiquette vers un chauffeur pour l'assigner à sa tournée.</p>

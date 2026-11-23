@@ -7,6 +7,8 @@
   const STATUS = { recue: 'reçue', traitement: 'en traitement', prete: 'prête' };
   let state = { tours: [], clients: [], drivers: [], today: '' };
   let planDate = ''; let errors = {}; let busy = false;
+  let trafficOn = false;     // le trafic en temps réel est-il activé sur le serveur ? (clé TomTom présente)
+  const eta = {};            // tournée -> { date, time, loading, error, data } : dernier calcul « durée avec trafic »
 
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   async function req(method, url, body) {
@@ -18,6 +20,55 @@
   const status = (text, bad) => { const el = document.getElementById('ft-status'); if (el) { el.textContent = text; el.classList.toggle('bad', !!bad); } };
   const addDay = (iso, n) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
   const longDate = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+
+  const hm = (iso) => new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' });
+  const dur = (m) => (m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${m} min`);
+  /** Prochain jour de passage de la tournée (aujourd'hui compris), sinon demain. */
+  function nextRun(t) {
+    const late = new Date().getHours() >= 7;   // l'heure proposée (7 h) est déjà passée aujourd'hui
+    for (let i = late ? 1 : 0; i < 9; i++) {
+      const iso = addDay(state.today, i);
+      const wd = (new Date(`${iso}T12:00:00Z`).getUTCDay() + 6) % 7 + 1;   // 1 = lundi … 7 = dimanche
+      if (t.weekdays.includes(wd)) return iso;
+    }
+    return addDay(state.today, 1);
+  }
+
+  function etaResult(d, askedAt) {
+    const t = d.totals;
+    const nowNote = askedAt && askedAt < Date.now() - 10 * 60000 ? ' <em>(l\'heure choisie est passée : calcul au départ de maintenant)</em>' : '';
+    const head = t ? `<p class="ft-eta-sum">Départ <b>${esc(hm(d.departAt))}</b>${nowNote} · ${esc(dur(t.driveMin))} de route (${esc(String(t.km).replace('.', ','))} km)${t.delayMin >= 2 ? ` <span class="late">dont +${esc(t.delayMin)} min de trafic</span>` : ' · circulation fluide'} · ${d.forecast ? 'trafic prévu à cette heure' : 'trafic en direct'}</p>` : '';
+    const rows = d.stops.map((s, i) => `<li><span>${i + 1}. ${esc(s.items.map(it => it.societe).join(', '))}</span><b>${esc(hm(s.etaAt))}</b></li>`).join('')
+      + (d.backToDepot ? `<li><span>Retour au dépôt</span><b>${esc(hm(d.backToDepot.etaAt))}</b></li>` : '');
+    return `${head}${rows ? `<ol>${rows}</ol>` : ''}${d.note ? `<p class="ft-empty">${esc(d.note)}</p>` : ''}
+      ${d.missing && d.missing.length ? `<p class="miss">Adresse pas encore localisée, hôtel non compté : ${esc(d.missing.map(m => m.societe).join(', '))}.</p>` : ''}
+      ${d.trimmed ? '<p class="miss">Tournée très longue : seuls les premiers hôtels sont calculés.</p>' : ''}
+      <p class="ft-empty">Conduite seule : le temps passé chez chaque hôtel n'est pas compté. Adresses d'après les dernières commandes.</p>`;
+  }
+
+  function etaHtml(t) {
+    if (!trafficOn || !t.clients.length) return '';
+    const f = eta[t.id] || (eta[t.id] = { date: nextRun(t), time: '07:00', loading: false, error: '', data: null });
+    return `<div class="ft-eta">
+      <div class="ft-eta-bar"><span>Durée avec le trafic, départ du dépôt</span>
+        <input type="date" value="${esc(f.date)}" data-ft-eta-date aria-label="Date de départ">
+        <input type="time" value="${esc(f.time)}" data-ft-eta-time aria-label="Heure de départ">
+        <button type="button" class="btn-secondary" data-ft-eta ${f.loading ? 'disabled' : ''} style="width:auto;padding:6px 12px;font-size:12px;">${f.loading ? 'Calcul…' : 'Calculer'}</button></div>
+      ${f.error ? `<p class="ft-err" role="alert">${esc(f.error)}</p>` : ''}
+      ${f.data ? `<div class="ft-eta-out">${etaResult(f.data, f.askedAt)}</div>` : ''}
+    </div>`;
+  }
+
+  async function runEta(t) {
+    const f = eta[t.id];
+    if (!f || f.loading) return;
+    const when = f.date && f.time ? new Date(`${f.date}T${f.time}:00`) : null;
+    if (!when || Number.isNaN(when.getTime())) { f.error = 'Choisissez la date et l\'heure de départ.'; return renderTours(); }
+    f.loading = true; f.error = ''; f.askedAt = when.getTime(); renderTours();
+    try { f.data = await req('GET', `/api/admin/traffic/tour/${encodeURIComponent(t.id)}/eta?departAt=${encodeURIComponent(when.toISOString())}`); }
+    catch (err) { f.error = err.message; f.data = null; }
+    f.loading = false; renderTours();
+  }
 
   function warnings(t) {
     const w = [];
@@ -57,6 +108,7 @@
           <button type="button" class="btn-secondary" data-ft-add style="width:auto;padding:6px 12px;font-size:12px;">Ajouter</button>
           <span class="ft-count">${t.pendingOrders ? `${t.pendingOrders} commande${t.pendingOrders > 1 ? 's' : ''} en cours affectée${t.pendingOrders > 1 ? 's' : ''}` : ''}</span>
         </div>
+        ${etaHtml(t)}
         ${warn.length && t.active ? `<ul class="ft-warn">${warn.map(w => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
         ${errors[t.id] ? `<p class="ft-err" role="alert">${esc(errors[t.id])}</p>` : ''}
       </section>`;
@@ -97,6 +149,7 @@
   }
 
   async function load() {
+    try { trafficOn = !!(await req('GET', '/api/admin/traffic/status')).enabled; } catch { trafficOn = false; }
     try {
       state = await req('GET', BASE);
       status(state.tours.length ? `${state.tours.filter(t => t.active).length} active${state.tours.filter(t => t.active).length > 1 ? 's' : ''} sur ${state.tours.length}` : '');
@@ -111,6 +164,7 @@
       const out = await req('PUT', `${BASE}/${id}`, patch);
       const i = state.tours.findIndex(t => t.id === id);
       if (i >= 0) state.tours[i] = out.tour;
+      if (eta[id]) eta[id].data = null;
       status('Enregistré');
     } catch (err) {
       errors[id] = err.message; status('Non enregistré', true);
@@ -144,6 +198,7 @@
     }
     const t = tourOf(e.target);
     if (!t) return;
+    if (e.target.closest('[data-ft-eta]')) return runEta(t);
     const li = e.target.closest('li[data-client]');
     const ids = t.clients.map(c => c.id);
     const day = e.target.closest('[data-ft-day]');
@@ -177,6 +232,8 @@
     if (e.target.matches('[data-ft-name]')) { const v = e.target.value.trim(); if (v && v !== t.name) save(t.id, { name: v }); else e.target.value = t.name; }
     else if (e.target.matches('[data-ft-driver]')) save(t.id, { driverId: e.target.value ? Number(e.target.value) : null });
     else if (e.target.matches('[data-ft-active]')) save(t.id, { active: e.target.checked });
+    else if (e.target.matches('[data-ft-eta-date]') && eta[t.id]) eta[t.id].date = e.target.value;
+    else if (e.target.matches('[data-ft-eta-time]') && eta[t.id]) eta[t.id].time = e.target.value;
   });
 
   document.addEventListener('keydown', (e) => {
