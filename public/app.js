@@ -2161,7 +2161,7 @@ document.getElementById('ai-report-question').addEventListener('keydown', e => {
 // chiffres clés, NPS, répartition par statut, top hôtels et top articles.
 async function renderStats() {
   const el = document.getElementById('stats-content');
-  el.innerHTML = '<div id="stats-filter"></div><div id="daily-dashboard"></div><div id="stats-families"></div><div id="stats-body"></div>';
+  el.innerHTML = '<div id="stats-filter"></div><div id="daily-dashboard"></div><div id="stats-families"></div><div id="stats-delivery-costs"></div><div id="stats-body"></div>';
   let seq = 0;   // une réponse arrivée en retard ne doit jamais écraser une demande plus récente
 
   const refresh = async () => {
@@ -2176,6 +2176,9 @@ async function renderStats() {
     // Répartition grand plat / petit plat / éponge / divers (public/stats-families.js) : même principe, chargée à part.
     const fam = el.querySelector('#stats-families');
     if (fam && typeof renderStatsFamilies === 'function') renderStatsFamilies(fam).catch(err => { fam.innerHTML = `<p class="form-error" style="display:block;">${escHtml(err.message)}</p>`; });
+    // Coûts de livraison (public/stats-couts-livraison.js) : chargés à part eux aussi.
+    const costs = el.querySelector('#stats-delivery-costs');
+    if (costs && typeof renderStatsDeliveryCosts === 'function') renderStatsDeliveryCosts(costs).catch(err => { costs.innerHTML = `<p class="form-error" style="display:block;">${escHtml(err.message)}</p>`; });
     try {
       const qs = `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
       // Prix moyens : montants, donc derrière le verrou de la Facturation (423 = verrouillée → on l'indique, sans bloquer le reste).
