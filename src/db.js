@@ -451,6 +451,17 @@ if (driversWithoutToken.length > 0) {
   }
 }
 
+// Sac pour le linge non conforme (taché, abîmé, à reprendre) : article du catalogue que les hôtels peuvent commander comme
+// les autres. Créé UNE SEULE fois (le drapeau évite de le recréer si vous le supprimez ensuite). Prix à 0 € : fixez-le dans
+// Administration → Gestion des articles si ces sacs doivent être facturés.
+db.exec(`CREATE TABLE IF NOT EXISTS schema_flags (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')))`);
+if (!db.prepare(`SELECT 1 FROM schema_flags WHERE name = 'article_sac_non_conforme'`).get()) {
+  db.transaction(() => {
+    db.prepare(`INSERT OR IGNORE INTO articles (id, name, code, sage_code, price, category) VALUES ('sac_nc', 'Sac pour linge non conforme', 'SACNC', 'B-SACNC', 0, 'service')`).run();
+    db.prepare(`INSERT INTO schema_flags (name) VALUES ('article_sac_non_conforme')`).run();
+  })();
+}
+
 // Ligne unique pour le compteur de tickets, si absente
 db.prepare(`INSERT OR IGNORE INTO order_seq (id, value) VALUES (1, 0)`).run();
 

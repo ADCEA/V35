@@ -22,6 +22,7 @@ const logisticsRouter = require('./routes/logistics');
 const statsRouter = require('./routes/stats');
 const articlesRouter = require('./routes/articles');
 const driverPortalRouter = require('./routes/driverPortal');
+const nonConformities = require('./routes/nonConformities');
 const garageRouter = require('./routes/garage');
 const apiV1Router = require('./routes/apiV1');
 const backupPullRouter = require('./routes/backupPull');
@@ -91,8 +92,10 @@ app.get('/api/services', (req, res) => {
   res.json({ services, categories: CATEGORIES });
 });
 
+app.use('/api/clients/non-conformities', nonConformities.clientRouter);
 app.use('/api/clients', clientsRouter);
 app.use('/api/orders', ordersRouter);
+app.use('/api/admin/non-conformities', nonConformities.adminRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/webhooks', webhooksRouter);
 app.use('/api/admin/room-types', roomTypesRouter);

@@ -126,6 +126,13 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
 - **Logistique livraison** — gérez vos chauffeurs (nom + véhicule optionnel),
   puis glissez les commandes "prêtes" vers le chauffeur qui les livrera.
   Une colonne "Non assigné" regroupe celles pas encore prises en charge.
+- **Non-conformités** — dans l'espace client, onglet Livraisons : « Signaler un problème » sur une livraison (il manque du
+  linge, linge en trop, sale, abîmé, autre), avec les articles et quantités concernés et un commentaire. L'équipe est
+  prévenue (WhatsApp si configuré, et dans la discussion de la commande), retrouve les signalements dans l'onglet
+  **Non-conformités** (le nombre à traiter s'affiche sur l'onglet), change leur état (Reçu → En cours → Traité) et écrit
+  une réponse que l'hôtel lit dans son espace. L'hôtel peut aussi y **commander des sacs pour le linge non conforme** :
+  article « Sac pour linge non conforme » (créé une seule fois dans le catalogue, prix 0 € à fixer dans Gestion des
+  articles ; il suit l'attribution du catalogue par hôtel).
 - **Équipe** — collaborateurs rattachés à une BU ou à une machine, badgeuse de l'atelier, présence en direct et heures
   pointées par poste (voir « Équipe (RH) et badgeuse »).
 - **Statistiques** — un seul filtre de dates en haut de page pilote tout :

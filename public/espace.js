@@ -8,7 +8,7 @@
 
 const ESPACE_TABS = ['accueil', 'factures', 'contrat', 'livraisons', 'compte'];
 let espaceTab = 'accueil';
-const espaceData = { invoices: null, summary: null, payment: null, deliveries: null, documents: null };
+const espaceData = { invoices: null, summary: null, payment: null, deliveries: null, documents: null, nonConformities: null };
 
 const espEsc = (v) => escapeHtml(String(v ?? ''));
 const espCap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
@@ -106,8 +106,126 @@ function initEspaceTabs() {
     const more = e.target.closest('[data-deliv-more]');
     if (more) { delivState.expanded.add(more.dataset.delivMore); renderDeliveryList(); return; }
     const re = e.target.closest('[data-deliv-reorder]');
-    if (re) reorderFrom(re.dataset.delivReorder);
+    if (re) { reorderFrom(re.dataset.delivReorder); return; }
+    const nc = e.target.closest('[data-nc-open]');
+    if (nc) { toggleNcForm(nc.dataset.ncOpen, nc); return; }
+    const cancel = e.target.closest('[data-nc-cancel]');
+    if (cancel) closeNcForm(cancel.dataset.ncCancel);
   });
+  list.addEventListener('submit', (e) => {
+    const f = e.target.closest('form[data-nc-form]');
+    if (!f) return;
+    e.preventDefault();
+    sendNonConformity(f);
+  });
+  document.getElementById('nc-box').addEventListener('click', (e) => {
+    if (e.target.closest('[data-nc-bags]')) orderNonConformBags();
+  });
+}
+
+// ---------- non-conformités (signalements de l'hôtel) ----------
+
+const NC_TONE = { ouverte: 'neutral', en_cours: 'neutral', resolue: 'paid' };
+
+function renderNcBox() {
+  const box = document.getElementById('nc-box');
+  if (!box) return;
+  const list = espaceData.nonConformities || [];
+  const open = list.filter(n => n.status !== 'resolue');
+  const rows = list.map(n => `
+    <li class="nc-item">
+      <div class="nc-item-head">
+        <span class="nc-item-title">${espEsc(n.kindLabel)}</span>
+        ${espPill(n.statusLabel, NC_TONE[n.status] || 'neutral')}
+      </div>
+      <div class="nc-item-meta">Livraison ${espEsc(n.ticket || '')} · signalé le ${espEsc(new Date(n.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }))}</div>
+      ${n.lines.length ? `<div class="nc-item-lines">${n.lines.map(l => `${espEsc(l.name)} ×${l.qty}`).join(' · ')}</div>` : ''}
+      ${n.comment ? `<div class="nc-item-comment">« ${espEsc(n.comment)} »</div>` : ''}
+      ${n.teamNote ? `<div class="nc-reply"><strong>Réponse de Blanchisserie Cézanne</strong><br>${espEsc(n.teamNote)}</div>` : ''}
+    </li>`).join('');
+  box.innerHTML = `
+    <section class="esp-card nc-card" aria-labelledby="nc-h">
+      <div class="nc-head">
+        <div>
+          <h4 id="nc-h" class="esp-card-title">Un problème sur une livraison ?</h4>
+          <p class="nc-hint">Ouvrez la livraison concernée ci-dessous, puis « Signaler un problème » : manque, linge en trop, sale ou abîmé.</p>
+        </div>
+        <button type="button" class="esp-btn" data-nc-bags>Commander des sacs pour le linge non conforme</button>
+      </div>
+      ${list.length ? `
+        <details class="nc-list" ${open.length ? 'open' : ''}>
+          <summary>Mes signalements · ${list.length}${open.length ? ` (${open.length} en cours)` : ''}</summary>
+          <ul>${rows}</ul>
+        </details>` : ''}
+    </section>`;
+}
+
+function ncFormHtml(d) {
+  const kinds = espaceData.ncKinds || {};
+  const lines = d.items.filter(i => i.qty > 0);
+  return `
+    <form class="nc-form" data-nc-form="${d.id}" novalidate>
+      <fieldset>
+        <legend>Quel est le problème ?</legend>
+        ${Object.entries(kinds).map(([k, label], i) => `
+          <label class="nc-radio"><input type="radio" name="nc-kind-${d.id}" value="${espEsc(k)}" ${i === 0 ? 'checked' : ''}> <span>${espEsc(label)}</span></label>`).join('')}
+      </fieldset>
+      ${lines.length ? `
+      <fieldset>
+        <legend>Articles concernés <small>(facultatif)</small></legend>
+        ${lines.map(i => `
+          <div class="nc-line"><label for="nc-q-${d.id}-${espEsc(i.id)}">${espEsc(i.name)}</label>
+            <input type="number" min="0" max="100000" step="1" inputmode="numeric" value="0" id="nc-q-${d.id}-${espEsc(i.id)}" data-nc-line="${espEsc(i.id)}" aria-label="Quantité concernée : ${espEsc(i.name)}"></div>`).join('')}
+        <p class="nc-hint">Indiquez le nombre de pièces concernées ; laissez 0 pour les autres.</p>
+      </fieldset>` : ''}
+      <div class="field"><label for="nc-c-${d.id}">Précisions</label>
+        <textarea id="nc-c-${d.id}" name="comment" rows="3" maxlength="1000" placeholder="Ex. Il manquait 2 draps dans le chariot 2."></textarea></div>
+      <div class="nc-error" role="alert" hidden></div>
+      <div class="nc-actions">
+        <button type="submit" class="esp-btn solid nc-send">Envoyer le signalement</button>
+        <button type="button" class="link-btn" data-nc-cancel="${d.id}">Annuler</button>
+      </div>
+    </form>`;
+}
+
+function toggleNcForm(id, btn) {
+  const slot = document.getElementById(`nc-slot-${id}`);
+  if (!slot) return;
+  if (slot.firstElementChild) { closeNcForm(id); return; }
+  const d = (espaceData.deliveries || []).find(x => String(x.id) === String(id));
+  if (!d) return;
+  slot.innerHTML = ncFormHtml(d);
+  btn.setAttribute('aria-expanded', 'true');
+  const first = slot.querySelector('input[type=radio]'); if (first) first.focus();
+}
+
+function closeNcForm(id) {
+  const slot = document.getElementById(`nc-slot-${id}`);
+  if (slot) slot.innerHTML = '';
+  const btn = document.querySelector(`[data-nc-open="${id}"]`);
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+async function sendNonConformity(form) {
+  const id = form.dataset.ncForm;
+  const err = form.querySelector('.nc-error'); const send = form.querySelector('.nc-send');
+  err.hidden = true;
+  const kind = (form.querySelector('input[type=radio]:checked') || {}).value;
+  const lines = [...form.querySelectorAll('[data-nc-line]')].map(i => ({ id: i.dataset.ncLine, qty: parseInt(i.value, 10) })).filter(l => l.qty > 0);
+  const comment = form.querySelector('textarea[name=comment]').value.trim();
+  if (!lines.length && comment.length < 3) { err.textContent = 'Indiquez les articles concernés ou décrivez le problème.'; err.hidden = false; return; }
+  send.disabled = true; send.textContent = 'Envoi…';
+  try {
+    await api('POST', '/api/clients/non-conformities', { orderId: Number(id), kind, comment, lines });
+    const nc = await api('GET', '/api/clients/non-conformities');
+    espaceData.nonConformities = nc.nonConformities;
+    renderNcBox();
+    const slot = document.getElementById(`nc-slot-${id}`);
+    if (slot) slot.innerHTML = '<p class="nc-done" role="status">Merci, votre signalement est envoyé. Nous revenons vers vous rapidement ; vous en suivez l\'avancement en haut de cette page.</p>';
+  } catch (e) {
+    err.textContent = e.message || 'Le signalement n\'a pas pu être envoyé. Réessayez ou appelez-nous.'; err.hidden = false;
+    send.disabled = false; send.textContent = 'Envoyer le signalement';
+  }
 }
 
 // ---------- accueil ----------
@@ -244,8 +362,13 @@ function deliveryPill(d) {
 }
 
 async function renderDeliveries() {
-  const { deliveries } = await api('GET', '/api/clients/deliveries');
+  const [{ deliveries }, nc] = await Promise.all([
+    api('GET', '/api/clients/deliveries'),
+    api('GET', '/api/clients/non-conformities').catch(() => ({ nonConformities: [], kinds: {} })),
+  ]);
   espaceData.deliveries = deliveries;
+  espaceData.nonConformities = nc.nonConformities; espaceData.ncKinds = nc.kinds;
+  renderNcBox();
   if (!delivState.firstOpenDone && deliveries.length) { delivState.open.add(String(deliveries[0].id)); delivState.firstOpenDone = true; }
   const months = [...new Set(deliveries.map(d => String(d.date).slice(0, 7)))];
   const sel = document.getElementById('deliv-month');
@@ -276,7 +399,9 @@ function deliveryBodyHtml(d) {
       <div class="bon-actions">
         <a class="esp-btn" href="/api/clients/deliveries/${d.id}/pdf" target="_blank" rel="noopener">${espPdfIcon}Bon de livraison (PDF)</a>
         ${canReorder ? `<button type="button" class="link-btn" data-deliv-reorder="${d.id}">Commander à nouveau</button>` : ''}
+        <button type="button" class="link-btn" data-nc-open="${d.id}" aria-expanded="false">Signaler un problème</button>
       </div>
+      <div class="nc-slot" id="nc-slot-${d.id}"></div>
     </div>`;
 }
 
