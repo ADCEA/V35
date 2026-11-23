@@ -15,7 +15,7 @@ const db = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const { rateLimit } = require('../middleware/security');
 const traffic = require('../utils/traffic');
-const { parisDay } = require('../utils/orderDelivery');
+const { plan, depotOf, driverPlan } = require('../utils/trafficPlan');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -37,11 +37,8 @@ function sendError(res, e) {
 router.get('/status', (req, res) => res.json(traffic.status()));
 
 router.get('/tiles/:style/:z/:x/:y', tilesLimit, async (req, res) => {
-  const { style, z, x, y } = req.params;
-  const ym = /^(\d{1,7})\.png$/.exec(y);
-  if (!/^[a-z0-9-]{1,20}$/.test(style) || !/^\d{1,2}$/.test(z) || !/^\d{1,7}$/.test(x) || !ym) return res.status(400).json({ error: 'Tuile invalide.', code: 'bad_input' });
   try {
-    const png = await traffic.tile({ style, z: Number(z), x: Number(x), y: Number(ym[1]) });
+    const png = await traffic.tile(traffic.parseTileParams(req.params));
     // Les réponses d'API ne se mettent pas en cache d'ordinaire ; une tuile se garde une minute dans CE navigateur seulement
     // (jamais dans un cache partagé : elle est derrière la connexion administrateur).
     res.set({ 'Content-Type': 'image/png', 'Cache-Control': 'private, max-age=60', Vary: 'Cookie', 'Content-Length': String(png.length) });
@@ -53,81 +50,14 @@ router.get('/speed', dataLimit, async (req, res) => {
   try { res.json(await traffic.speedAt(req.query.lat, req.query.lng)); } catch (e) { sendError(res, e); }
 });
 
-// ---------- itinéraires ----------
-const same = (a, b) => Math.abs(a.lat - b.lat) < 1e-4 && Math.abs(a.lng - b.lng) < 1e-4;   // ≈ 10 m : même adresse
-const min = (sec) => Math.round(sec / 60);
-
-/**
- * start : { lat, lng } ; groups : arrêts dans l'ordre [{ lat, lng, items: [...] }] ; depot : retour éventuel ; departAt : Date ou null (= maintenant).
- * Renvoie les heures de passage et les totaux (durée avec trafic, sans trafic, retard dû au trafic).
- */
-async function plan({ start, groups, depot, departAt }) {
-  const targets = [];
-  let skipped = null;
-  for (const g of groups) {
-    if (!targets.length && !skipped && same(start, g)) { skipped = g; continue; }   // déjà sur place : pas de trajet
-    const prev = targets[targets.length - 1];
-    if (prev && prev.kind === 'stop' && same(prev, g)) { prev.items.push(...g.items); continue; }   // même adresse que l'arrêt précédent
-    targets.push({ kind: 'stop', lat: g.lat, lng: g.lng, items: [...g.items] });
-  }
-  const trimmed = targets.length > traffic.MAX_POINTS - 2;
-  if (trimmed) targets.length = traffic.MAX_POINTS - 2;
-  const last = targets.length ? targets[targets.length - 1] : start;
-  if (depot && !same(last, depot) && targets.length) targets.push({ kind: 'depot', lat: depot.lat, lng: depot.lng, items: [] });
-  const origin = departAt || new Date();
-  const out = { departAt: origin.toISOString(), stops: [], backToDepot: null, totals: null, trimmed };
-  if (skipped) out.stops.push({ items: skipped.items, etaAt: origin.toISOString(), driveMin: 0, delayMin: 0 });
-  if (!targets.length) return out;
-
-  const r = await traffic.route([start, ...targets], { departAt });
-  let clock = Date.parse(r.departAt) || origin.getTime();
-  targets.forEach((t, i) => {
-    const leg = r.legs[i];
-    if (!leg) return;
-    clock += leg.travelSec * 1000;
-    const row = { etaAt: leg.arrivalAt || new Date(clock).toISOString(), driveMin: min(leg.travelSec), delayMin: min(leg.delaySec) };
-    if (t.kind === 'depot') out.backToDepot = row; else out.stops.push({ items: t.items, ...row });
-  });
-  out.departAt = r.departAt;
-  out.totals = { driveMin: min(r.travelSec), freeFlowMin: min(r.noTrafficSec), delayMin: min(r.delaySec), km: Math.round(r.lengthM / 100) / 10 };
-  return out;
-}
-
-const depotOf = () => {
-  const a = db.prepare('SELECT depot_address, depot_lat, depot_lng FROM admin WHERE id = 1').get() || {};
-  return a.depot_lat != null && a.depot_lng != null ? { lat: a.depot_lat, lng: a.depot_lng } : null;
-};
-const GPS_FRESH_MS = 10 * 60 * 1000;
-
+// ---------- itinéraires (construits dans src/utils/trafficPlan.js, communs avec le lien du livreur) ----------
 router.get('/driver/:id/eta', dataLimit, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Chauffeur invalide.', code: 'bad_input' });
   try {
-    const d = db.prepare('SELECT id, name, last_lat, last_lng, last_position_at FROM drivers WHERE id = ?').get(id);
-    if (!d) return res.status(404).json({ error: 'Chauffeur introuvable.' });
-    const depot = depotOf();
-    const since = new Date(Date.now() - 36 * 3600 * 1000).toISOString();
-    const today = parisDay();
-    const orders = db.prepare(`SELECT id, ticket, societe, status, lat, lng, delivered_lat, delivered_lng, delivered_at, delivery_sequence, created_at
-      FROM orders WHERE driver_id = ? AND (status = 'prete' OR (status = 'livree' AND delivered_at IS NOT NULL AND delivered_at >= ?))`).all(id, since)
-      .filter(o => o.status === 'prete' || parisDay(o.delivered_at) === today);
-    const pending = orders.filter(o => o.status === 'prete' && o.lat != null && o.lng != null)
-      .sort((a, b) => (a.delivery_sequence ?? 1e9) - (b.delivery_sequence ?? 1e9) || Date.parse(a.created_at) - Date.parse(b.created_at));
-    const noCoords = orders.filter(o => o.status === 'prete' && (o.lat == null || o.lng == null)).length;
-
-    // Point de départ : position partagée si elle est récente, sinon dernière livraison validée, sinon dépôt.
-    const lastDone = orders.filter(o => o.status === 'livree').sort((a, b) => Date.parse(b.delivered_at) - Date.parse(a.delivered_at))[0];
-    let from = null, source = null;
-    if (d.last_lat != null && d.last_position_at && Date.now() - Date.parse(d.last_position_at) <= GPS_FRESH_MS) { from = { lat: d.last_lat, lng: d.last_lng }; source = 'gps'; }
-    else if (lastDone && (lastDone.delivered_lat ?? lastDone.lat) != null) { from = { lat: lastDone.delivered_lat ?? lastDone.lat, lng: lastDone.delivered_lng ?? lastDone.lng }; source = 'delivery'; }
-    else if (depot) { from = depot; source = 'depot'; }
-
-    const base = { driver: { id: d.id, name: d.name }, source, missingAddresses: noCoords, remaining: pending.length };
-    if (!pending.length) return res.json({ ...base, stops: [], backToDepot: null, totals: null, note: noCoords ? 'Les adresses restantes ne sont pas encore localisées.' : 'Plus aucun arrêt à faire.' });
-    if (!from) return res.status(409).json({ error: 'Position de départ inconnue : localisez le dépôt (carte des tournées) ou attendez la position du chauffeur.', code: 'no_start' });
-
-    const groups = pending.map(o => ({ lat: o.lat, lng: o.lng, items: [{ orderId: o.id, ticket: o.ticket, societe: o.societe }] }));
-    res.json({ ...base, ...(await plan({ start: from, groups, depot, departAt: null })) });
+    const out = await driverPlan(id);
+    if (!out) return res.status(404).json({ error: 'Chauffeur introuvable.' });
+    res.json(out);
   } catch (e) { sendError(res, e); }
 });
 

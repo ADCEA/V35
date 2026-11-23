@@ -71,7 +71,7 @@ function sameOriginOnly(req, res, next) {
   let host = null;
   try { host = new URL(origin).host; } catch { /* origine illisible : refusée plus bas */ }
   if (host && host === req.get('host')) return next();
-  console.warn(`[sécurité] requête ${req.method} ${req.originalUrl} refusée : origine ${origin} ≠ ${req.get('host')}`);
+  console.warn(`[sécurité] requête ${req.method} ${req.originalUrl.replace(/(\/api\/driver-portal\/)[^/?]+/, '$1…')} refusée : origine ${origin} ≠ ${req.get('host')}`);
   return res.status(403).json({ error: 'Requête refusée : elle ne vient pas de ce site.', code: 'BAD_ORIGIN' });
 }
 
