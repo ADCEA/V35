@@ -709,3 +709,14 @@ CREATE TABLE IF NOT EXISTS lot_forecast_machines (
   weight_kg   REAL
 );
 CREATE INDEX IF NOT EXISTS idx_lot_forecast_machines ON lot_forecast_machines(forecast_id, stage, position);
+
+
+-- Trafic en temps réel (TomTom) : nombre d'appels réellement envoyés à TomTom par jour (UTC) et par nature
+-- (« api » = itinéraires et vitesses, « tiles » = tuiles de la couche trafic). Sert de plafond quotidien : au-delà, plus aucun
+-- appel ne part, quoi qu'il arrive côté interface. Les réponses gardées en mémoire ne comptent pas.
+CREATE TABLE IF NOT EXISTS traffic_usage (
+  day  TEXT    NOT NULL,
+  kind TEXT    NOT NULL,
+  n    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, kind)
+);
