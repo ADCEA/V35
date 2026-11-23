@@ -658,6 +658,6 @@ function stats(from, to, nowMs = Date.now()) {
 }
 
 module.exports = {
-  STAGES, STAGE_BU, ProdError, bad, parseKg, getSettings, saveSettings, loadLots, lotById, lotDetail, dayView, stepOut, stepCost, stale,
+  STAGES, STAGE_BU, ProdError, bad, parseKg, resolveClients, getSettings, saveSettings, loadLots, lotById, lotDetail, dayView, stepOut, stepCost, stale,
   route, programs, linenTypes, programOut, saveProgram, deleteProgram, saveLinenType, deleteLinenType, clientChoices, hoursView, stats, editStep, deleteStep, updateLot, cancelLot, reopenLot, createLot, startStep, finishStep, closeLot, addNote, openIncident, resolveIncident, incidentOut, board, waitingLots, machineConflict, checkMachine, round1, iso, clean,
 };

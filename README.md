@@ -673,12 +673,24 @@ prévue, libre, en panne), « À reprendre » (lots attendant l'étape suivante)
 un passage, signaler une panne, ajouter une remarque : chaque action demande le **code personnel** du collaborateur (ou son badge),
 gardé 90 s en mémoire du navigateur seulement ; 5 mauvais codes bloquent (même règle que la badgeuse).
 
-**Onglets de l'administration** : *Aujourd'hui* (machines du jour, lots à reprendre, saisie manuelle d'un lot a posteriori),
+**Onglets de l'administration** : *Aujourd'hui* (machines du jour, lots prévus à lancer, lots à reprendre, saisie manuelle d'un lot a posteriori), *Prévision* (lots du lendemain et des jours suivants),
 *Lots* (recherche par période, statut, client), *Machines* (30 jours : passages, kilos, charge moyenne, utilisation, cadence réelle,
 arrêts), *Heures* (par BU et par poste : heures, kilos, kg/h, coût, coût au kilo), *Tableau de bord* (coût au kilo comparé à
 l'objectif, kilos par jour, main-d'œuvre par étape, utilisation, kilos par type de linge et par client), *Réglages* (objectif, prix
 de l'eau et de l'énergie, tolérance de poids, horaires d'ouverture, programmes de lavage, types de linge). La cadence (kg/h) des
 calandres se règle dans Équipe → Machines (départ : 45 kg/h pour 320 cm, 35 kg/h pour 250 cm).
+
+**Prévision de production** (onglet *Prévision*) : l'équipe saisit à l'avance les lots d'un jour à venir (jusqu'à 60 jours), par exemple
+ceux de demain : type de linge, clients (avec leur commande rattachée), poids estimé, laveuse et programme souhaités, remarque. Une bande
+de 7 jours montre le nombre de lots et les kilos de chaque jour ; on peut réordonner (↑ ↓), modifier, supprimer, et **recopier un jour sur
+un autre** (semaine type). Sous la liste, « Commandes à planifier » propose les commandes reçues ou en traitement qui ne sont encore dans
+aucun lot ni aucune prévision, avec un poids estimé (articles × poids catalogue) : « Prévoir » préremplit le formulaire. Une prévision
+**n'est pas un lot** : elle n'occupe aucune machine et n'entre dans aucun chiffre (tables séparées `lot_forecasts` et
+`lot_forecast_clients`). Le jour venu, elle apparaît dans « À lancer » (onglet *Aujourd'hui*) et dans la colonne « Prévu » de la tablette ;
+on la lance en confirmant la laveuse et le poids réellement chargé (prérempli, modifiable) : le vrai lot est alors créé (mêmes contrôles de
+capacité et d'occupation qu'un nouveau lot) et la prévision passe à « lancée » avec le code du lot. Une prévision lancée ne se modifie
+plus. API : `GET /api/admin/atelier/forecast?day=`, `POST/PUT/DELETE …/forecasts[/:id]`, `POST …/forecasts/copy`, `…/forecasts/:id/move`,
+`…/forecasts/:id/launch` ; tablette `POST /api/atelier/forecasts/:id/launch` (code du collaborateur).
 
 Règles :
 - une machine doit appartenir à l'étape (laveuse → lavage…), le poids ne dépasse pas sa capacité, et deux passages ne peuvent pas se

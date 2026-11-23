@@ -25,10 +25,10 @@
   const dFr = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('fr-FR', { timeZone: 'UTC' });
   const dLong = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('fr-FR', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
   const dShort = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('fr-FR', { timeZone: 'UTC', day: 'numeric', month: 'numeric' });
-  const TABS = [['today', 'Aujourd\'hui'], ['lots', 'Lots'], ['machines', 'Machines'], ['hours', 'Heures'], ['dash', 'Tableau de bord'], ['settings', 'Réglages']];
+  const TABS = [['today', 'Aujourd\'hui'], ['forecast', 'Prévision'], ['lots', 'Lots'], ['machines', 'Machines'], ['hours', 'Heures'], ['dash', 'Tableau de bord'], ['settings', 'Réglages']];
   const STAGE_ORDER = ['lavage', 'sechage', 'finition'];
 
-  const S = { tab: 'today', day: null, ov: null, ref: null, range: null, status: '', q: '', timer: null };
+  const S = { tab: 'today', day: null, fday: null, ov: null, ref: null, range: null, status: '', q: '', timer: null };
   const root = () => document.getElementById('atelier-root');
   const body = () => document.getElementById('pr-body');
   const visible = () => { const v = document.getElementById('admin-view-atelier'); return v && v.style.display !== 'none'; };
@@ -47,6 +47,7 @@
     body().innerHTML = '<p class="empty-note">Chargement…</p>';
     try {
       if (tab === 'today') await paintToday();
+      else if (tab === 'forecast') await paintForecast();
       else if (tab === 'lots') await paintLots();
       else if (tab === 'machines') await paintMachines();
       else if (tab === 'hours') await paintHours();
@@ -113,6 +114,8 @@
     }).join('')}</div>` : '';
     const wait = isToday && o.waiting.length ? `<h3 class="rh-h">À reprendre <span class="pr-sub">lavage ou séchage terminé, étape suivante pas lancée</span></h3>
       <div class="rh-chips">${o.waiting.map(l => `<button type="button" class="pr-lotchip" data-lot="${l.id}"><b>${e(l.code)}</b> ${e(l.linenType || '')} · ${e(NF1.format(l.weightKg))} kg<small>${e(stageName(l.lastStage))} terminé · ${e(l.clients.join(', '))}</small></button>`).join('')}</div>` : '';
+    const due = isToday && o.forecastDue && o.forecastDue.length ? `<h3 class="rh-h">À lancer <span class="pr-sub">lots prévus pour aujourd'hui, ou restés en attente</span></h3>
+      <div class="rh-chips">${o.forecastDue.map(f => `<button type="button" class="pr-lotchip pf-due" data-launch="${f.id}"><span><b>${e(f.linenType || 'Lot')}</b>${f.weightKg != null ? ' · ' + e(NF1.format(f.weightKg)) + ' kg' : ''}</span><small>${e(f.clients.map(c => c.societe).join(', '))}${f.day < o.today ? ' · prévu le ' + e(dFr(f.day)) : ''}</small></button>`).join('')}</div>` : '';
     const lots = o.view.lots;
     const table = lots.length ? `<div class="bl-tablewrap"><table class="bl-table rh-table"><thead><tr><th>Lot</th><th>Début</th><th>Type</th><th>Clients</th><th class="r">Kg</th><th>Parcours</th><th>État</th></tr></thead><tbody>
       ${lots.map(l => `<tr class="bl-row${l.status === 'annule' ? ' rh-off' : ''}" data-lot="${l.id}" tabindex="0"><td class="bl-mono">${e(l.code)}</td><td>${e(hm(l.steps.length ? l.steps[0].startedAt : l.createdAt))}</td><td>${e(l.linenType || '—')}</td>
@@ -130,7 +133,7 @@
         <div class="rh-kpi"><span>Kg lavés</span><b>${e(NF1.format(t.kgLavage))}</b></div>
         <div class="rh-kpi"><span>Kg séchés</span><b>${e(NF1.format(t.kgSechage))}</b></div>
         <div class="rh-kpi"><span>Kg en finition</span><b>${e(NF1.format(t.kgFinition))}</b></div></div>
-      ${cols}${wait}<h3 class="rh-h">Lots du jour</h3>${table}
+      ${cols}${due}${wait}<h3 class="rh-h">Lots du jour</h3>${table}
       <p class="rh-help">Les lots sont lancés depuis la tablette de l'atelier (Équipe → Badgeuses pour l'activer) ; ici on peut aussi les saisir ou les corriger après coup.</p>`;
     wireToday();
   }
@@ -140,6 +143,7 @@
     const day = document.getElementById('pr-day');
     day.onchange = () => { if (day.value && day.value <= today()) { S.day = day.value; refreshTab(); } };
     document.getElementById('pr-newlot').onclick = () => lotForm();
+    b.querySelectorAll('[data-launch]').forEach(x => x.onclick = () => { const f = S.ov.forecastDue.find(y => y.id === Number(x.dataset.launch)); if (f) lotForm(null, f); });
     b.querySelectorAll('[data-lot]').forEach(x => { x.onclick = () => openLot(Number(x.dataset.lot)); if (x.tagName === 'TR') x.onkeydown = (ev) => { if (ev.key === 'Enter') openLot(Number(x.dataset.lot)); }; });
     b.querySelectorAll('[data-down]').forEach(x => x.onclick = () => downForm(Number(x.dataset.down)));
     b.querySelectorAll('[data-up]').forEach(x => x.onclick = async () => { try { await post(`/incidents/${x.dataset.up}/resolve`); toast('Machine remise en service.'); refreshTab(); } catch (err) { toast(err.message, true); } });
@@ -183,35 +187,37 @@
     return () => rows.filter(r => r.clientId || r.societe.trim()).map(r => ({ clientId: r.clientId ? Number(r.clientId) : undefined, societe: r.clientId ? undefined : r.societe.trim(), weightKg: r.kg || undefined, orderId: r.orderId ? Number(r.orderId) : undefined }));
   }
 
-  async function lotForm(lot) {
+  async function lotForm(lot, fc) {
     const [ref, ch] = await Promise.all([refData(), get('/choices')]);
     const choices = ch.clients;
     const editing = !!lot;
+    const pre = lot || (fc ? { linenTypeId: fc.linenTypeId, note: fc.note } : null);   // lancement d'un lot prévu : tout est prérempli
     let getClients;
-    const buttons = [{ label: 'Annuler' }, { label: editing ? 'Enregistrer' : 'Créer le lot', primary: true, onClick: async (box) => {
+    const buttons = [{ label: 'Annuler' }, { label: editing ? 'Enregistrer' : fc ? 'Lancer le lavage' : 'Créer le lot', primary: true, onClick: async (box) => {
       if (editing) {
         await put(`/lots/${lot.id}`, { linenTypeId: Number(box.$('#lf-type').value), note: box.$('#lf-note').value, clients: getClients() });
         toast('Lot modifié.'); box.close(); await openLot(lot.id); refreshTab(); return true;
       }
       const date = box.$('#lf-date').value, start = box.$('#lf-start').value, end = box.$('#lf-end').value;
-      const r = await post('/lots', { linenTypeId: Number(box.$('#lf-type').value), clients: getClients(), weightKg: box.$('#lf-kg').value, machineId: Number(box.$('#lf-machine').value),
+      const r = await post(fc ? `/forecasts/${fc.id}/launch` : '/lots', { linenTypeId: Number(box.$('#lf-type').value), clients: getClients(), weightKg: box.$('#lf-kg').value, machineId: Number(box.$('#lf-machine').value),
         programId: box.$('#lf-prog').value || undefined, note: box.$('#lf-note').value, date, start, end });
-      toast('Lot ' + r.lot.code + ' créé.'); box.close(); refreshTab(); openLot(r.lot.id); return true;
+      toast('Lot ' + r.lot.code + (fc ? ' lancé.' : ' créé.')); box.close(); refreshTab(); openLot(r.lot.id); return true;
     } }];
     const types = ref.linenTypes.filter(t => t.active || (lot && t.id === lot.linenTypeId));
     Bill.modal({
-      title: editing ? 'Modifier le lot ' + lot.code : 'Saisir un lot', wide: true, buttons,
-      body: `<div class="bl-row2"><div class="bl-field"><label for="lf-type">Type de linge *</label><select id="lf-type">${types.map(t => opt(t.id, t.label, lot && t.id === lot.linenTypeId)).join('')}</select></div>
-        <div class="bl-field"><label for="lf-note">Remarque</label><input id="lf-note" maxlength="300" value="${e(lot && lot.note)}"></div></div>
+      title: editing ? 'Modifier le lot ' + lot.code : fc ? 'Lancer le lot prévu' : 'Saisir un lot', wide: true, buttons,
+      body: `<div class="bl-row2"><div class="bl-field"><label for="lf-type">Type de linge *</label><select id="lf-type">${types.map(t => opt(t.id, t.label, pre && t.id === pre.linenTypeId)).join('')}</select></div>
+        <div class="bl-field"><label for="lf-note">Remarque</label><input id="lf-note" maxlength="300" value="${e(pre && pre.note)}"></div></div>
         <div class="bl-field"><label>Clients * <span class="bl-faint">— plusieurs si le lot est mélangé ; les kilos par client sont facultatifs</span></label><div id="lf-clients"></div></div>
-        ${editing ? '' : `<div class="bl-row2"><div class="bl-field"><label for="lf-machine">Laveuse *</label><select id="lf-machine">${machOpts(ref, 'lavage')}</select></div>
-          <div class="bl-field"><label for="lf-kg">Poids chargé (kg) *</label><input id="lf-kg" inputmode="decimal" placeholder="24,5"></div></div>
-          <div class="bl-field"><label for="lf-prog">Programme</label><select id="lf-prog">${progOpts(ref, null)}</select></div>
+        ${editing ? '' : `<div class="bl-row2"><div class="bl-field"><label for="lf-machine">Laveuse *</label><select id="lf-machine">${machOpts(ref, 'lavage', fc && fc.machineId)}</select></div>
+          <div class="bl-field"><label for="lf-kg">Poids chargé (kg) *</label><input id="lf-kg" inputmode="decimal" placeholder="24,5" value="${e(fc && fc.weightKg != null ? fc.weightKg : '')}"></div></div>
+          <div class="bl-field"><label for="lf-prog">Programme</label><select id="lf-prog">${progOpts(ref, fc && fc.programId)}</select></div>
           <div class="bl-row2"><div class="bl-field"><label for="lf-date">Jour *</label><input id="lf-date" type="date" value="${S.day || today()}" max="${today()}"></div>
           <div class="bl-field"><label>Début * / fin</label><div style="display:flex;gap:8px"><input id="lf-start" type="time" value="${nowHm()}" aria-label="Début"><input id="lf-end" type="time" aria-label="Fin"></div></div></div>
           <p class="rh-help">Sans heure de fin, le lavage est « en cours » (possible seulement aujourd'hui).</p>`}`,
       onOpen: (box) => {
-        getClients = clientRows(box, choices, lot ? lot.clients.map(c => ({ clientId: c.clientId || '', societe: c.societe, kg: c.weightAuto ? '' : (c.weightKg || ''), orderId: c.orderId || '' })) : []);
+        getClients = clientRows(box, choices, lot ? lot.clients.map(c => ({ clientId: c.clientId || '', societe: c.societe, kg: c.weightAuto ? '' : (c.weightKg || ''), orderId: c.orderId || '' }))
+          : fc ? fc.clients.map(c => ({ clientId: c.clientId || '', societe: c.societe, kg: c.weightKg || '', orderId: c.orderId || '' })) : []);
         if (!editing) {
           const sync = () => { const m = ref.machines.find(x => x.id === Number(box.$('#lf-machine').value)); if (m && m.capacityKg && !box.$('#lf-kg').value) box.$('#lf-kg').placeholder = NF1.format(m.capacityKg); };
           box.$('#lf-machine').onchange = sync; sync();
@@ -250,6 +256,143 @@
         if (!editing) box.$('#sf-stage').onchange = draw;
         draw();
       },
+    });
+  }
+
+  // ---------- prévision de production ----------
+  const dDay = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('fr-FR', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'numeric' });
+  const tomorrow = () => addDays(today(), 1);
+
+  async function paintForecast() {
+    if (!S.fday || S.fday < today()) S.fday = tomorrow();
+    const d = await get('/forecast?day=' + S.fday);
+    S.fc = d;
+    const t = d.totals;
+    const isPast = S.fday === d.today;
+    const strip = d.upcoming.map(u => `<button type="button" class="pf-day${u.day === S.fday ? ' on' : ''}" data-fday="${u.day}" aria-pressed="${u.day === S.fday}">
+        <span>${e(dDay(u.day))}</span><b>${u.count ? e(u.count + ' lot' + (u.count > 1 ? 's' : '')) : '—'}</b><small>${u.count ? e(NF1.format(u.kg)) + ' kg' : 'rien de prévu'}</small></button>`).join('');
+    const card = (f, i, n) => {
+      const clients = f.clients.map(c => `${e(c.societe)}${c.weightKg ? ` <span class="bl-faint">${e(NF1.format(c.weightKg))} kg</span>` : ''}${c.orderTicket ? ` <span class="bl-tag draft">${e(c.orderTicket)}</span>` : ''}`).join(', ');
+      const meta = [f.machineName ? 'Laveuse prévue : ' + f.machineName : '', f.programName ? 'Programme : ' + f.programName : ''].filter(Boolean).map(e).join(' · ');
+      const planned = f.status === 'prevu';
+      return `<article class="pf-card${planned ? '' : ' done'}" data-fc="${f.id}">
+        <span class="pf-n">${i + 1}</span>
+        <div class="pf-main">
+          <div class="pf-title"><b>${e(f.linenType || 'Type à choisir')}</b><span class="pf-kg">${f.weightKg != null ? e(NF1.format(f.weightKg)) + ' kg' : 'poids à peser'}</span>
+            ${planned ? '<span class="bl-tag wait">prévu</span>' : `<span class="bl-tag ok">lancé</span>${f.lotCode ? ` <button type="button" class="pr-code" data-lot="${f.lotId}">${e(f.lotCode)}</button>` : ''}`}</div>
+          <div class="pf-clients">${clients}</div>
+          ${meta || f.note ? `<div class="pf-meta">${meta}${meta && f.note ? ' · ' : ''}${f.note ? '« ' + e(f.note) + ' »' : ''}</div>` : ''}
+        </div>
+        ${planned ? `<div class="pf-actions">
+          <button type="button" class="bl-btn small" data-fmove="up" ${i === 0 ? 'disabled' : ''} aria-label="Passer plus tôt">↑</button>
+          <button type="button" class="bl-btn small" data-fmove="down" ${i === n - 1 ? 'disabled' : ''} aria-label="Passer plus tard">↓</button>
+          ${S.fday <= d.today ? '<button type="button" class="bl-btn small primary" data-flaunch>Lancer</button>' : ''}
+          <button type="button" class="bl-btn small" data-fedit>Modifier</button>
+          <button type="button" class="bl-btn small danger" data-fdel>Supprimer</button></div>` : ''}
+      </article>`;
+    };
+    const orders = d.orders.length ? `<div class="bl-tablewrap"><table class="bl-table rh-table"><thead><tr><th>Commande</th><th>Client</th><th>Livraison prévue</th><th class="r">Poids estimé</th><th></th></tr></thead><tbody>
+      ${d.orders.map(o => `<tr><td class="bl-mono">${e(o.ticket)}</td><td class="client">${e(o.societe)}</td><td>${o.deliveryDate ? e(dFr(o.deliveryDate)) : '<span class="bl-faint">—</span>'}</td>
+        <td class="r bl-num">${o.estimatedKg != null ? e(NF1.format(o.estimatedKg)) + ' kg' : '<span class="bl-faint">non calculable</span>'}</td>
+        <td class="r"><button type="button" class="bl-btn small" data-fplan="${o.orderId}">Prévoir</button></td></tr>`).join('')}</tbody></table></div>`
+      : '<p class="empty-note">Toutes les commandes reçues sont déjà dans un lot ou une prévision.</p>';
+    body().innerHTML = `
+      <div class="rh-bar"><button type="button" class="bl-btn" data-fstep="-1" aria-label="Jour précédent"${S.fday <= d.today ? ' disabled' : ''}>‹</button>
+        <input type="date" id="pf-date" value="${S.fday}" min="${d.today}" aria-label="Jour à prévoir" style="height:34px;border:1px solid #C5D3E0;border-radius:6px;padding:0 8px">
+        <button type="button" class="bl-btn" data-fstep="1" aria-label="Jour suivant">›</button>
+        <span class="rh-sub" style="margin-left:6px">${e(dLong(S.fday))}${S.fday === tomorrow() ? ' · demain' : isPast ? ' · aujourd\'hui' : ''}</span><span class="rh-grow"></span>
+        ${t.count ? '<button type="button" class="bl-btn" id="pf-copy">Recopier vers un autre jour</button>' : '<button type="button" class="bl-btn" id="pf-copyfrom">Reprendre un autre jour</button>'}
+        <button type="button" class="bl-btn primary" id="pf-new">+ Prévoir un lot</button></div>
+      <div class="pf-strip" role="group" aria-label="Jours à venir">${strip}</div>
+      <div class="pr-kpis">
+        <div class="rh-kpi"><span>Lots prévus</span><b>${NF0.format(t.count)}</b>${t.launched ? `<small>${t.launched} déjà lancé${t.launched > 1 ? 's' : ''}</small>` : ''}</div>
+        <div class="rh-kpi"><span>Kilos prévus</span><b>${e(NF1.format(t.kg))}</b>${t.withoutWeight ? `<small>${t.withoutWeight} lot${t.withoutWeight > 1 ? 's' : ''} sans poids estimé</small>` : ''}</div>
+        <div class="rh-kpi"><span>Clients concernés</span><b>${NF0.format(t.clients)}</b></div></div>
+      <div class="pf-list">${d.forecasts.length ? d.forecasts.map((f, i) => card(f, i, d.forecasts.length)).join('') : `<p class="empty-note">Aucun lot prévu ${S.fday === tomorrow() ? 'demain' : 'ce jour-là'}. Ajoutez-les ci-dessous, ou prévoyez directement une commande reçue.</p>`}</div>
+      <h3 class="rh-h">Commandes à planifier <span class="pr-sub">reçues ou en traitement, pas encore dans un lot ni une prévision</span></h3>${orders}
+      <p class="rh-help">Une prévision ne bloque aucune machine et n'entre dans aucun chiffre. Le jour venu, elle apparaît dans « Aujourd'hui » et sur la tablette de l'atelier : on la lance en confirmant la laveuse et le poids réellement chargé.</p>`;
+    wireForecast(d);
+  }
+
+  function wireForecast(d) {
+    const b = body();
+    const go1 = (day) => { S.fday = day; refreshTab(); };
+    b.querySelectorAll('[data-fday]').forEach(x => x.onclick = () => go1(x.dataset.fday));
+    b.querySelectorAll('[data-fstep]').forEach(x => x.onclick = () => { const n = addDays(S.fday, Number(x.dataset.fstep)); if (n >= d.today) go1(n); });
+    const dt = document.getElementById('pf-date');
+    dt.onchange = () => { if (dt.value && dt.value >= d.today) go1(dt.value); else dt.value = S.fday; };
+    document.getElementById('pf-new').onclick = () => forecastForm(null, null);
+    const cp = document.getElementById('pf-copy') || document.getElementById('pf-copyfrom');
+    if (cp) cp.onclick = () => copyForm(!!document.getElementById('pf-copy'));
+    const find = (x) => d.forecasts.find(f => f.id === Number(x.closest('[data-fc]').dataset.fc));
+    b.querySelectorAll('[data-fedit]').forEach(x => x.onclick = () => forecastForm(find(x), null));
+    b.querySelectorAll('[data-flaunch]').forEach(x => x.onclick = () => lotForm(null, find(x)));
+    b.querySelectorAll('[data-fmove]').forEach(x => x.onclick = async () => { try { await post(`/forecasts/${find(x).id}/move`, { direction: x.dataset.fmove }); refreshTab(); } catch (err) { toast(err.message, true); } });
+    b.querySelectorAll('[data-fdel]').forEach(x => x.onclick = async () => {
+      const f = find(x);
+      if (!(await Bill.confirm('Supprimer ce lot prévu ?', `${f.linenType || 'Lot'} · ${f.clients.map(c => c.societe).join(', ')}. Les commandes liées reviennent dans « à planifier ».`, 'Supprimer', true))) return;
+      try { await del(`/forecasts/${f.id}`); toast('Prévision supprimée.'); refreshTab(); } catch (err) { toast(err.message, true); }
+    });
+    b.querySelectorAll('[data-lot]').forEach(x => x.onclick = () => openLot(Number(x.dataset.lot)));
+    b.querySelectorAll('[data-fplan]').forEach(x => x.onclick = () => {
+      const o = d.orders.find(y => y.orderId === Number(x.dataset.fplan));
+      if (o) forecastForm(null, { clients: [{ clientId: o.clientId, societe: o.societe, orderId: o.orderId, weightKg: '' }], weightKg: o.estimatedKg });
+    });
+  }
+
+  /** Saisie ou modification d'un lot prévu. `seed` préremplit (commande à planifier). */
+  async function forecastForm(fc, seed) {
+    const [ref, ch] = await Promise.all([refData(), get('/choices')]);
+    const editing = !!fc;
+    let getClients;
+    const first = fc || seed || {};
+    const types = ref.linenTypes.filter(t => t.active || (fc && t.id === fc.linenTypeId));
+    Bill.modal({
+      title: editing ? 'Modifier le lot prévu' : 'Prévoir un lot', wide: true,
+      buttons: [{ label: 'Annuler' }, { label: editing ? 'Enregistrer' : 'Ajouter à la prévision', primary: true, onClick: async (box) => {
+        const day = box.$('#pf-day').value;
+        const payload = { day, linenTypeId: Number(box.$('#pf-type').value), clients: getClients(), weightKg: box.$('#pf-kg').value, machineId: box.$('#pf-machine').value ? Number(box.$('#pf-machine').value) : null,
+          programId: box.$('#pf-prog').value ? Number(box.$('#pf-prog').value) : null, note: box.$('#pf-note').value };
+        if (editing) await put(`/forecasts/${fc.id}`, payload); else await post('/forecasts', payload);
+        toast(editing ? 'Prévision modifiée.' : 'Lot ajouté à la prévision.'); box.close(); S.fday = day; S.tab = 'forecast'; refreshTab(); return true;
+      } }],
+      body: `<div class="bl-row2"><div class="bl-field"><label for="pf-day">Jour prévu *</label><input id="pf-day" type="date" value="${e(fc ? fc.day : S.fday || tomorrow())}" min="${today()}"></div>
+        <div class="bl-field"><label for="pf-type">Type de linge *</label><select id="pf-type">${types.map(t => opt(t.id, t.label, fc && t.id === fc.linenTypeId)).join('')}</select></div></div>
+        <div class="bl-field"><label>Clients * <span class="bl-faint">— plusieurs si le lot est mélangé ; rattachez la commande pour comparer au poids attendu</span></label><div id="lf-clients"></div></div>
+        <div class="bl-row2"><div class="bl-field"><label for="pf-kg">Poids estimé (kg)</label><input id="pf-kg" inputmode="decimal" placeholder="Facultatif" value="${e(first.weightKg != null ? first.weightKg : '')}"></div>
+          <div class="bl-field"><label for="pf-machine">Laveuse souhaitée</label><select id="pf-machine">${opt('', '— à choisir le jour même —', !fc || !fc.machineId)}${machOpts(ref, 'lavage', fc && fc.machineId)}</select></div></div>
+        <div class="bl-row2"><div class="bl-field"><label for="pf-prog">Programme</label><select id="pf-prog">${progOpts(ref, fc && fc.programId)}</select></div>
+          <div class="bl-field"><label for="pf-note">Remarque</label><input id="pf-note" maxlength="300" value="${e(fc && fc.note)}" placeholder="Ex. draps du week-end, taches à traiter"></div></div>
+        <p class="rh-help" id="pf-hint" style="color:var(--rust);display:none"></p>
+        <p class="rh-help">Rien n'est lancé : le lot apparaîtra dans « Aujourd'hui » et sur la tablette le jour prévu.</p>`,
+      onOpen: (box) => {
+        const cap = Math.max(0, ...ref.machines.filter(m => m.bu === 'lavage').map(m => m.capacityKg || 0));
+        const hint = () => {
+          const kg = Number(String(box.$('#pf-kg').value).replace(',', '.'));
+          const h = box.$('#pf-hint');
+          h.style.display = cap && kg > cap ? '' : 'none';
+          h.textContent = `Plus que la plus grande laveuse (${NF1.format(cap)} kg) : prévoyez plusieurs lots, un par charge.`;
+        };
+        box.$('#pf-kg').addEventListener('input', hint); hint();
+        getClients = clientRows(box, ch.clients, (fc || seed) ? first.clients.map(c => ({ clientId: c.clientId || '', societe: c.societe, kg: c.weightKg || '', orderId: c.orderId || '' })) : []);
+      },
+    });
+  }
+
+  function copyForm(hasSome) {
+    const from = S.fday;
+    Bill.modal({
+      title: hasSome ? 'Recopier ces lots' : 'Reprendre un autre jour',
+      buttons: [{ label: 'Annuler' }, { label: 'Recopier', primary: true, onClick: async (box) => {
+        const a = hasSome ? from : box.$('#cp-from').value, b = hasSome ? box.$('#cp-to').value : from;
+        const r = await post('/forecasts/copy', { from: a, to: b });
+        toast(`${r.copied} lot${r.copied > 1 ? 's' : ''} recopié${r.copied > 1 ? 's' : ''}.`); box.close(); S.fday = b; refreshTab(); return true;
+      } }],
+      body: hasSome
+        ? `<p class="rh-help" style="margin-top:0">Recopie les lots prévus le ${e(dLong(from))} (type, clients, poids, laveuse) sur un autre jour. Les commandes liées ne sont pas recopiées.</p>
+           <div class="bl-field"><label for="cp-to">Vers le jour *</label><input id="cp-to" type="date" value="${addDays(from, 7)}" min="${today()}"></div>`
+        : `<p class="rh-help" style="margin-top:0">Reprend les lots d'un autre jour (une semaine type, par exemple) sur le ${e(dLong(from))}. Les commandes liées ne sont pas recopiées.</p>
+           <div class="bl-field"><label for="cp-from">Depuis le jour *</label><input id="cp-from" type="date" value="${addDays(from, -7)}"></div>`,
     });
   }
 
