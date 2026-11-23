@@ -467,6 +467,10 @@ et à choisir le tarif en vigueur).
 
 La page ne modifie ni commande ni facture, hormis la correction des quantités livrées ci-dessus. Elle est derrière le code de la Facturation.
 
+**Contrôle des quantités facturées** (lecture seule, `GET /api/admin/billing/quantity-audit`, `src/billing/quantityAudit.js`) : pour chaque facture
+émise rattachée à des commandes, compare ses lignes à celles que le moteur produirait aujourd'hui avec les données des commandes (*écart*),
+et repère les commandes facturées au complet dont une note ou un commentaire signale un manque, sans complément ni quantité corrigée (*signalé*).
+
 ### Restreindre des articles aux hôtels qui les utilisent
 
 Deux façons de régler la même chose (un hôtel voit tout le catalogue ou seulement une sélection) :
