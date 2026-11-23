@@ -44,9 +44,11 @@ router.get('/:token', async (req, res) => {
     tel: o.tel,
     sequence: o.delivery_sequence,
     distanceFromPrevKm: o.distance_from_prev_km,
+    collectOnly: !!o.collect_only,   // arrêt de collecte : du linge sale à prendre, rien à livrer, pas de bon de livraison
+    notes: o.collect_only ? (o.notes || null) : undefined,
     items: itemsStmt.all(o.id),
     mapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(o.adresse)}`,
-    deliveryNoteUrl: `/api/driver-portal/${req.params.token}/orders/${o.id}/delivery-note.pdf`,
+    deliveryNoteUrl: o.collect_only ? null : `/api/driver-portal/${req.params.token}/orders/${o.id}/delivery-note.pdf`,
   }));
 
   // Résumé de la tournée : distance cumulée (depuis le dépôt jusqu'au
@@ -104,7 +106,8 @@ router.get('/:token', async (req, res) => {
     adresse: o.adresse,
     deliveredAt: o.delivered_at,
     minutesSincePrev: i === 0 ? null : Math.round((Date.parse(o.delivered_at) - Date.parse(doneRows[i - 1].delivered_at)) / 60000),
-    deliveryNoteUrl: `/api/driver-portal/${req.params.token}/orders/${o.id}/delivery-note.pdf`,
+    collectOnly: !!o.collect_only,
+    deliveryNoteUrl: o.collect_only ? null : `/api/driver-portal/${req.params.token}/orders/${o.id}/delivery-note.pdf`,
   }));
 
   res.json({
@@ -129,6 +132,7 @@ router.get('/:token/orders/:orderId/delivery-note.pdf', async (req, res) => {
 
   const order = db.prepare('SELECT * FROM orders WHERE id = ? AND driver_id = ?').get(Number(req.params.orderId), driver.id);
   if (!order) return res.status(404).json({ error: 'Commande introuvable pour ce chauffeur.' });
+  if (order.collect_only) return res.status(404).json({ error: 'Un arrêt de collecte n\'a pas de bon de livraison.' });
 
   const items = db.prepare('SELECT service_id as id, name, code, price, qty, delivered_qty as deliveredQty FROM order_items WHERE order_id = ?').all(order.id);
 

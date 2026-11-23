@@ -13,6 +13,14 @@ const STATUSES = [
 ];
 function statusLabel(id) { return (STATUSES.find(s => s.id === id) || {}).label || id; }
 
+// Arrêt de collecte : du linge sale à prendre chez un client, rien à livrer (voir POST /api/admin/logistics/collections).
+function collectionStopLabel(o) {
+  if (o.status === 'livree') return '🧺 Collecte faite';
+  if (o.status === 'prete') return '🧺 Collecte du sale · rien à livrer';
+  const d = String(o.livraisonPrevue || '').split('-');
+  return `🧺 Collecte prévue le ${d.length === 3 ? `${d[2]}/${d[1]}` : 'jour à préciser'}`;
+}
+
 let SERVICES = [];
 let CATEGORIES = [];
 let cart = {};
@@ -730,6 +738,7 @@ async function openOrderModal(orderId, context) {
   currentModalContext = context;
   const order = ownOrdersCache.find(o => String(o.id) === String(orderId)) || adminOrdersCache.find(o => String(o.id) === String(orderId));
   if (!order) return;
+  if (order.collectOnly) { renderCollectionStopModal(order); return; }
   const currentIdx = STATUSES.findIndex(s => s.id === order.status);
   const isAdminContext = ADMIN_MODAL_CONTEXTS.includes(context);
   // La facture suit les quantités LIVRÉES : on peut les corriger tant que la commande n'est pas reprise dans une facture.
@@ -959,6 +968,80 @@ async function deleteOrder(orderId, ticket) {
   else if (currentModalContext === 'historique') renderHistoryList();
   else refreshAdmin();
 }
+
+// ---------- arrêt de collecte (Logistique) ----------
+// Fiche d'un arrêt de collecte : pas de quantités, de statut à faire avancer ni de bon de livraison, seulement ce que le chauffeur doit savoir.
+function renderCollectionStopModal(order) {
+  const d = String(order.livraisonPrevue || '').split('-');
+  const day = d.length === 3 ? `${d[2]}/${d[1]}/${d[0]}` : 'non précisé';
+  document.getElementById('modal-ticket').innerHTML = `
+    <div class="ticket-top">
+      <div><div class="ticket-eyebrow">Arrêt de collecte</div><div class="ticket-num">${escapeHtml(order.ticket)}</div></div>
+      <span class="ticket-status ${order.status}">${escapeHtml(collectionStopLabel(order).replace('🧺 ', ''))}</span>
+    </div>
+    <div class="ticket-dash"></div>
+    <p class="qty-bill-hint">Le chauffeur passe chercher du linge sale. <b>Aucun linge propre à livrer</b> : pas de bon de livraison, rien à facturer, et l'arrêt ne figure pas dans l'historique de l'hôtel.</p>
+    <div class="ticket-meta">
+      ${escapeHtml(order.client.societe)}${order.client.contact ? ` — ${escapeHtml(order.client.contact)}` : ''}<br>
+      ${escapeHtml(order.client.adresse)}<br>
+      Passage prévu le ${escapeHtml(day)}
+      ${order.notes ? `<br>Consigne : ${escapeHtml(order.notes)}` : ''}
+    </div>`;
+  for (const id of ['modal-delivery-note', 'modal-team-zone', 'modal-conditioning-zone']) {
+    const z = document.getElementById(id); z.style.display = 'none'; z.innerHTML = '';
+  }
+  const manage = document.getElementById('modal-order-manage-zone');
+  manage.style.display = 'block';
+  manage.innerHTML = `
+    <p style="font-size:12.5px;color:var(--steel);margin:0 0 10px;">Pour changer de chauffeur, glissez l'étiquette vers sa colonne dans la Logistique. Pour changer le jour ou le client, supprimez l'arrêt et programmez-en un nouveau.</p>
+    <button class="btn-secondary" id="btn-delete-order" style="width:auto;color:var(--rust);border-color:var(--rust);">Supprimer l'arrêt</button>`;
+  document.getElementById('btn-delete-order').addEventListener('click', () => deleteOrder(order.id, order.ticket));
+  document.getElementById('order-modal').classList.add('open');
+}
+
+async function openCollectionStopModal() {
+  if (manualOrderClientsCache.length === 0) {
+    const { clients } = await api('GET', '/api/admin/clients');
+    manualOrderClientsCache = clients;
+  }
+  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' });
+  const clients = [...manualOrderClientsCache].sort((a, b) => a.societe.localeCompare(b.societe));
+  const inner = document.getElementById('manual-order-modal-inner');
+  inner.innerHTML = `
+    <h3 style="font-family:'Fredoka',sans-serif;font-size:18px;margin-bottom:16px;">Arrêt de collecte</h3>
+    <p class="mo-copy-note">Le chauffeur passe chercher du linge sale, <b>sans linge propre à livrer</b> : pas de bon de livraison, rien à facturer. L'arrêt apparaît dans la tournée du chauffeur le jour choisi.</p>
+    <div class="field"><label for="cs-client">Client *</label>
+      <select id="cs-client"><option value="">— Choisir un client —</option>${clients.map(c => `<option value="${c.id}">${escHtml(c.societe)}</option>`).join('')}</select></div>
+    <div class="field-row">
+      <div class="field"><label for="cs-date">Jour du passage</label><input type="date" id="cs-date" min="${today}" value="${today}"></div>
+      <div class="field"><label for="cs-driver">Chauffeur</label>
+        <select id="cs-driver"><option value="">Non assigné</option>${driversCache.map(d => `<option value="${d.id}">${escHtml(d.name)}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label for="cs-notes">Consigne pour le chauffeur (facultatif)</label><input id="cs-notes" maxlength="300" placeholder="Ex. 3 sacs à la réception"></div>
+    <p class="qty-bill-hint" style="margin-top:0;">Sans chauffeur choisi, l'arrêt rejoint la tournée fixe de l'hôtel s'il en a une ; sinon il reste « Non assigné ».</p>
+    <button class="btn-primary" id="cs-submit" style="width:auto;margin-top:12px;">Programmer l'arrêt</button>
+    <div class="qty-save-note" id="cs-error"></div>`;
+  document.getElementById('cs-submit').addEventListener('click', async () => {
+    const err = document.getElementById('cs-error');
+    const clientId = document.getElementById('cs-client').value;
+    if (!clientId) { err.textContent = 'Choisissez un client.'; err.classList.add('error'); return; }
+    const btn = document.getElementById('cs-submit');
+    btn.disabled = true;
+    try {
+      await api('POST', '/api/admin/logistics/collections', {
+        clientId: Number(clientId), date: document.getElementById('cs-date').value || undefined,
+        driverId: document.getElementById('cs-driver').value ? Number(document.getElementById('cs-driver').value) : null,
+        notes: document.getElementById('cs-notes').value.trim(),
+      });
+      closeManualOrderModal();
+      renderLogisticsKanban();
+    } catch (e) {
+      err.textContent = e.message; err.classList.add('error');
+    } finally { btn.disabled = false; }
+  });
+  document.getElementById('manual-order-modal').classList.add('open');
+}
+document.getElementById('btn-new-collection').addEventListener('click', () => openCollectionStopModal().catch(e => alert(e.message)));
 
 // Échappement HTML minimal — le texte des messages et les noms d'auteurs
 // viennent de saisie libre (chauffeurs, équipe), jamais interpolés tels
@@ -2074,11 +2157,11 @@ async function renderLogisticsKanban() {
         <div id="route-result-${col.id || 'none'}"></div>` : ''}
         <div class="kcol-drop">
         ${list.length === 0 ? '<div class="kcol-empty">Aucune commande</div>' : list.map(o => `
-          <div class="mini-ticket ${o.status === 'prete' ? 'logistics-ready' : 'logistics-pending'}" data-id="${o.id}" draggable="true" tabindex="0" role="button" aria-label="Voir le détail de la commande ${o.ticket}, statut ${statusLabel(o.status)}">
+          <div class="mini-ticket ${o.status === 'prete' ? 'logistics-ready' : 'logistics-pending'}${o.collectOnly ? ' logistics-collect' : ''}" data-id="${o.id}" draggable="true" tabindex="0" role="button" aria-label="Voir le détail de la commande ${o.ticket}, statut ${statusLabel(o.status)}">
             <div class="mini-num">${o.ticket}${o.status === 'prete' && o.deliverySequence ? ` <span class="mono" style="color:var(--brand-deep);">#${o.deliverySequence}</span>` : ''}</div>
             <div class="mini-client">${escapeHtml(o.client.societe)}</div>
             <div class="mini-sub">${escapeHtml(o.client.adresse)}</div>
-            <div class="mini-sub" style="font-weight:600;color:${o.status === 'prete' ? 'var(--teal)' : 'var(--rust)'};">${o.status === 'prete' ? '✓ Prête à partir' : statusLabel(o.status)}</div>
+            <div class="mini-sub" style="font-weight:600;color:${o.status === 'prete' ? 'var(--teal)' : 'var(--rust)'};">${o.collectOnly ? collectionStopLabel(o) : o.status === 'prete' ? '✓ Prête à partir' : statusLabel(o.status)}</div>
           </div>
         `).join('')}
         </div>

@@ -50,6 +50,9 @@ function nextSlot(clientId, fromDate) {
  * Renvoie le nombre de commandes affectées.
  */
 function assignPending(today = parisDay()) {
+  // Arrêts de collecte programmés : ils attendent leur jour (statut « reçue », donc invisibles du chauffeur et de l'atelier)
+  // puis passent « prêts » le matin même, ce qui les met sur la page du chauffeur.
+  db.prepare(`UPDATE orders SET status = 'prete' WHERE collect_only = 1 AND status = 'recue' AND livraison_prevue IS NOT NULL AND livraison_prevue <= ?`).run(today);
   const orders = db.prepare(`
     SELECT id, client_id, livraison_prevue FROM orders
     WHERE status IN ('recue', 'traitement', 'prete') AND driver_id IS NULL AND tour_manual = 0 AND client_id IS NOT NULL

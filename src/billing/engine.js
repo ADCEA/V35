@@ -159,7 +159,7 @@ function listInvoiceableOrders(clientId) {
   return db.prepare(`
     SELECT o.id, o.ticket, o.livraison_prevue as livraisonPrevue
     FROM orders o
-    WHERE o.client_id = ? AND o.status = 'livree'
+    WHERE o.client_id = ? AND o.status = 'livree' AND o.collect_only = 0
       AND o.id NOT IN (SELECT order_id FROM invoice_orders)
       AND NOT EXISTS (
         SELECT 1 FROM native_invoice_orders no

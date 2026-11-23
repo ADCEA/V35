@@ -10,7 +10,7 @@ const { BillingError } = engine;
 /** Hôtels ayant des BL livrés à facturer, livrés jusqu'à `upTo` (AAAA-MM-JJ, inclus). */
 function preview(upTo) {
   if (upTo && !engine.isIsoDate(upTo)) throw new BillingError('Date limite invalide.');
-  const ids = db.prepare("SELECT DISTINCT client_id FROM orders WHERE status = 'livree' AND client_id IS NOT NULL").all().map(r => r.client_id);
+  const ids = db.prepare("SELECT DISTINCT client_id FROM orders WHERE status = 'livree' AND collect_only = 0 AND client_id IS NOT NULL").all().map(r => r.client_id);
   const out = [];
   for (const cid of ids) {
     const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(cid);

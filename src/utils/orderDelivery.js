@@ -34,7 +34,7 @@ function markDelivered(order, { at = new Date(), lat = null, lng = null } = {}) 
   const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id);
 
   // Comme côté administration : au mieux, sans jamais bloquer ni faire échouer la validation.
-  if (order.client_id) {
+  if (order.client_id && !order.collect_only) {   // un arrêt de collecte ne livre rien : le logiciel de l'hôtel n'a rien à recevoir
     const client = db.prepare('SELECT * FROM clients WHERE id = ?').get(order.client_id);
     if (client?.webhook_url) notifyOrderDelivered(client, updated, itemsStmt.all(order.id)).catch(() => {});
   }

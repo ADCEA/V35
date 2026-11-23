@@ -151,6 +151,12 @@ if (!ordersColumns.includes('tour_id')) {
 if (!ordersColumns.includes('tour_manual')) {
   db.exec(`ALTER TABLE orders ADD COLUMN tour_manual INTEGER NOT NULL DEFAULT 0;`);
 }
+// Arrêt de collecte : le chauffeur passe chez l'hôtel chercher du linge sale, sans linge propre à livrer. C'est une « commande » sans
+// ligne (pour hériter du chauffeur, de l'ordre de passage, de l'itinéraire et de l'heure de validation) qui n'entre ni dans la
+// facturation, ni dans les statistiques de livraison, ni dans l'historique de l'hôtel.
+if (!ordersColumns.includes('collect_only')) {
+  db.exec(`ALTER TABLE orders ADD COLUMN collect_only INTEGER NOT NULL DEFAULT 0;`);
+}
 db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_production ON orders(production_stage);`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_driver ON orders(driver_id);`);
 

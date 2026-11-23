@@ -39,7 +39,8 @@ function parseFilters(f = {}) {
 
 /** Clause WHERE commune aux requêtes (BL livrés, filtrés par date, hôtel et recherche). */
 function where({ from, to, clientId, q, ids = [] }) {
-  const sql = ["o.status = 'livree'"]; const args = [];
+  // un arrêt de collecte n'est pas un bon de livraison
+  const sql = ["o.status = 'livree'", 'o.collect_only = 0']; const args = [];
   if (ids.length) { sql.push(`o.id IN (${ids.map(() => '?').join(',')})`); args.push(...ids); }
   if (from) { sql.push(`${DATE_SQL} >= ?`); args.push(from); }
   if (to) { sql.push(`${DATE_SQL} <= ?`); args.push(to); }
@@ -155,7 +156,7 @@ function listDeliveries(filters) {
 function getDelivery(id) {
   const o = db.prepare(`
     SELECT o.*, COALESCE(c.societe, o.societe) AS clientName, ${DATE_SQL} AS date
-    FROM orders o LEFT JOIN clients c ON c.id = o.client_id WHERE o.id = ? AND o.status = 'livree'
+    FROM orders o LEFT JOIN clients c ON c.id = o.client_id WHERE o.id = ? AND o.status = 'livree' AND o.collect_only = 0
   `).get(id);
   if (!o) throw new BillingError('Bon de livraison introuvable (la commande n\'est pas livrée ou n\'existe plus).', 404);
   const items = db.prepare('SELECT service_id AS id, name, code, sage_code AS sageCode, price, qty, delivered_qty AS deliveredQty FROM order_items WHERE order_id = ? ORDER BY id').all(id);

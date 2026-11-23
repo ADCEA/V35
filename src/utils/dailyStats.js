@@ -39,7 +39,7 @@ function parisDate(ts) {
 
 /** Identifiants des commandes REÇUES dans la période (date de création, heure de Paris) : on lit large puis on trie à l'heure de Paris. */
 function receivedIds(p) {
-  const rows = db.prepare('SELECT id, created_at FROM orders WHERE substr(created_at, 1, 10) BETWEEN ? AND ?').all(addDays(p.from, -1), addDays(p.to, 1));
+  const rows = db.prepare('SELECT id, created_at FROM orders WHERE collect_only = 0 AND substr(created_at, 1, 10) BETWEEN ? AND ?').all(addDays(p.from, -1), addDays(p.to, 1));
   return rows.filter(r => { const d = parisDate(r.created_at); return d >= p.from && d <= p.to; }).map(r => r.id);
 }
 
@@ -60,7 +60,7 @@ function daily(from, to) {
   const received = db.prepare(`
     SELECT o.id, o.created_at AS ts, COALESCE(SUM(oi.qty), 0) AS pieces
     FROM orders o LEFT JOIN order_items oi ON oi.order_id = o.id
-    WHERE substr(o.created_at, 1, 10) BETWEEN ? AND ?
+    WHERE o.collect_only = 0 AND substr(o.created_at, 1, 10) BETWEEN ? AND ?
     GROUP BY o.id
   `).all(addDays(p.from, -1), addDays(p.to, 1));
   for (const r of received) {
@@ -97,7 +97,7 @@ function daily(from, to) {
     d.ordersDelivered = s.orders.size; d.references = s.refs.size; d.hotelsServed = s.hotels.size; d.drivers = s.drivers.size; d.ordersAdjusted = s.adjusted.size;
   }
   // Commandes livrées sans aucune ligne d'article : elles comptent quand même comme livrées.
-  for (const r of db.prepare(`SELECT ${DELIVERY_DATE_SQL} AS date, COUNT(*) AS n FROM orders o WHERE o.status = 'livree' AND ${DELIVERY_DATE_SQL} BETWEEN ? AND ? AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id) GROUP BY date`).all(p.from, p.to)) {
+  for (const r of db.prepare(`SELECT ${DELIVERY_DATE_SQL} AS date, COUNT(*) AS n FROM orders o WHERE o.status = 'livree' AND o.collect_only = 0 AND ${DELIVERY_DATE_SQL} BETWEEN ? AND ? AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id) GROUP BY date`).all(p.from, p.to)) {
     const d = days.get(r.date); if (d) d.ordersDelivered += r.n;
   }
 
@@ -110,7 +110,7 @@ function daily(from, to) {
     activeDays: active.length, avgDeliveredPerActiveDay: active.length ? round1(sum('ordersDelivered') / active.length) : 0,
   };
   // État actuel des commandes (photo d'aujourd'hui, pas de la période)
-  const now = Object.fromEntries(db.prepare('SELECT status, COUNT(*) n FROM orders GROUP BY status').all().map(r => [r.status, r.n]));
+  const now = Object.fromEntries(db.prepare('SELECT status, COUNT(*) n FROM orders WHERE collect_only = 0 GROUP BY status').all().map(r => [r.status, r.n]));
   return { from: p.from, to: p.to, days: list, totals, current: now };
 }
 
@@ -122,8 +122,8 @@ function dayDetail(date) {
       COALESCE((SELECT SUM(qty) FROM order_items WHERE order_id = o.id), 0) AS pieces,
       COALESCE((SELECT SUM(COALESCE(delivered_qty, qty)) FROM order_items WHERE order_id = o.id), 0) AS piecesDelivered
     FROM orders o LEFT JOIN clients c ON c.id = o.client_id LEFT JOIN drivers d ON d.id = o.driver_id`;
-  const received = db.prepare(`${base} WHERE substr(o.created_at, 1, 10) BETWEEN ? AND ? ORDER BY o.id`).all(addDays(date, -1), addDays(date, 1)).filter(o => parisDate(o.createdAt) === date);
-  const delivered = db.prepare(`${base} WHERE o.status = 'livree' AND ${DELIVERY_DATE_SQL} = ? ORDER BY o.id`).all(date);
+  const received = db.prepare(`${base} WHERE o.collect_only = 0 AND substr(o.created_at, 1, 10) BETWEEN ? AND ? ORDER BY o.id`).all(addDays(date, -1), addDays(date, 1)).filter(o => parisDate(o.createdAt) === date);
+  const delivered = db.prepare(`${base} WHERE o.status = 'livree' AND o.collect_only = 0 AND ${DELIVERY_DATE_SQL} = ? ORDER BY o.id`).all(date);
   const shape = (o) => ({ id: o.id, ticket: o.ticket, status: o.status, clientName: o.clientName, pieces: o.pieces, piecesDelivered: o.piecesDelivered, km: o.km || 0, driver: o.driver || null });
   return { date, received: received.map(shape), delivered: delivered.map(shape) };
 }
