@@ -427,10 +427,11 @@
           const kgIn = row.querySelector('[data-f="kg"]');
           if (l.auto) kgIn.placeholder = l.weightKg != null ? NF1.format(l.weightKg) : 'auto';
           row.querySelector('.pf-linest').innerHTML = l.minutes != null
-            ? (st === 'lavage' ? `${l.passes} passage${l.passes > 1 ? 's' : ''} × ${e(dur(l.passMin))} = <b>${e(dur(l.minutes))}</b>` : `${l.weightKg != null ? e(NF1.format(l.weightKg)) + ' kg · ' : ''}<b>${e(dur(l.minutes))}</b>${l.source === 'historique' ? ' <small>d\'après l\'historique</small>' : ''}`)
+            ? (st === 'lavage' || l.source === 'cycle' ? `${l.weightKg != null && st !== 'lavage' ? e(NF1.format(l.weightKg)) + ' kg · ' : ''}${l.passes} ${st === 'lavage' ? 'passage' : 'cycle'}${l.passes > 1 ? 's' : ''} × ${e(dur(l.passMin))} = <b>${e(dur(l.minutes))}</b>` : `${l.weightKg != null ? e(NF1.format(l.weightKg)) + ' kg · ' : ''}<b>${e(dur(l.minutes))}</b>${l.source === 'historique' ? ' <small>d\'après l\'historique</small>' : ''}`)
             : '<span class="pf-unk">durée inconnue</span>';
         });
-        sec.querySelector('[data-stmin]').textContent = g.planned ? (g.minutes != null ? ` · ${dur(g.minutes)}${g.incomplete ? ' au moins' : ''}` : ' · durée à renseigner') : '';
+        const part = plan.families.length && g.routedKg != null && g.routedKg !== plan.weightKg ? ` · ${NF1.format(g.routedKg)} kg` : '';   // lot détaillé : seuls les kilos concernés passent par cette étape
+        sec.querySelector('[data-stmin]').textContent = g.planned ? part + (g.minutes != null ? ` · ${dur(g.minutes)}${g.incomplete ? ' au moins' : ''}` : ' · durée à renseigner') : '';
       });
       const segs = STAGE_ORDER.filter(st => plan.stages[st].planned).map(st => `<span class="pf-seg"><b>${STAGE_NAME[st]}</b> ${plan.stages[st].minutes != null ? e(dur(plan.stages[st].minutes)) : '<em>?</em>'}</span>`).join('<span class="pf-arrow" aria-hidden="true">→</span>');
       tot.innerHTML = segs ? `<div class="pf-est big">${segs}<span class="pf-sum">${plan.incomplete ? 'au moins ' : ''}<b>${e(dur(plan.minutes.total))}</b> en tout</span></div>
@@ -696,16 +697,18 @@
     const st = ref.settings;
     const eur = (c) => (c == null ? '' : String(c / 100).replace('.', ','));
     body().innerHTML = `
-      <h3 class="rh-h" style="margin-top:0">Objectif et prix</h3>
+      <h3 class="rh-h" style="margin-top:0">Objectif, prix et cycles</h3>
       <div class="pr-set">
         <div class="bl-field"><label for="st-target">Objectif de coût (€ par kg)</label><input id="st-target" inputmode="decimal" value="${e(eur(st.targetCentsPerKg))}" placeholder="1,30"></div>
         <div class="bl-field"><label for="st-water">Prix de l'eau (€ par m³)</label><input id="st-water" inputmode="decimal" value="${e(eur(st.waterCentsPerM3))}" placeholder="à renseigner"></div>
         <div class="bl-field"><label for="st-energy">Prix de l'énergie (€ par kWh)</label><input id="st-energy" inputmode="decimal" value="${e(eur(st.energyCentsPerKwh))}" placeholder="à renseigner"></div>
         <div class="bl-field"><label for="st-tol">Tolérance de poids (±&nbsp;%)</label><input id="st-tol" inputmode="decimal" value="${e(st.tolerancePct)}"></div>
+        <div class="bl-field"><label for="st-wash">Cycle de lavage (minutes)</label><input id="st-wash" inputmode="numeric" value="${e(st.washCycleMin)}" placeholder="50"></div>
+        <div class="bl-field"><label for="st-dry">Cycle de séchage (minutes)</label><input id="st-dry" inputmode="numeric" value="${e(st.dryCycleMin)}" placeholder="30"></div>
         <div class="bl-field"><label for="st-from">Ouverture</label><input id="st-from" type="time" value="${e(st.openFrom)}"></div>
         <div class="bl-field"><label for="st-to">Fermeture</label><input id="st-to" type="time" value="${e(st.openTo)}"></div></div>
       <div class="rh-bar"><button type="button" class="bl-btn primary" id="st-save">Enregistrer</button><span class="rh-sub" id="st-msg"></span></div>
-      <p class="rh-help">Les prix servent à estimer le coût de l'eau et de l'énergie de chaque lavage (consommations moyennes du programme × prix). Laissés vides, aucun coût n'est inventé : la ligne reste « à renseigner ». L'ouverture sert au calcul de l'utilisation des machines.</p>
+      <p class="rh-help">Les prix servent à estimer le coût de l'eau et de l'énergie de chaque lavage (consommations moyennes du programme × prix). Laissés vides, aucun coût n'est inventé : la ligne reste « à renseigner ». L'ouverture sert au calcul de l'utilisation des machines. Les cycles servent à la prévision : un lavage dure 50 minutes par charge (sauf si le programme choisi indique une autre durée) et un cycle de séchoir 30 minutes. Le plat (grand et petit) va du lavage à la calandre sans passer par le séchoir ; les éponges passent au séchoir.</p>
 
       <h3 class="rh-h">Programmes de lavage</h3>
       <div class="rh-bar"><button type="button" class="bl-btn" id="pg-new">+ Nouveau programme</button></div>
@@ -727,7 +730,7 @@
       const msg = document.getElementById('st-msg');
       try {
         await put('/settings', { targetCostPerKg: document.getElementById('st-target').value, waterPrice: document.getElementById('st-water').value, energyPrice: document.getElementById('st-energy').value,
-          tolerancePct: document.getElementById('st-tol').value, openFrom: document.getElementById('st-from').value, openTo: document.getElementById('st-to').value });
+          tolerancePct: document.getElementById('st-tol').value, washCycleMin: document.getElementById('st-wash').value, dryCycleMin: document.getElementById('st-dry').value, openFrom: document.getElementById('st-from').value, openTo: document.getElementById('st-to').value });
         S.ref = null; toast('Réglages enregistrés.'); refreshTab();
       } catch (err) { msg.textContent = err.message; msg.style.color = 'var(--rust)'; }
     };

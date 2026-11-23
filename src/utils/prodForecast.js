@@ -117,7 +117,7 @@ function estimateDraft(o) {
 }
 
 function planOut(weightKg, families, lines) {
-  const est = W.estimate({ totalKg: weightKg, lines });
+  const est = W.estimate({ totalKg: weightKg, lines, families });
   const famSum = round1(Object.values(families || {}).reduce((a, x) => a + x, 0));
   return { weightKg, families: famSum > 0 ? W.familyList(families) : [], ...est };
 }
