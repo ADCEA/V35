@@ -130,7 +130,8 @@
   // ---------- tableau des machines ----------
   function renderSummary() {
     const t = S.today.totals;
-    document.getElementById('at-sum').innerHTML = `<b>${num(t.lots)}</b> lot${t.lots > 1 ? 's' : ''} · <b>${kgf(t.kgLavage)}</b> kg lavés<br>${kgf(t.kgSechage)} kg séchés · ${kgf(t.kgFinition)} kg finis`;
+    const tm = S.forecast && S.forecast.tomorrow;
+    document.getElementById('at-sum').innerHTML = `<b>${num(t.lots)}</b> lot${t.lots > 1 ? 's' : ''} · <b>${kgf(t.kgLavage)}</b> kg lavés<br>${kgf(t.kgSechage)} kg séchés · ${kgf(t.kgFinition)} kg finis${tm && tm.count ? `<br>Demain : ${num(tm.count)} lot${tm.count > 1 ? 's' : ''} prévu${tm.count > 1 ? 's' : ''}${tm.kg ? ' · ' + kgf(tm.kg) + ' kg' : ''}` : ''}`;
     document.getElementById('at-new').hidden = false;
     renderWho();
   }
@@ -175,6 +176,12 @@
       <span class="s">${esc(l.stageLabel)}${clients ? ' · ' + esc(clients) : ''}</span></button>`;
   }
 
+  function forecastButton(f) {
+    const clients = f.clients.map((c) => c.societe).join(', ');
+    return `<button type="button" class="at-lot plan" data-act="launchfc" data-fc="${num(f.id)}"><span class="t"><b>${esc(f.linenType || 'Lot')}</b>${f.weightKg != null ? ' · ' + esc(kgf(f.weightKg)) + ' kg' : ''}</span>
+      <span class="s">${esc(clients)}${f.machineName ? ' · ' + esc(f.machineName) : ''}${f.note ? ' · ' + esc(f.note) : ''}</span></button>`;
+  }
+
   function renderBoard() {
     renderSummary();
     const cols = ['lavage', 'sechage', 'finition'].map((stage) => {
@@ -184,8 +191,10 @@
     }).join('');
     const wait = S.waiting.map((l) => lotButton(l, 'wait')).join('') || '<p class="at-none">Aucun lot en attente.</p>';
     const today = S.today.lots.map((l) => lotButton(l, 'day')).join('') || '<p class="at-none">Aucun lot aujourd\'hui.</p>';
+    const due = (S.forecast && S.forecast.due) || [];
+    const planned = due.length ? `<section><h2>Prévu<span>${due.length}</span></h2>${due.map(forecastButton).join('')}</section>` : '';
     main.innerHTML = `<div class="at-board"><div class="at-cols">${cols}</div>
-      <aside class="at-rail"><section><h2>À reprendre<span>${S.waiting.length}</span></h2>${wait}</section>
+      <aside class="at-rail">${planned}<section><h2>À reprendre<span>${S.waiting.length}</span></h2>${wait}</section>
       <section><h2>Lots du jour<span>${S.today.lots.length}</span></h2>${today}</section></aside></div>`;
   }
 
@@ -301,11 +310,19 @@
     ${chips([{ id: 0, html: 'Aucun' }, ...S.programs.map((p) => ({ id: p.id, html: `${esc(p.name)}${p.durationMin ? ` <small>${num(p.durationMin)} min</small>` : ''}` }))], (i) => (F.programId || 0) === i.id, 'program', 'p')}</div></div>` : '');
 
   // ---------- nouveau lot ----------
-  function openNewLot(machineId) {
+  function openNewLot(machineId, fc) {
     const free = stageMachines('lavage').filter((m) => m.state === 'free');
-    const m = machineId ? machineById(machineId) : free[0];
+    // Un lot prévu : sa laveuse souhaitée si elle est libre, sinon la première libre.
+    const wanted = fc && fc.machineId ? free.find((m) => m.id === fc.machineId) : null;
+    const m = wanted || (machineId ? machineById(machineId) : free[0]);
     if (!m) { toast('Aucune laveuse libre pour le moment.', true); return; }
     F = { kind: 'newlot', typeId: null, clients: [], find: '', free: '', machineId: m.id, kg: m.capacityKg || 0, programId: null, err: '' };
+    if (fc) {
+      F.forecastId = fc.id; F.typeId = fc.linenTypeId; F.note = fc.note || '';
+      F.clients = fc.clients.map((c) => ({ clientId: c.clientId || null, societe: c.societe, kg: c.weightKg || '', orderId: c.orderId || null }));
+      if (fc.weightKg) F.kg = m.capacityKg ? Math.min(fc.weightKg, m.capacityKg) : fc.weightKg;
+      F.programId = fc.programId || null;
+    }
     showSheet(renderNewLot);
   }
   function filteredClients() {
@@ -324,7 +341,7 @@
   }
   function renderNewLot() {
     const m = machineById(F.machineId);
-    pane(`${head('Nouveau lot', 'Lavage lancé maintenant.')}
+    pane(`${head(F.forecastId ? 'Lancer le lot prévu' : 'Nouveau lot', F.forecastId ? 'Vérifiez la laveuse et le poids réellement chargé.' : 'Lavage lancé maintenant.')}
       <div class="at-blk"><div class="l">Type de linge</div><div class="at-chips">${chips(S.linenTypes.map((t) => ({ id: t.id, html: esc(t.label) })), (i) => F.typeId === i.id, 'type', 't')}</div></div>
       <div class="at-blk"><div class="l">Client <small>plusieurs possibles si le lot est mélangé</small></div>
         <div class="at-sel" id="at-sel">${selectedHtml()}</div>
@@ -345,8 +362,8 @@
     needAuth(async () => {
       if (busy) return; busy = true;
       try {
-        const r = await act('/lots', {
-          linenTypeId: F.typeId, weightKg: F.kg, machineId: F.machineId, programId: F.programId || undefined,
+        const r = await act(F.forecastId ? `/forecasts/${F.forecastId}/launch` : '/lots', {
+          linenTypeId: F.typeId, weightKg: F.kg, machineId: F.machineId, programId: F.programId || undefined, note: F.note || undefined,
           clients: F.clients.map((c) => ({ clientId: c.clientId || undefined, societe: c.clientId ? undefined : c.societe, weightKg: c.kg || undefined, orderId: c.orderId || undefined })),
         });
         busy = false; const code = r.lot.code; closeSheet(); toast('Lot ' + code + ' lancé.');
@@ -507,6 +524,7 @@
       case 'lot': return openLot(d.lot);
       case 'resume': return openResume(d.lot);
       case 'launch': return openLaunch(d.m);
+      case 'launchfc': { const fc = ((S.forecast && S.forecast.due) || []).find((x) => x.id === Number(d.fc)); if (fc) openNewLot(null, fc); else { toast('Ce lot prévu n\'est plus à lancer.', true); refresh(); } return; }
       case 'launchlot': return openResume(d.lot, F.machineId);
       case 'finish': return openFinish(d.step);
       case 'down': return openDown(d.m);

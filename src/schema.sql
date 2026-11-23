@@ -626,3 +626,30 @@ CREATE TABLE IF NOT EXISTS machine_incidents (
   employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_incidents_machine ON machine_incidents(machine_id, started_at);
+
+-- Prévision de production : lots saisis à l'avance pour un jour à venir (« prévu »). Ce ne sont pas des lots : aucun passage machine,
+-- rien dans les statistiques. Le jour J, l'atelier lance la prévision (statut « lance ») et un vrai lot est créé (lot_id).
+CREATE TABLE IF NOT EXISTS lot_forecasts (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  day           TEXT NOT NULL,
+  position      INTEGER NOT NULL DEFAULT 0,
+  linen_type_id INTEGER REFERENCES linen_types(id) ON DELETE SET NULL,
+  weight_kg     REAL,
+  machine_id    INTEGER REFERENCES machines(id) ON DELETE SET NULL,
+  program_id    INTEGER REFERENCES wash_programs(id) ON DELETE SET NULL,
+  note          TEXT,
+  status        TEXT NOT NULL DEFAULT 'prevu',
+  lot_id        INTEGER REFERENCES lots(id) ON DELETE SET NULL,
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_lot_forecasts_day ON lot_forecasts(day, position);
+CREATE TABLE IF NOT EXISTS lot_forecast_clients (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  forecast_id INTEGER NOT NULL REFERENCES lot_forecasts(id) ON DELETE CASCADE,
+  client_id   INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  societe     TEXT NOT NULL,
+  order_id    INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  weight_kg   REAL
+);
+CREATE INDEX IF NOT EXISTS idx_lot_forecast_clients ON lot_forecast_clients(forecast_id);

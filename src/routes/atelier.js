@@ -6,6 +6,7 @@ const security = require('../middleware/security');
 const rh = require('../utils/rh');
 const rhStore = require('../utils/rhStore');
 const P = require('../utils/prodStore');
+const F = require('../utils/prodForecast');
 const { requireTerminal, authenticate, fail } = require('../utils/rhAuth');
 
 const router = express.Router();
@@ -35,6 +36,7 @@ router.get('/state', P.route((req, res) => {
     now: new Date(nowMs).toISOString(), day, terminal: { id: req.terminal.id, label: req.terminal.label }, stages: P.STAGES, settings: { openFrom: P.getSettings().openFrom, openTo: P.getSettings().openTo },
     machines: P.board(nowMs), waiting: P.waitingLots(nowMs),
     today: { totals: view.totals, lots: view.lots.filter(l => l.status !== 'annule').map(l => ({ id: l.id, code: l.code, linenType: l.linenType, weightKg: l.weightKg, status: l.status, stageLabel: l.stageLabel, clients: l.clients.map(c => c.societe), createdAt: l.createdAt })) },
+    forecast: { due: F.due(nowMs), tomorrow: F.totals(F.list(rh.addDays(day, 1))) },
     employees: employees(nowMs),
     linenTypes: P.linenTypes().filter(t => t.active), programs: P.programs().filter(p => p.active), clients: P.clientChoices(),
   });
@@ -55,6 +57,13 @@ router.post('/lots', R((req, res, e) => {
   const b = req.body || {};
   const id = P.createLot({ linenTypeId: b.linenTypeId, clients: b.clients, weightKg: b.weightKg, machineId: b.machineId, programId: b.programId, note: b.note, employeeId: e.id, terminalId: req.terminal.id });
   res.status(201).json({ lot: P.lotDetail(id), machines: P.board() });
+}));
+
+// POST /api/atelier/forecasts/:id/launch — lance un lot prévu : même corps qu'un nouveau lot, ce qui manque reprend la prévision.
+router.post('/forecasts/:id/launch', R((req, res, e) => {
+  const b = req.body || {};
+  const lotId = F.launch(Number(req.params.id), { linenTypeId: b.linenTypeId, clients: b.clients, weightKg: b.weightKg, machineId: b.machineId, programId: b.programId, note: b.note, employeeId: e.id, terminalId: req.terminal.id });
+  res.status(201).json({ lot: P.lotDetail(lotId), machines: P.board() });
 }));
 
 // POST /api/atelier/lots/:id/steps — séchage, finition ou second lavage d'un lot existant.

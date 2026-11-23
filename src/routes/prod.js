@@ -5,6 +5,7 @@ const db = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const rh = require('../utils/rh');
 const P = require('../utils/prodStore');
+const F = require('../utils/prodForecast');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -35,7 +36,7 @@ router.get('/overview', R((req, res) => {
   if (!rh.isDate(day)) throw P.bad('Jour invalide.');
   res.json({
     now: new Date(nowMs).toISOString(), today: rh.parisDate(nowMs), day, settings: P.getSettings(), stages: P.STAGES,
-    machines: P.board(nowMs), waiting: P.waitingLots(nowMs), view: P.dayView(day, nowMs),
+    machines: P.board(nowMs), waiting: P.waitingLots(nowMs), view: P.dayView(day, nowMs), forecastDue: F.due(nowMs),
     linenTypes: P.linenTypes(), programs: P.programs(),
     incidents: db.prepare('SELECT i.*, m.name AS machine_name FROM machine_incidents i JOIN machines m ON m.id = i.machine_id WHERE i.ended_at IS NULL ORDER BY i.started_at').all().map(i => P.incidentOut(i, nowMs)),
   });
@@ -92,6 +93,23 @@ router.post('/lots/:id/notes', R((req, res) => {
 router.post('/lots/:id/close', R((req, res) => { P.closeLot(Number(req.params.id)); res.json({ lot: P.lotDetail(Number(req.params.id)) }); }));
 router.post('/lots/:id/reopen', R((req, res) => { P.reopenLot(Number(req.params.id)); res.json({ lot: P.lotDetail(Number(req.params.id)) }); }));
 router.post('/lots/:id/cancel', R((req, res) => { P.cancelLot(Number(req.params.id)); res.json({ lot: P.lotDetail(Number(req.params.id)) }); }));
+
+// ---------- prévision de production (lots saisis à l'avance) ----------
+router.get('/forecast', R((req, res) => {
+  const nowMs = Date.now();
+  res.json(F.dayPlan(req.query.day ? String(req.query.day) : rh.addDays(rh.parisDate(nowMs), 1), nowMs));
+}));
+router.post('/forecasts', R((req, res) => { res.status(201).json({ forecast: F.get(F.create(req.body || {})) }); }));
+router.post('/forecasts/copy', R((req, res) => { const b = req.body || {}; res.status(201).json({ copied: F.copyDay(b.from, b.to) }); }));
+router.put('/forecasts/:id', R((req, res) => { F.update(Number(req.params.id), req.body || {}); res.json({ forecast: F.get(Number(req.params.id)) }); }));
+router.delete('/forecasts/:id', R((req, res) => { F.remove(Number(req.params.id)); res.json({ ok: true }); }));
+router.post('/forecasts/:id/move', R((req, res) => { F.move(Number(req.params.id), String((req.body || {}).direction || '')); res.json({ ok: true }); }));
+router.post('/forecasts/:id/launch', R((req, res) => {
+  const b = req.body || {}, nowMs = Date.now();
+  const t = readTimes(b, nowMs);
+  const lotId = F.launch(Number(req.params.id), { ...b, ...t }, nowMs);
+  res.status(201).json({ lot: P.lotDetail(lotId) });
+}));
 
 // ---------- passages ----------
 router.post('/steps/:id/finish', R((req, res) => {
