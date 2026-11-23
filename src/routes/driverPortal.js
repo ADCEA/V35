@@ -7,6 +7,7 @@ const { buildDeliveryNotePdf } = require('../utils/pdf');
 const security = require('../middleware/security');
 const { markDelivered, parisDay, cleanCoords } = require('../utils/orderDelivery');
 const { assignPending } = require('../utils/fixedTours');
+const { refreshOrderCoords } = require('../utils/orderCoords');
 const traffic = require('../utils/traffic');
 const { driverPlan } = require('../utils/trafficPlan');
 const router = express.Router();
@@ -30,6 +31,7 @@ router.get('/:token', async (req, res) => {
   const driver = db.prepare('SELECT * FROM drivers WHERE access_token = ?').get(req.params.token);
   if (!driver) return res.status(404).json({ error: 'Lien invalide ou expiré.' });
   assignPending(); // tournées fixes : une commande prête d'un hôtel de sa tournée apparaît chez lui
+  refreshOrderCoords().catch(() => {}); // points manquants ou périmés recalculés en arrière-plan (carte du lien livreur)
 
   const orders = db.prepare(`
     SELECT * FROM orders WHERE driver_id = ? AND status = 'prete' ORDER BY delivery_sequence ASC, created_at ASC

@@ -18,7 +18,7 @@ async function startServer({ dataDir, env = {} } = {}) {
   const DATA_DIR = dataDir || fs.mkdtempSync(path.join(os.tmpdir(), 'cezanne-test-'));
   const PORT = await freePort();
   const BASE = `http://localhost:${PORT}`;
-  const full = { ...process.env, DATA_DIR, PORT: String(PORT), SESSION_SECRET: 'test-secret', BACKUP_SCHEDULER: 'off', CLIENT_CODE_POLICY: 'legacy', ...env };
+  const full = { ...process.env, DATA_DIR, PORT: String(PORT), SESSION_SECRET: 'test-secret', BACKUP_SCHEDULER: 'off', GEOCODE_SCHEDULER: 'off', CLIENT_CODE_POLICY: 'legacy', ...env };
   delete full.ODOO_URL; delete full.ODOO_API_KEY;
   for (const k of Object.keys(env)) if (env[k] === undefined) delete full[k];
   let output = '';   // sortie du serveur (journaux), pour vérifier ce qu'il écrit

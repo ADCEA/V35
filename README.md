@@ -133,7 +133,15 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
   (bouton sur son lien, jamais automatique, seule la dernière position est conservée et elle est effacée à l'arrêt ou à
   la dernière livraison) : le camion est alors à cette position tant qu'elle date de moins de 10 min, sinon à sa dernière
   livraison validée. Fond de carte OpenStreetMap, tracés routiers OSRM (`ROAD_ROUTING=off` pour les désactiver : lignes
-  droites), adresses géocodées en arrière-plan par Nominatim (adresse de la commande **complétée par le code postal et la ville de la fiche client** quand elle ne les contient pas ; corriger l'adresse, le code postal ou la ville d'une fiche replace sur la carte ses commandes pas encore livrées). **Trafic en temps réel** (bouton « Trafic » de la carte et
+  droites), adresses géocodées en arrière-plan par Nominatim (adresse de la commande **complétée par le code postal et la ville de la fiche client** quand elle ne les contient pas ; corriger l'adresse, le code postal ou la ville d'une fiche replace sur la carte ses commandes pas encore livrées).
+  **Points toujours à jour** (`src/utils/orderCoords.js`) : chaque point retient le texte exact qui a servi à le calculer
+  (`orders.geo_query`). Un point dont ce texte n'est plus celui d'aujourd'hui (fiche modifiée, règle de calcul améliorée) ou qui
+  n'a pas cette trace — donc **tous les points calculés avant cette version** — est recalculé en arrière-plan (une adresse par
+  seconde, 25 par passage) : au démarrage du serveur, toutes les 10 minutes, et à chaque ouverture de la carte (administration,
+  TV) ou du lien livreur. L'ancien point reste affiché tant que le nouveau n'est pas trouvé ; une adresse introuvable n'est pas
+  redemandée avant 10 minutes. Les livraisons validées avec la position GPS du chauffeur gardent cette position, et seules les
+  commandes « prêtes » ou livrées aujourd'hui sont concernées (l'historique n'est jamais recalculé). `GEOCODE_SCHEDULER=off`
+  désactive le passage automatique (tests). **Trafic en temps réel** (bouton « Trafic » de la carte et
   durée avec trafic par tournée) : voir « Trafic en temps réel (TomTom) » plus bas ; sans clé TomTom, rien ne change.
   **Fond de carte** : Plan (OpenStreetMap), Plan IGN ou Satellite (photos aériennes IGN, sans clé, via la Géoplateforme
   `data.geopf.fr`) ; le choix est retenu dans le navigateur, et si un fond ne s'affiche pas du tout la carte revient au plan avec un message.
@@ -1262,7 +1270,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (485 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (488 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

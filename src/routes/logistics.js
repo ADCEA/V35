@@ -5,6 +5,7 @@ const { requireAdmin } = require('../middleware/auth');
 const { serializeOrder } = require('../utils/serializeOrder');
 const { geocodeAddress, sleep, nearestNeighborRoute } = require('../utils/geocode');
 const { queryForOrder } = require('../utils/orderGeocode');
+const { mapOrders, needsCoords, geocodeOrder, pendingCount, refreshOrderCoords } = require('../utils/orderCoords');
 const { buildPreparationSlipPdf } = require('../utils/pdf');
 const { legGeometry } = require('../utils/roadRoute');
 const { parisDay } = require('../utils/orderDelivery');
@@ -388,18 +389,20 @@ async function ensureOrdersCoords(orders) {
   const geocoded = [];
   const failed = [];
   for (const order of orders) {
-    if (order.lat != null && order.lng != null) {
+    const has = order.lat != null && order.lng != null;
+    if (has && !needsCoords(order)) {
       geocoded.push(order);
       continue;
     }
     try {
-      const coords = await geocodeAddress(queryForOrder(order));
-      if (!coords) { failed.push(order); continue; }
-      db.prepare('UPDATE orders SET lat = ?, lng = ? WHERE id = ?').run(coords.lat, coords.lng, order.id);
-      geocoded.push({ ...order, lat: coords.lat, lng: coords.lng });
-      await sleep(1100); // respecte la limite ~1 req/s de Nominatim
+      const coords = await geocodeOrder(order);
+      if (coords) {
+        geocoded.push({ ...order, lat: coords.lat, lng: coords.lng });
+        await sleep(1100); // respecte la limite ~1 req/s de Nominatim
+      } else if (has) geocoded.push(order);   // introuvable avec l'adresse actuelle : on garde l'ancien point plutôt que rien
+      else failed.push(order);
     } catch (err) {
-      failed.push(order);
+      if (has) geocoded.push(order); else failed.push(order);
     }
   }
   return { geocoded, failed };
@@ -446,38 +449,7 @@ router.post('/optimize-route', async (req, res) => {
 const DRIVER_COLORS = ['#1D91FF', '#E0574B', '#2FB27A', '#F5A623', '#8A5CF6', '#0EA5A5', '#D6459E', '#6B7C3A'];
 const GPS_FRESH_MS = 10 * 60 * 1000;   // au-delà, la position partagée est jugée périmée : on retombe sur la dernière livraison
 const GEOCODE_RETRY_MS = 10 * 60 * 1000;
-
-// Adresses de la carte qui n'ont pas encore de coordonnées : géocodées EN ARRIÈRE-PLAN (une par seconde, comme l'exige
-// Nominatim), pour que la carte s'affiche tout de suite et se complète aux rafraîchissements suivants.
-const geocodeTriedAt = new Map();   // id de commande -> instant du dernier essai infructueux
-let geocoding = false;
 let depotTriedAt = 0;
-
-function mapOrders() {
-  const since = new Date(Date.now() - 36 * 3600 * 1000).toISOString();
-  const today = parisDay();
-  return db.prepare(`
-    SELECT * FROM orders
-    WHERE status = 'prete' OR (status = 'livree' AND driver_id IS NOT NULL AND delivered_at IS NOT NULL AND delivered_at >= ?)
-  `).all(since).filter(o => o.status === 'prete' || parisDay(o.delivered_at) === today);
-}
-
-async function geocodeMissing() {
-  if (geocoding) return;
-  geocoding = true;
-  try {
-    const todo = mapOrders().filter(o => o.lat == null && !(o.delivered_lat != null) && o.adresse
-      && !(geocodeTriedAt.get(o.id) > Date.now() - GEOCODE_RETRY_MS)).slice(0, 25);
-    for (const o of todo) {
-      try {
-        const c = await geocodeAddress(queryForOrder(o));
-        if (c) db.prepare('UPDATE orders SET lat = ?, lng = ? WHERE id = ?').run(c.lat, c.lng, o.id);
-        else geocodeTriedAt.set(o.id, Date.now());
-      } catch { geocodeTriedAt.set(o.id, Date.now()); }
-      await sleep(1100);
-    }
-  } finally { geocoding = false; }
-}
 
 const minutesBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 60000);
 
@@ -559,13 +531,15 @@ function buildMap() {
 
   const unassigned = orders.filter(o => o.status === 'prete' && o.driver_id == null).map(stopOf).map(clean);
   const unassignedMissing = unassigned.filter(s => s.lat == null).length;
-  if (missing + unassignedMissing > 0) geocodeMissing().catch(() => {});
+  // Points manquants, ou périmés (calculés avec une autre adresse, ou avant que le calcul soit tracé) : recalculés en arrière-plan.
+  const recalculating = missing + unassignedMissing > 0 || pendingCount(orders) > 0;
+  if (recalculating) refreshOrderCoords().catch(() => {});
 
   return {
     depot,
     drivers: outDrivers,
     unassigned,
-    geocoding: missing + unassignedMissing > 0,
+    geocoding: recalculating,
     generatedAt: new Date().toISOString(),
   };
 }
