@@ -166,6 +166,14 @@ L'administration est organisée en sous-onglets (les articles, tarifs et fiches 
   chauffeur le même jour sont évaluées séparément.
   API : `GET/POST /api/admin/logistics/tours`, `PUT/DELETE …/tours/:id`, `GET …/tours/plan?date=AAAA-MM-JJ`, `POST …/tours/apply`,
   `GET …/tours/forecast?days=28` (14 à 60 jours).
+- **Coûts de livraison** (Statistiques, sous la répartition du linge) — ce que coûtent les livraisons de la période choisie : coût
+  total, par livraison, au kilomètre et au kilo livré, avec le détail par poste (carburant/pneus/usure = km × €/km ; chauffeur =
+  temps de tournée × €/h ; entretien des véhicules = dépenses saisies dans le Garage ; frais fixes = montant mensuel au prorata des
+  jours), par chauffeur et jour par jour. Le temps de tournée est estimé comme sur le lien du livreur (km ÷ vitesse moyenne + minutes
+  par arrêt, réglages de la Logistique). Les trois réglages (€/km, €/h, frais fixes par mois) se saisissent dans le bloc lui-même ;
+  un poste sans réglage n'est pas compté et le total est alors signalé « partiel ». Les livraisons sans distance (tournée jamais
+  optimisée) comptent dans les arrêts mais pas dans les km. API : `GET /api/admin/stats/delivery-costs?from=&to=`,
+  `PUT /api/admin/stats/delivery-costs/settings` (réglages dans `prod_settings`).
 - **Équipe** — collaborateurs rattachés à une BU ou à une machine, badgeuse de l'atelier, présence en direct et heures
   pointées par poste (voir « Équipe (RH) et badgeuse »).
 - **Statistiques** — un seul filtre de dates en haut de page pilote tout :

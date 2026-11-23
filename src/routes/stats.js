@@ -79,6 +79,17 @@ router.get('/families', (req, res) => {
   try { res.json(linenFamilies.breakdown(dailyStats.period(req.query.from, req.query.to))); } catch (e) { dailyFail(res, e); }
 });
 
+// GET /api/admin/stats/delivery-costs?from=&to= — coûts de livraison de la période : carburant et usure (km × coût au km), chauffeur
+// (temps de tournée × coût horaire), entretien des véhicules (Garage) et frais fixes au prorata ; par livraison, au km et au kilo,
+// par chauffeur et par jour (voir utils/deliveryCosts.js). Les réglages (€/km, €/h, frais fixes mensuels) se lisent et s'écrivent ici.
+const deliveryCosts = require('../utils/deliveryCosts');
+router.get('/delivery-costs', (req, res) => {
+  try { res.json(deliveryCosts.compute(dailyStats.period(req.query.from, req.query.to))); } catch (e) { dailyFail(res, e); }
+});
+router.put('/delivery-costs/settings', (req, res) => {
+  try { res.json({ settings: deliveryCosts.saveSettings(req.body) }); } catch (e) { dailyFail(res, e); }
+});
+
 // GET /api/admin/stats/daily?from=AAAA-MM-JJ&to=AAAA-MM-JJ — exploitation jour par jour (sans montants :
 // ceux-ci sont dans /api/admin/billing/stats/daily, derrière le verrou de la Facturation).
 router.get('/daily', (req, res) => {
