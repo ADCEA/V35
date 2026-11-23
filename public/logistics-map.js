@@ -13,32 +13,47 @@
   // test/fonds-de-carte.test.js le vérifie. Les tuiles IGN sont servies sans clé par la Géoplateforme (WMTS, grille « PM » = Web Mercator).
   const IGN = (layer, format) => `https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=normal&FORMAT=${format}&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`;
   const IGN_ATTR = '© <a href="https://www.ign.fr/" target="_blank" rel="noopener">IGN</a>';
+  // « Navigation » : fond vectoriel clair (public/fonds/navigation.json, tuiles OpenFreeMap) dessiné par MapLibre : voir fond-navigation.js.
   const BASEMAPS = [
+    { id: 'nav', label: 'Navigation', gl: true },
     { id: 'plan', label: 'Plan', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
       opts: { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' } },
-    { id: 'ign', label: 'Plan IGN', url: IGN('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'image/png'), opts: { maxZoom: 19, maxNativeZoom: 18, attribution: IGN_ATTR } },
     { id: 'sat', label: 'Satellite', url: IGN('ORTHOIMAGERY.ORTHOPHOTOS', 'image/jpeg'), opts: { maxZoom: 19, maxNativeZoom: 19, attribution: IGN_ATTR } },
   ];
   const BASE = { id: null, layer: null, loaded: 0, failed: 0 };
   const baseStore = {
-    get() { try { const v = localStorage.getItem('cezanne.basemap'); return BASEMAPS.some(b => b.id === v) ? v : 'plan'; } catch { return 'plan'; } },
+    get() { try { const v = localStorage.getItem('cezanne.basemap'); return BASEMAPS.some(b => b.id === v) ? v : 'nav'; } catch { return 'nav'; } },
     set(v) { try { localStorage.setItem('cezanne.basemap', v); } catch { /* pas de stockage : le choix n'est pas retenu */ } },
   };
 
   function setBasemap(id, { save = true } = {}) {
     const def = BASEMAPS.find(b => b.id === id) || BASEMAPS[0];
     if (!map) return;
+    if (def.gl && !(window.FondNavigation && FondNavigation.supported())) {
+      status('Le fond « Navigation » ne peut pas s\'afficher sur cet appareil : retour au plan.', true);
+      return setBasemap('plan', { save: false });
+    }
     if (BASE.layer) map.removeLayer(BASE.layer);
     BASE.id = def.id; BASE.loaded = 0; BASE.failed = 0;
-    BASE.layer = L.tileLayer(def.url, { zIndex: 1, ...def.opts });
-    BASE.layer.on('tileload', () => { BASE.loaded++; });
-    // Un fond qui ne s'affiche pas du tout (service injoignable) : retour au plan plutôt qu'une carte vide, avec l'explication.
-    BASE.layer.on('tileerror', () => {
-      if (def.id === 'plan' || BASE.id !== def.id) return;
-      BASE.failed++;
-      if (BASE.failed >= 4 && BASE.loaded === 0) { status(`Fond « ${def.label} » indisponible : retour au plan.`, true); setBasemap('plan', { save: false }); }
-    });
-    BASE.layer.addTo(map).bringToBack();
+    if (def.gl) {
+      // Style ou tuiles injoignables : retour au plan plutôt qu'une carte vide, avec l'explication.
+      BASE.layer = FondNavigation.create(() => {
+        if (BASE.id !== def.id) return;
+        status('Fond « Navigation » indisponible : retour au plan.', true);
+        setBasemap('plan', { save: false });
+      });
+      BASE.layer.addTo(map);
+    } else {
+      BASE.layer = L.tileLayer(def.url, { zIndex: 1, ...def.opts });
+      BASE.layer.on('tileload', () => { BASE.loaded++; });
+      // Un fond qui ne s'affiche pas du tout (service injoignable) : retour au plan plutôt qu'une carte vide, avec l'explication.
+      BASE.layer.on('tileerror', () => {
+        if (def.id === 'plan' || BASE.id !== def.id) return;
+        BASE.failed++;
+        if (BASE.failed >= 4 && BASE.loaded === 0) { status(`Fond « ${def.label} » indisponible : retour au plan.`, true); setBasemap('plan', { save: false }); }
+      });
+      BASE.layer.addTo(map).bringToBack();
+    }
     if (save) baseStore.set(def.id);
     document.querySelectorAll('#tours-basemaps [data-basemap]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.basemap === def.id)));
   }

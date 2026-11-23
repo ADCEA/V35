@@ -28,14 +28,17 @@ const conf = () => ({
 // Politique de contenu des PAGES : aucun script ne peut venir d'ailleurs que de ce site (ni script en ligne, ni autre domaine),
 // de sorte qu'un texte piégé qui passerait entre les mailles de l'échappement ne s'exécuterait pas. Les styles en ligne restent
 // permis (l'interface en utilise beaucoup) ; polices de Google Fonts ; aperçus PDF dans des cadres du même site ;
-// fonds de carte de la carte des tournées : OpenStreetMap, et l'IGN (plan et photos aériennes, https://data.geopf.fr) — images seulement.
+// fonds de carte de la carte des tournées : OpenStreetMap (plan), l'IGN (photos aériennes, https://data.geopf.fr) — images seulement —,
+// et le fond « Navigation » : tuiles vectorielles d'OpenFreeMap (https://tiles.openfreemap.org : style, tuiles et polices, lus par
+// fetch donc dans connect-src), dessinées par MapLibre GL en version « CSP » (son worker est un fichier du site, pas un blob).
 const CSP_PAGE = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
   "img-src 'self' data: blob: https://tile.openstreetmap.org https://data.geopf.fr",
-  "connect-src 'self'",
+  "connect-src 'self' https://tiles.openfreemap.org",
+  "worker-src 'self'",
   "frame-src 'self' blob:",
   "object-src 'self' blob:",
   "base-uri 'self'",

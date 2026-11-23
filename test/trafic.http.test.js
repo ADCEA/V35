@@ -345,14 +345,15 @@ test('sans clé, clé mal formée ou adresse refusée : désactivé, rien ne par
   }
 });
 
-test('la page ne connaît ni la clé, ni TomTom : politique de contenu inchangée', async () => {
+test('la page ne connaît ni la clé, ni TomTom : politique de contenu sans TomTom', async () => {
   const a = await admin();
   try {
     const res = await a.s.call('GET', '/', null, true);
     const csp = res.headers.get('content-security-policy');
     assert.ok(!/tomtom/i.test(csp), csp);
     assert.match(csp, /img-src 'self' data: blob: https:\/\/tile\.openstreetmap\.org https:\/\/data\.geopf\.fr;/);
-    assert.match(csp, /connect-src 'self';/);
+    // le seul ajout autorisé côté navigateur est le service du fond « Navigation » ; jamais TomTom
+    assert.match(csp, /connect-src 'self' https:\/\/tiles\.openfreemap\.org;/);
     const html = await res.text();
     assert.ok(!html.includes(KEY));
   } finally { await a.done(); }

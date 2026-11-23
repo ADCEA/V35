@@ -12,7 +12,6 @@
   const IGN = (layer, format) => `https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=normal&FORMAT=${format}&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`;
   const BASEMAPS = {
     plan: { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', opts: { maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' } },
-    ign: { url: IGN('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'image/png'), opts: { maxZoom: 19, maxNativeZoom: 18, attribution: '© IGN' } },
     sat: { url: IGN('ORTHOIMAGERY.ORTHOPHOTOS', 'image/jpeg'), opts: { maxZoom: 19, maxNativeZoom: 19, attribution: '© IGN' } },
   };
 
@@ -51,13 +50,21 @@
       boxZoom: false, keyboard: false, touchZoom: false, tap: false, zoomSnap: 0.25,
     }).setView([44.055, 5.049], 12);
     const want = new URLSearchParams(location.search).get('fond');
-    setBasemap(BASEMAPS[want] ? want : 'plan');
+    setBasemap(want === 'nav' || BASEMAPS[want] ? want : 'nav');
     layer = L.layerGroup().addTo(map);
   }
 
   function setBasemap(id) {
-    const def = BASEMAPS[id];
     if (baseLayer) map.removeLayer(baseLayer);
+    // « Navigation » : fond vectoriel clair (fond-navigation.js). Sans WebGL, ou s'il ne s'affiche pas : le plan.
+    if (id === 'nav') {
+      if (!(window.FondNavigation && FondNavigation.supported())) return setBasemap('plan');
+      const nav = FondNavigation.create(() => { if (baseLayer === nav) setBasemap('plan'); });
+      baseLayer = nav;
+      nav.addTo(map);
+      return;
+    }
+    const def = BASEMAPS[id];
     let loaded = 0; let failed = 0;
     baseLayer = L.tileLayer(def.url, { zIndex: 1, ...def.opts });
     baseLayer.on('tileload', () => { loaded++; });
