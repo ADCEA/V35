@@ -970,6 +970,16 @@ Optionnel : sans clé, le bouton « Trafic » n'apparaît pas et le reste de l'a
   prévu à cette heure ; si l'heure est passée, le calcul part de maintenant. Les adresses viennent des dernières commandes
   de chaque hôtel (un hôtel jamais localisé est signalé et laissé de côté). Conduite seule : le temps passé chez chaque hôtel
   n'est pas compté.
+- sur le **lien du livreur** (`tournee.html`) : sous le résumé de la tournée, une carte « Circulation fluide / chargée / très chargée »
+  (retard dû au trafic sur l'ensemble de la tournée), l'heure d'arrivée au **dernier arrêt** et au **retour au dépôt**, la durée de
+  conduite, et sur **chaque arrêt** « ≈ 14:42 · 12 min de route · 3,2 km » avec « +N min de trafic » à partir de 3 min. Les
+  heures **comptent le temps passé sur place** à chaque arrêt (réglage « minutes par arrêt » de l'atelier, 20 par défaut) et
+  suivent l'ordre affiché sur le lien. Le départ est la position partagée du téléphone, sinon la dernière livraison validée, sinon
+  le dépôt (la page invite à partager sa position pour des heures plus justes). Bouton **« Voir la carte du trafic »** : arrêts
+  numérotés, dépôt, position du livreur, couche de trafic (case à cocher) et, en touchant la carte, la vitesse actuelle et
+  habituelle à cet endroit ; Leaflet n'est chargé qu'à l'ouverture de la carte. Recalcul à l'ouverture de la page, après chaque
+  livraison validée, puis toutes les 3 min tant que la page est visible (bouton ↻ pour forcer). En cas de panne ou de plafond
+  atteint, le livreur garde sa tournée et les dernières heures connues, avec un message sobre ; sans clé, rien n'apparaît.
 
 **Mise en place**
 1. Créez un compte sur developer.tomtom.com et une clé d'API. Dans l'espace TomTom, n'activez sur cette clé que les services
@@ -979,7 +989,8 @@ Optionnel : sans clé, le bouton « Trafic » n'apparaît pas et le reste de l'a
    pas versionné).
 3. Réglages facultatifs : `TOMTOM_REQUESTS_PER_DAY` (1 500 : itinéraires et vitesses) et `TOMTOM_TILES_PER_DAY` (15 000 : tuiles de
    la couche) — à ajuster selon l'offre de votre compte TomTom ; `TOMTOM_TRAVEL_MODE` (`car`, `van` ou `truck`, défaut `car`) ;
-   `TRAFFIC=off` coupe tout sans retirer la clé.
+   `TRAFFIC=off` coupe tout sans retirer la clé ; `TOMTOM_DRIVER_REQUESTS_PER_DAY` (600) et `TOMTOM_DRIVER_TILES_PER_DAY` (4 000) :
+   plafond **par lien de livreur** et par jour (en plus du plafond général).
 
 **Sécurité** (la clé se paie à l'usage et TomTom l'attend dans l'adresse de chaque requête, d'où ces précautions)
 - la clé reste **sur le serveur** : le navigateur ne parle qu'à `/api/admin/traffic/*` (réservé à l'administrateur connecté,
@@ -997,6 +1008,14 @@ Optionnel : sans clé, le bouton « Trafic » n'apparaît pas et le reste de l'a
   demandes identiques simultanées sont regroupées ; cadence limitée par session (900 tuiles/min, 40 calculs/min) ;
 - **coupe-circuit** : clé refusée (401/403) → suspension 30 min et ligne « Clé TomTom refusée » dans Réglages → Sécurité ;
   trop de demandes (429) ou 5 pannes de suite → pause de 2 min ; plafond atteint → ligne « Plafond quotidien TomTom atteint » ;
+- **lien du livreur** : un lien est un secret transmis par message, donc plus exposé qu'une session d'administration. Les trois
+  routes `/api/driver-portal/<jeton>/traffic` (heures de passage), `…/traffic/tiles/…` (tuiles) et `…/traffic/speed` (vitesse)
+  vérifient le lien à chaque appel (inconnu → 404, rien n'est envoyé à TomTom) et ne donnent que **la tournée de ce livreur** :
+  l'itinéraire est lu dans la base, la page n'envoie aucune coordonnée à calculer. Cadence limitée par lien (12 calculs/min,
+  400 tuiles/min) et par adresse IP, **plafond quotidien par lien** (message « Limite quotidienne de trafic atteinte pour ce lien »,
+  la tournée reste utilisable), le tout compté en base. Le lien n'est jamais envoyé à TomTom ni écrit dans un journal : les
+  limiteurs utilisent une empreinte du lien (c'était le lien lui-même pour le partage de position), et les refus d'origine
+  croisée le masquent ;
 - tout texte d'erreur est **nettoyé de la clé** avant d'être écrit dans un journal, et les erreurs renvoyées à la page sont des
   phrases fixes (jamais l'adresse appelée) ;
 - clé au mauvais format (autre chose que 16 à 128 lettres, chiffres, `_`, `-`) : trafic désactivé, et la clé n'est jamais répétée.

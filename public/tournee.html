@@ -110,6 +110,44 @@ header .date{font-size:13px;color:#B7CEE6;}
 .share-btn{width:100%;padding:11px;border-radius:8px;border:none;background:var(--brand);color:#fff;font-size:13px;font-weight:600;}
 .share-btn.stop{background:var(--bg);color:var(--ink);border:1px solid var(--line);}
 
+/* ---------- trafic en temps réel (tournee-trafic.js) ---------- */
+.tr-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 20px;}
+.tr-card[hidden],.tr-eta[hidden],#tr-mapbox[hidden]{display:none;}
+.tr-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.tr-pill{display:inline-flex;align-items:center;gap:8px;font-family:'Fredoka',sans-serif;font-size:14.5px;font-weight:600;padding:6px 12px 6px 10px;border-radius:999px;background:#E6F6EE;color:#136B46;}
+.tr-pill::before{content:'';width:9px;height:9px;border-radius:50%;background:currentColor;}
+.tr-pill.mid{background:#FFF1D6;color:#7C5200;}
+.tr-pill.bad{background:#FCE6E3;color:#A8321F;}
+.tr-refresh{margin-left:auto;min-width:44px;min-height:44px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font-size:18px;line-height:1;}
+.tr-refresh:disabled{opacity:.55;}
+.tr-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:10px 14px;margin:0 0 8px;}
+.tr-facts div{min-width:0;}
+.tr-facts dt{font-size:11.5px;color:var(--steel);}
+.tr-facts dd{margin:1px 0 0;font-family:'Fredoka',sans-serif;font-size:19px;font-weight:600;color:var(--ink);}
+.tr-facts dd small{display:block;font-family:'IBM Plex Sans',sans-serif;font-size:11px;font-weight:400;color:var(--steel);}
+.tr-note{margin:6px 0 0;font-size:11.5px;line-height:1.45;color:var(--steel);}
+.tr-err{margin:8px 0 0;font-size:12px;line-height:1.45;color:var(--rust);font-weight:500;}
+.tr-map-btn{width:100%;min-height:44px;margin-top:10px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font-size:13px;font-weight:500;}
+.tr-refresh:focus-visible,.tr-map-btn:focus-visible,.tr-chk input:focus-visible{outline:3px solid var(--brand);outline-offset:2px;}
+.tr-mapbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0 8px;font-size:12.5px;}
+.tr-chk{display:flex;align-items:center;gap:8px;min-height:36px;}
+.tr-chk input{width:20px;height:20px;accent-color:var(--brand);}
+.tr-legend{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--steel);}
+.tr-legend i{display:block;width:54px;height:7px;border-radius:4px;background:linear-gradient(90deg,#3BB273,#F2C230,#E0574B,#8A1F1F);}
+#tr-map{height:min(58vh,380px);border-radius:10px;border:1px solid var(--line);font-family:inherit;}
+.tr-pin span{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:var(--brand);color:#fff;border:2px solid #fff;box-shadow:0 1px 5px rgba(22,50,79,.45);font-family:'Fredoka',sans-serif;font-size:14px;font-weight:600;}
+.tr-depot span{border-radius:8px;background:var(--ink);}
+.tr-me span{width:18px;height:18px;margin:6px;background:#1D91FF;border-width:3px;box-shadow:0 0 0 3px rgba(29,145,255,.3);}
+.tr-from span{width:16px;height:16px;margin:7px;background:var(--steel);border-width:2px;font-size:0;}
+.tr-pop{font-size:12.5px;line-height:1.45;}
+.tr-pop-name{font-weight:600;}
+.tr-mute{color:var(--steel);}
+.tr-eta{display:flex;flex-wrap:wrap;align-items:baseline;gap:1px 10px;margin:-4px 0 10px;font-size:12.5px;color:var(--steel);}
+.tr-eta b{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:14px;color:var(--ink);}
+.tr-delay{font-weight:600;}
+.tr-delay.mid{color:#7C5200;}
+.tr-delay.bad{color:#A8321F;}
+
 /* ---------- validation d'une livraison ---------- */
 .deliver-zone{margin-top:12px;}
 .deliver-btn{width:100%;padding:13px;border-radius:9px;border:none;background:var(--teal);color:#fff;font-size:14px;font-weight:600;}
@@ -144,5 +182,6 @@ footer{text-align:center;font-size:11px;color:var(--steel-light);padding:20px 16
 </div>
 
 <script src="/tournee.js"></script>
+<script src="/tournee-trafic.js"></script>
 </body>
 </html>

@@ -17,7 +17,8 @@
 //
 // Réglages (variables d'environnement) : TOMTOM_API_KEY (obligatoire, 16 à 128 caractères : lettres, chiffres, _ et -),
 // TOMTOM_REQUESTS_PER_DAY (1500, itinéraires et vitesses), TOMTOM_TILES_PER_DAY (15000, tuiles),
-// TOMTOM_TRAVEL_MODE (car | van | truck, défaut car), TRAFFIC=off (coupe tout), TOMTOM_BASE_URL (tests : serveur factice).
+// TOMTOM_TRAVEL_MODE (car | van | truck, défaut car), TRAFFIC=off (coupe tout), TOMTOM_BASE_URL (tests : serveur factice),
+// TOMTOM_DRIVER_TILES_PER_DAY (4000) et TOMTOM_DRIVER_REQUESTS_PER_DAY (600) : plafond de chaque lien de livreur.
 const crypto = require('crypto');
 const db = require('../db');
 const securityLog = require('./securityLog');
@@ -35,7 +36,7 @@ const FRANCE = { latMin: 41.0, latMax: 51.5, lngMin: -5.6, lngMax: 9.8 };   // F
 const MIN = 60 * 1000;
 
 class TrafficError extends Error {
-  /** @param {string} code  disabled | key_invalid | bad_config | key_rejected | budget | paused | upstream | bad_input */
+  /** @param {string} code  disabled | key_invalid | bad_config | key_rejected | budget | paused | upstream | bad_input | no_start | driver_quota */
   constructor(code, message, http) { super(message); this.code = code; this.http = http || 502; }
 }
 const MESSAGES = {
@@ -111,6 +112,17 @@ function reserve(kind) {
   }
   return ok;
 }
+
+/**
+ * Plafond quotidien PAR LIEN DE LIVREUR (un lien est un secret transmis par message : s'il fuit, il ne doit pas pouvoir vider le
+ * budget du site). Compte les demandes servies, mémoire comprise. kind : « drv<id>:tiles » ou « drv<id>:api ». Faux = plafond atteint.
+ */
+function spend(kind, limit) {
+  const day = utcDay();
+  if (purgeDay !== day) { purgeDay = day; try { purge.run(); } catch { /* sans gravité */ } }
+  return reserveTx(kind, limit);
+}
+const driverLimits = () => ({ tiles: posInt(process.env.TOMTOM_DRIVER_TILES_PER_DAY, 4000), api: posInt(process.env.TOMTOM_DRIVER_REQUESTS_PER_DAY, 600) });
 
 // ---------- coupe-circuit ----------
 const breaker = { failures: 0, openUntil: 0, reason: null };
@@ -214,6 +226,13 @@ function point(lat, lng) {
   if (!Number.isFinite(la) || !Number.isFinite(lo)) throw bad('Coordonnées invalides.');
   if (la < FRANCE.latMin || la > FRANCE.latMax || lo < FRANCE.lngMin || lo > FRANCE.lngMax) throw bad('Position hors de France.');
   return { lat: Math.round(la * 1e5) / 1e5, lng: Math.round(lo * 1e5) / 1e5 };
+}
+
+/** Paramètres d'adresse d'une tuile (chaînes) → { style, z, x, y } contrôlés ; lève bad_input sinon. y arrive sous la forme « 1488.png ». */
+function parseTileParams({ style, z, x, y }) {
+  const ym = /^(\d{1,7})\.png$/.exec(String(y));
+  if (!/^[a-z0-9-]{1,20}$/.test(String(style)) || !/^\d{1,2}$/.test(String(z)) || !/^\d{1,7}$/.test(String(x)) || !ym) throw bad('Tuile invalide.');
+  return { style: String(style), z: Number(z), x: Number(x), y: Number(ym[1]) };
 }
 
 // ---------- tuiles de circulation ----------
@@ -325,4 +344,4 @@ function status() {
   };
 }
 
-module.exports = { tile, speedAt, route, status, scrub, TrafficError, STYLES, TILE_ZOOM, MAX_POINTS, _breaker: breaker };
+module.exports = { tile, parseTileParams, speedAt, route, status, scrub, spend, driverLimits, TrafficError, STYLES, TILE_ZOOM, MAX_POINTS, _breaker: breaker };

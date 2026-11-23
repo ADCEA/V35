@@ -21,11 +21,12 @@ async function startServer({ dataDir, env = {} } = {}) {
   const full = { ...process.env, DATA_DIR, PORT: String(PORT), SESSION_SECRET: 'test-secret', BACKUP_SCHEDULER: 'off', CLIENT_CODE_POLICY: 'legacy', ...env };
   delete full.ODOO_URL; delete full.ODOO_API_KEY;
   for (const k of Object.keys(env)) if (env[k] === undefined) delete full[k];
+  let output = '';   // sortie du serveur (journaux), pour vérifier ce qu'il écrit
   const child = spawn('node', [path.join(__dirname, '..', 'src', 'server.js')], { env: full, stdio: ['ignore', 'pipe', 'pipe'] });
   await new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('serveur non démarré')), 15000);
-    child.stdout.on('data', d => { if (String(d).includes('serveur lancé')) { clearTimeout(t); resolve(); } });
-    child.stderr.on('data', d => { if (process.env.TEST_VERBOSE) process.stderr.write(d); });
+    child.stdout.on('data', d => { output = (output + d).slice(-200000); if (String(d).includes('serveur lancé')) { clearTimeout(t); resolve(); } });
+    child.stderr.on('data', d => { output = (output + d).slice(-200000); if (process.env.TEST_VERBOSE) process.stderr.write(d); });
     child.on('exit', c => { clearTimeout(t); reject(new Error('serveur arrêté (' + c + ')')); });
   });
 
@@ -51,7 +52,7 @@ async function startServer({ dataDir, env = {} } = {}) {
     child.on('exit', () => { exited = true; r(); });
     child.kill();
   });
-  return { DATA_DIR, BASE, call, upload, stop, newClient: () => { cookie = ''; } };
+  return { DATA_DIR, BASE, call, upload, stop, logs: () => output, newClient: () => { cookie = ''; } };
 }
 
 module.exports = { startServer };

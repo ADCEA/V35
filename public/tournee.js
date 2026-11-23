@@ -135,6 +135,7 @@ async function load(){
 }
 
 function render(data){
+  if (typeof trBeforeRender === 'function') trBeforeRender();   // trafic (tournee-trafic.js) : la carte est détruite avant que la page soit redessinée
   const dateLabel = new Date(data.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 
   const w = data.weather;
@@ -204,6 +205,7 @@ function render(data){
         <div class="stop-societe">${esc(s.societe)}</div>
         <div class="stop-ticket">${esc(s.ticket)}</div>
         <div class="stop-addr">${esc(s.adresse)}</div>
+        <div class="tr-eta" data-order="${esc(s.orderId)}" hidden></div>
         <div class="stop-actions">
           <a class="maps" href="${esc(safeUrl(s.mapsUrl))}" target="_blank" rel="noopener">🧭 Itinéraire</a>
           ${s.tel ? `<a class="call" href="tel:${esc(String(s.tel).replace(/[^\d+]/g, ''))}">📞 Appeler</a>` : ''}
@@ -250,6 +252,7 @@ function render(data){
         ` : ''}
       </div>
       ${!data.routeSummary ? '<p style="font-size:11.5px;color:var(--steel-light);margin:-12px 0 16px;">Distance et durée non disponibles — la tournée n\'a pas encore été optimisée côté admin.</p>' : ''}
+      <div id="traffic-card" class="tr-card" hidden><div id="tr-summary"></div><div id="tr-mapbox" hidden></div></div>
       <div class="route">${stopsHtml}</div>
       ${doneHtml}
     </div>
@@ -257,6 +260,7 @@ function render(data){
   `;
 
   paintShare();
+  if (typeof trAfterRender === 'function') trAfterRender(data);
   document.querySelectorAll('[data-deliver-ask]').forEach(btn => {
     btn.addEventListener('click', () => {
       const zone = document.getElementById(`deliver-zone-${btn.dataset.deliverAsk}`);
