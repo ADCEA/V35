@@ -143,6 +143,14 @@ if (!ordersColumns.includes('driver_id')) {
 if (!ordersColumns.includes('delivery_sequence')) {
   db.exec(`ALTER TABLE orders ADD COLUMN delivery_sequence INTEGER;`);
 }
+// Tournées fixes : tour_id = tournée qui a affecté la commande automatiquement ; tour_manual = 1 dès que l'équipe
+// a placé (ou retiré) la commande à la main, pour que l'automatisme ne la déplace plus jamais.
+if (!ordersColumns.includes('tour_id')) {
+  db.exec(`ALTER TABLE orders ADD COLUMN tour_id INTEGER REFERENCES fixed_tours(id) ON DELETE SET NULL;`);
+}
+if (!ordersColumns.includes('tour_manual')) {
+  db.exec(`ALTER TABLE orders ADD COLUMN tour_manual INTEGER NOT NULL DEFAULT 0;`);
+}
 db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_production ON orders(production_stage);`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_orders_driver ON orders(driver_id);`);
 

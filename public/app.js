@@ -1857,6 +1857,7 @@ let logisticsOrdersCache = [];
 
 async function renderLogisticsView() {
   if (window.ToursMap) window.ToursMap.show();
+  if (window.FixedTours) window.FixedTours.show();
   await ensureCartTypesCache();
   await renderTruckTypesList();
   await renderDriversList();

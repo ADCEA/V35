@@ -7,6 +7,7 @@ const { geocodeAddress, sleep, nearestNeighborRoute } = require('../utils/geocod
 const { buildPreparationSlipPdf } = require('../utils/pdf');
 const { legGeometry } = require('../utils/roadRoute');
 const { parisDay } = require('../utils/orderDelivery');
+const { assignPending } = require('../utils/fixedTours');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -46,6 +47,7 @@ router.delete('/drivers/:id', (req, res) => {
 // tournées avant même que tout soit prêt. Le frontend les distingue
 // visuellement (rouge = pas encore prête, vert = prête à partir).
 router.get('/orders', (req, res) => {
+  assignPending(); // tournées fixes : les commandes en attente rejoignent la tournée de leur hôtel
   const rows = db.prepare(`
     SELECT * FROM orders
     WHERE status IN ('recue', 'traitement', 'prete')
@@ -63,7 +65,8 @@ router.patch('/orders/:id', (req, res) => {
   if (!order) return res.status(404).json({ error: 'Commande introuvable.' });
 
   const { driverId, deliverySequence } = req.body || {};
-  db.prepare('UPDATE orders SET driver_id = ?, delivery_sequence = ? WHERE id = ?').run(
+  // Placement à la main : l'automatisme des tournées fixes ne touchera plus à cette commande.
+  db.prepare('UPDATE orders SET driver_id = ?, delivery_sequence = ?, tour_manual = 1, tour_id = NULL WHERE id = ?').run(
     driverId ?? null,
     deliverySequence ?? null,
     orderId
@@ -272,6 +275,7 @@ router.post('/pack/pdf', async (req, res) => {
 // du camion (poids), et si un camion réel est rattaché au chauffeur, à
 // vérifier que le volume tient réellement dedans.
 router.get('/loads', (req, res) => {
+  assignPending();
   const settings = db.prepare('SELECT truck_capacity_kg as truckCapacityKg, cart_weight_kg as cartWeightKg FROM admin WHERE id = 1').get()
     || { truckCapacityKg: 1200, cartWeightKg: 20 };
   const cartTypesRaw = db.prepare('SELECT * FROM cart_types ORDER BY length_cm * width_cm * height_cm DESC').all();
@@ -467,6 +471,7 @@ const minutesBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 60
 // restants) et la position du camion : position partagée par le livreur si elle est récente, sinon dernière livraison
 // validée, sinon dépôt.
 router.get('/map', (req, res) => {
+  assignPending();
   const adm = db.prepare('SELECT depot_address, depot_lat, depot_lng FROM admin WHERE id = 1').get() || {};
   let depot = null;
   if (adm.depot_lat != null && adm.depot_lng != null) depot = { lat: adm.depot_lat, lng: adm.depot_lng, address: adm.depot_address || null };

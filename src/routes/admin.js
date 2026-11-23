@@ -823,6 +823,8 @@ router.patch('/orders/:id/status', (req, res) => {
   db.prepare('UPDATE orders SET status = ?, livraison_prevue = ?, delivered_at = ?, delivered_lat = ?, delivered_lng = ? WHERE id = ?')
     .run(status, livraisonPrevue, deliveredAt, status === 'livree' ? (order.delivered_lat ?? null) : null, status === 'livree' ? (order.delivered_lng ?? null) : null, order.id);
 
+  if (status === 'prete') require('../utils/fixedTours').assignPending(); // tournées fixes
+
   // Notifie le logiciel du client (si intégré via API et webhook
   // configuré) avec les quantités définitives, sans jamais bloquer la
   // réponse ni faire échouer le changement de statut si l'appel rate.
