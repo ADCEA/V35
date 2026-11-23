@@ -99,6 +99,8 @@ router.get('/forecast', R((req, res) => {
   const nowMs = Date.now();
   res.json(F.dayPlan(req.query.day ? String(req.query.day) : rh.addDays(rh.parisDate(nowMs), 1), nowMs));
 }));
+// Durée estimée d'un lot en cours de saisie (poids par type de pièce, machines par étape) : rien n'est enregistré.
+router.post('/forecasts/estimate', R((req, res) => { res.json({ plan: F.estimateDraft(req.body || {}) }); }));
 router.post('/forecasts', R((req, res) => { res.status(201).json({ forecast: F.get(F.create(req.body || {})) }); }));
 router.post('/forecasts/copy', R((req, res) => { const b = req.body || {}; res.status(201).json({ copied: F.copyDay(b.from, b.to) }); }));
 router.put('/forecasts/:id', R((req, res) => { F.update(Number(req.params.id), req.body || {}); res.json({ forecast: F.get(Number(req.params.id)) }); }));

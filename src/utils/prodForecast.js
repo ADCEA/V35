@@ -4,10 +4,13 @@
 const db = require('../db');
 const rh = require('./rh');
 const P = require('./prodStore');
+const W = require('./washPlan');
 
 const MAX_AHEAD_DAYS = 60;
 const MAX_PER_DAY = 80;
 const { bad, clean, round1 } = P;
+const MAX_LINES = 6;
+const FAMILY_IDS = new Set(W.FAMILIES.map(f => f.id));
 
 const today = (nowMs = Date.now()) => rh.parisDate(nowMs);
 
@@ -22,6 +25,103 @@ function readDay(v, nowMs) {
 
 const optKg = (v, label) => (v === undefined || v === null || v === '' ? null : P.parseKg(v, label));
 
+// ---------- répartition par type de pièce et machines par étape ----------
+const loadFamilies = (id) => Object.fromEntries(db.prepare('SELECT family, weight_kg FROM lot_forecast_families WHERE forecast_id = ?').all(id).map(r => [r.family, r.weight_kg]));
+const loadLines = (id) => db.prepare('SELECT * FROM lot_forecast_machines WHERE forecast_id = ? ORDER BY stage, position, id').all(id)
+  .map(l => ({ stage: l.stage, machineId: l.machine_id, programId: l.program_id, weightKg: l.weight_kg }));
+
+/** { grand_plat: 40, eponge: 12 } → kilos par type de pièce (les zéros et vides sont ignorés). null ou {} efface la répartition. */
+function readFamilies(v) {
+  if (v === null || v === undefined) return {};
+  if (typeof v !== 'object' || Array.isArray(v)) throw bad('Répartition par type de pièce invalide.', 'BAD_FAMILIES');
+  const out = {};
+  for (const [k, raw] of Object.entries(v)) {
+    if (!FAMILY_IDS.has(k)) throw bad(`Type de pièce inconnu : ${k}.`, 'BAD_FAMILIES');
+    if (raw === '' || raw === null || raw === undefined || Number(String(raw).replace(',', '.')) === 0) continue;
+    out[k] = P.parseKg(raw, `Le poids « ${W.FAMILIES.find(f => f.id === k).label} »`);
+  }
+  return out;
+}
+
+/** Poids total et répartition retenus : dès qu'il y a une répartition par type de pièce, sa somme fait le poids du lot (un poids saisi à côté doit lui correspondre). */
+function resolveWeight(b, cur) {
+  const famsGiven = b.families !== undefined;
+  const families = famsGiven ? readFamilies(b.families) : (cur ? loadFamilies(cur.id) : {});
+  const sum = round1(Object.values(families).reduce((a, x) => a + x, 0));
+  const given = b.weightKg !== undefined ? optKg(b.weightKg, 'Le poids prévu') : undefined;
+  let weightKg = given !== undefined ? given : (cur ? cur.weight_kg : null);
+  if (sum > 0) {
+    if (given != null && Math.abs(given - sum) > 0.15) throw bad(`Le poids total (${given} kg) ne correspond pas à la somme des types de pièces (${sum} kg).`, 'BAD_WEIGHT');
+    weightKg = sum;
+  }
+  return { families, famsGiven, weightKg };
+}
+
+/** { lavage: [{machineId, programId, weightKg}], sechage: [...], finition: [...] } → lignes validées (kilos vides = part automatique). */
+function readMachines(v, totalKg) {
+  if (v === null || v === undefined) return [];
+  if (typeof v !== 'object' || Array.isArray(v)) throw bad('Machines invalides.', 'BAD_MACHINES');
+  const out = [];
+  for (const stage of Object.keys(v)) {
+    if (!W.STAGES.includes(stage)) throw bad(`Étape inconnue : ${stage}.`, 'BAD_STAGE');
+    const arr = v[stage];
+    if (!Array.isArray(arr)) throw bad('Machines invalides.', 'BAD_MACHINES');
+    if (arr.length > MAX_LINES) throw bad(`Au plus ${MAX_LINES} machines par étape.`, 'TOO_MANY');
+    const seen = new Set();
+    let given = 0;
+    for (const l of arr) {
+      const m = P.checkMachine(stage, (l || {}).machineId, 0);     // la capacité n'est pas un plafond ici : au-delà, la machine fait plusieurs passages
+      if (seen.has(m.id)) throw bad(`${m.name} est déjà dans cette étape.`, 'DUPLICATE_MACHINE');
+      seen.add(m.id);
+      let programId = null;
+      if (l.programId !== undefined && l.programId !== null && l.programId !== '') {
+        if (stage !== 'lavage') throw bad('Un programme ne se choisit que pour le lavage.', 'BAD_PROGRAM');
+        const pr = db.prepare('SELECT * FROM wash_programs WHERE id = ?').get(Number(l.programId));
+        if (!pr || !pr.active) throw bad('Programme inconnu ou retiré.', 'BAD_PROGRAM');
+        programId = pr.id;
+      }
+      const weightKg = l.weightKg === undefined || l.weightKg === null || l.weightKg === '' ? null : P.parseKg(l.weightKg, `Les kilos de ${m.name}`);
+      if (weightKg != null) given += weightKg;
+      out.push({ stage, machineId: m.id, programId, weightKg });
+    }
+    if (totalKg != null && given > totalKg + 0.05) throw bad(`Les kilos répartis en ${W.LABEL[stage].toLowerCase()} (${round1(given)} kg) dépassent le poids du lot (${totalKg} kg).`, 'BAD_WEIGHT');
+  }
+  return out;
+}
+
+function writeFamilies(id, families) {
+  db.prepare('DELETE FROM lot_forecast_families WHERE forecast_id = ?').run(id);
+  const ins = db.prepare('INSERT INTO lot_forecast_families (forecast_id, family, weight_kg) VALUES (?, ?, ?)');
+  for (const [k, kg] of Object.entries(families)) ins.run(id, k, kg);
+}
+function writeLines(id, lines) {
+  db.prepare('DELETE FROM lot_forecast_machines WHERE forecast_id = ?').run(id);
+  const ins = db.prepare('INSERT INTO lot_forecast_machines (forecast_id, stage, position, machine_id, program_id, weight_kg) VALUES (?, ?, ?, ?, ?, ?)');
+  const pos = {};
+  for (const l of lines) { pos[l.stage] = (pos[l.stage] || 0) + 1; ins.run(id, l.stage, pos[l.stage], l.machineId, l.programId, l.weightKg); }
+}
+
+/** Lignes à estimer pour une prévision : celles saisies, sinon la laveuse prévue à l'ancienne (colonnes machine_id / program_id). */
+function linesOf(f) {
+  const lines = loadLines(f.id);
+  if (!lines.some(l => l.stage === 'lavage') && f.machine_id) lines.unshift({ stage: 'lavage', machineId: f.machine_id, programId: f.program_id, weightKg: null });
+  return lines;
+}
+
+/** Durée estimée d'un brouillon (formulaire en cours de saisie) : même calcul que celui d'une prévision enregistrée, rien n'est écrit. */
+function estimateDraft(o) {
+  const b = o || {};
+  const w = resolveWeight(b, null);
+  const lines = readMachines(b.machines, w.weightKg);
+  return { ...planOut(w.weightKg, w.families, lines) };
+}
+
+function planOut(weightKg, families, lines) {
+  const est = W.estimate({ totalKg: weightKg, lines });
+  const famSum = round1(Object.values(families || {}).reduce((a, x) => a + x, 0));
+  return { weightKg, families: famSum > 0 ? W.familyList(families) : [], ...est };
+}
+
 /** Valide une saisie complète (création) ou partielle (modification, `cur` = prévision actuelle). */
 function read(o, cur, nowMs) {
   const b = o || {};
@@ -34,21 +134,27 @@ function read(o, cur, nowMs) {
   if (!type || (!type.active && !(cur && cur.linen_type_id === type.id))) throw bad('Choisissez le type de linge.', 'BAD_TYPE');
   out.linenTypeId = type.id;
 
-  out.weightKg = has('weightKg') ? optKg(b.weightKg, 'Le poids prévu') : (cur ? cur.weight_kg : null);
+  const w = resolveWeight(b, cur);
+  out.weightKg = w.weightKg;
+  out.families = w.families; out.famsGiven = w.famsGiven;
 
-  if (has('machineId')) {
-    if (b.machineId === null || b.machineId === '') out.machineId = null;
-    else { out.machineId = P.checkMachine('lavage', b.machineId, out.weightKg || 0).id; }
-  } else out.machineId = cur ? cur.machine_id : null;
-
-  if (has('programId')) {
-    if (b.programId === null || b.programId === '') out.programId = null;
-    else {
+  // Machines prévues : `machines` (plusieurs par étape) ou, comme avant, une seule laveuse `machineId` / `programId`.
+  out.lines = null;                                                  // null = inchangées
+  if (has('machines')) out.lines = readMachines(b.machines, out.weightKg);
+  else if (has('machineId') || has('programId')) {
+    const keep = cur ? loadLines(cur.id).filter(l => l.stage !== 'lavage') : [];
+    const machineId = has('machineId') ? (b.machineId === null || b.machineId === '' ? null : P.checkMachine('lavage', b.machineId, out.weightKg || 0).id) : (cur ? cur.machine_id : null);
+    let programId = has('programId') ? null : (cur ? cur.program_id : null);
+    if (has('programId') && b.programId !== null && b.programId !== '') {
       const pr = db.prepare('SELECT * FROM wash_programs WHERE id = ?').get(Number(b.programId));
       if (!pr || !pr.active) throw bad('Programme inconnu ou retiré.', 'BAD_PROGRAM');
-      out.programId = pr.id;
+      programId = pr.id;
     }
-  } else out.programId = cur ? cur.program_id : null;
+    out.lines = machineId ? [{ stage: 'lavage', machineId, programId, weightKg: null }, ...keep] : keep;
+  }
+  const first = out.lines ? out.lines.find(l => l.stage === 'lavage') : null;
+  out.machineId = out.lines ? (first ? first.machineId : null) : (cur ? cur.machine_id : null);
+  out.programId = out.lines ? (first ? first.programId : null) : (cur ? cur.program_id : null);
 
   out.note = has('note') ? (clean(b.note, 300) || null) : (cur ? cur.note : null);
 
@@ -65,10 +171,17 @@ function forecastOut(f, clients) {
     clientId: c.client_id, societe: c.societe, orderId: c.order_id, weightKg: c.weight_kg,
     orderTicket: c.order_id ? (db.prepare('SELECT ticket FROM orders WHERE id = ?').get(c.order_id) || {}).ticket || null : null,
   }));
+  const families = loadFamilies(f.id);
+  const lines = linesOf(f);
+  const plan = planOut(f.weight_kg, families, lines);
+  // Premier passage à lancer : la première laveuse prévue, avec au plus sa capacité (les charges suivantes se lancent ensuite, passage par passage).
+  const w1 = plan.stages.lavage.lines[0];
+  const firstPass = w1 ? { machineId: w1.machineId, programId: w1.programId, weightKg: w1.weightKg != null ? (w1.capacityKg ? Math.min(w1.weightKg, w1.capacityKg) : w1.weightKg) : null, others: plan.stages.lavage.lines.slice(1).map(x => x.machineName) } : null;
   return {
     id: f.id, day: f.day, position: f.position, status: f.status, linenTypeId: f.linen_type_id, linenType: type ? type.label : null,
     weightKg: f.weight_kg, machineId: f.machine_id, machineName: m ? m.name : null, programId: f.program_id, programName: pr ? pr.name : null,
     note: f.note, lotId: f.lot_id, lotCode: lot ? lot.code : null, lotStatus: lot ? lot.status : null, clients: cl,
+    families: plan.families, machines: lines, plan, firstPass,
   };
 }
 
@@ -121,6 +234,8 @@ function create(o, nowMs = Date.now()) {
     const id = Number(db.prepare('INSERT INTO lot_forecasts (day, position, linen_type_id, weight_kg, machine_id, program_id, note) VALUES (?, ?, ?, ?, ?, ?, ?)')
       .run(v.day, nextPosition(v.day), v.linenTypeId, v.weightKg, v.machineId, v.programId, v.note).lastInsertRowid);
     insertClients(id, v.clients);
+    writeFamilies(id, v.families);
+    if (v.lines) writeLines(id, v.lines);
     return id;
   })();
 }
@@ -140,6 +255,8 @@ function update(id, o, nowMs = Date.now()) {
     db.prepare("UPDATE lot_forecasts SET day = ?, position = ?, linen_type_id = ?, weight_kg = ?, machine_id = ?, program_id = ?, note = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?")
       .run(v.day, position, v.linenTypeId, v.weightKg, v.machineId, v.programId, v.note, cur.id);
     if (v.clients) { db.prepare('DELETE FROM lot_forecast_clients WHERE forecast_id = ?').run(cur.id); insertClients(cur.id, v.clients); }
+    if (v.famsGiven) writeFamilies(cur.id, v.families);
+    if (v.lines) writeLines(cur.id, v.lines);
   })();
 }
 
@@ -171,6 +288,8 @@ function copyDay(from, to, nowMs = Date.now()) {
       const id = Number(db.prepare('INSERT INTO lot_forecasts (day, position, linen_type_id, weight_kg, machine_id, program_id, note) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(dest, nextPosition(dest), f.linen_type_id, f.weight_kg, f.machine_id, f.program_id, f.note).lastInsertRowid);
       db.prepare('INSERT INTO lot_forecast_clients (forecast_id, client_id, societe, order_id, weight_kg) SELECT ?, client_id, societe, NULL, weight_kg FROM lot_forecast_clients WHERE forecast_id = ?').run(id, f.id);
+      db.prepare('INSERT INTO lot_forecast_families (forecast_id, family, weight_kg) SELECT ?, family, weight_kg FROM lot_forecast_families WHERE forecast_id = ?').run(id, f.id);
+      db.prepare('INSERT INTO lot_forecast_machines (forecast_id, stage, position, machine_id, program_id, weight_kg) SELECT ?, stage, position, machine_id, program_id, weight_kg FROM lot_forecast_machines WHERE forecast_id = ?').run(id, f.id);
     }
     return src.length;
   })();
@@ -188,9 +307,11 @@ function launch(id, o, nowMs = Date.now()) {
     const pick = (k, dflt) => (b[k] === undefined || b[k] === null || b[k] === '' ? dflt : b[k]);
     const clients = Array.isArray(b.clients) && b.clients.length ? b.clients
       : db.prepare('SELECT * FROM lot_forecast_clients WHERE forecast_id = ? ORDER BY id').all(f.id).map(c => ({ clientId: c.client_id || undefined, societe: c.client_id ? undefined : c.societe, orderId: c.order_id || undefined, weightKg: c.weight_kg || undefined }));
+    const first = forecastOut(f).firstPass;   // plusieurs laveuses prévues : on lance la première charge de la première, les autres suivent passage par passage
     const lotId = P.createLot({
-      ...b, nowMs, linenTypeId: pick('linenTypeId', f.linen_type_id), weightKg: pick('weightKg', f.weight_kg), machineId: pick('machineId', f.machine_id),
-      programId: pick('programId', f.program_id), note: pick('note', f.note), clients,
+      ...b, nowMs, linenTypeId: pick('linenTypeId', f.linen_type_id), weightKg: pick('weightKg', first && first.weightKg != null ? first.weightKg : f.weight_kg),
+      machineId: pick('machineId', first ? first.machineId : f.machine_id), programId: pick('programId', first ? first.programId : f.program_id),
+      note: pick('note', f.note), clients, totalKg: f.weight_kg,
     });
     db.prepare("UPDATE lot_forecasts SET status = 'lance', lot_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?").run(lotId, f.id);
     return lotId;
@@ -205,4 +326,4 @@ function dayPlan(day, nowMs = Date.now()) {
   return { day, today: t, forecasts, totals: totals(forecasts), upcoming: upcoming(t < day ? t : day, 7), orders: pendingOrders() };
 }
 
-module.exports = { MAX_AHEAD_DAYS, create, update, remove, move, copyDay, launch, get, list, due, dayPlan, totals, upcoming, pendingOrders };
+module.exports = { MAX_AHEAD_DAYS, estimateDraft, create, update, remove, move, copyDay, launch, get, list, due, dayPlan, totals, upcoming, pendingOrders };
