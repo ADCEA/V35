@@ -26,6 +26,17 @@ const ROUTES = {
   divers: { lavage: true, sechage: true, finition: true },
 };
 const DEFAULT_CYCLE_MIN = { wash: 50, dry: 30 };
+const norm = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+/** Famille de pièces d'après le libellé d'un type de linge de l'atelier (« Grand plat », « Éponge », « Spa », « Tenues »…). */
+function familyOfLabel(label) {
+  const n = norm(label);
+  if (/eponge|\bspa\b|bain|peignoir|toilette/.test(n)) return 'eponge';
+  if (/plat|drap|housse|nappe|taie|torchon|alese|alaise/.test(n)) return 'grand_plat';
+  return 'divers';
+}
+/** Étapes que parcourt un lot de ce type, dans l'ordre : le plat va du lavage à la calandre, l'éponge au séchoir, le reste partout. */
+const routeOfLabel = (label) => STAGES.filter(st => ROUTES[familyOfLabel(label)][st]);
 const CYCLE_RANGE = { min: 5, max: 600 };
 const HIST_DAYS = 90;
 const MIN_HIST = 3;
@@ -160,4 +171,4 @@ const familyList = (fams) => {
   return FAMILIES.map(f => ({ id: f.id, label: f.label, weightKg: (fams && fams[f.id]) || 0, pct: total > 0 ? Math.round(((fams[f.id] || 0) / total) * 100) : 0 }));
 };
 
-module.exports = { STAGES, LABEL, FAMILIES, ROUTES, DEFAULT_CYCLE_MIN, CYCLE_RANGE, cycles, stageKg, estimate, history, familyList, share };
+module.exports = { STAGES, LABEL, FAMILIES, ROUTES, DEFAULT_CYCLE_MIN, CYCLE_RANGE, cycles, stageKg, estimate, history, familyList, share, familyOfLabel, routeOfLabel };

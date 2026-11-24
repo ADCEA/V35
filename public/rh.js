@@ -189,7 +189,7 @@
     const staff = (m) => S.ov.employees.filter(p => p.active && p.machineId === m.id).map(p => p.firstName);
     body().innerHTML = `
       <div class="rh-bar"><button type="button" class="bl-btn primary" id="rh-newm">+ Ajouter une machine</button></div>
-      <div class="bl-tablewrap"><table class="bl-table rh-table"><thead><tr><th>Machine</th><th>Unité (BU)</th><th class="r">Capacité</th><th class="r">Cadence</th><th>Rattachés</th><th>État</th></tr></thead><tbody>
+      <div class="bl-tablewrap"><table class="bl-table rh-table"><thead><tr><th>Machine</th><th>Unité (BU)</th><th class="r" title="Ne limite rien : valeur proposée sur la tablette">Poids repère</th><th class="r">Cadence</th><th>Rattachés</th><th>État</th></tr></thead><tbody>
       ${ms.map(m => `<tr class="bl-row${m.active ? '' : ' rh-off'}" data-id="${m.id}" tabindex="0"><td class="client">${e(m.name)}</td><td>${e(buLabel(m.bu))}</td>
         <td class="r bl-num">${m.capacityKg ? NF1.format(m.capacityKg) + ' kg' : '—'}</td><td class="r bl-num">${m.throughputKgh ? NF1.format(m.throughputKgh) + ' kg/h' : '—'}</td><td>${staff(m).map(e).join(', ') || '<span class="bl-faint">—</span>'}</td>
         <td>${m.active ? '<span class="bl-tag ok">en service</span>' : '<span class="bl-tag draft">retirée</span>'}</td></tr>`).join('')}
@@ -214,7 +214,8 @@
       title: m ? m.name : 'Nouvelle machine', buttons,
       body: `<div class="bl-field"><label for="mf-name">Nom *</label><input id="mf-name" value="${e(m && m.name)}" maxlength="60" placeholder="Laveuse 4, Calandre 3…"></div>
         <div class="bl-row2"><div class="bl-field"><label for="mf-bu">Unité (BU) *</label><select id="mf-bu">${S.ov.bus.map(b => `<option value="${e(b.id)}"${m && m.bu === b.id ? ' selected' : ''}>${e(b.label)}</option>`).join('')}</select></div>
-        <div class="bl-field"><label for="mf-cap">Capacité (kg)</label><input id="mf-cap" type="number" min="0" step="0.5" value="${m && m.capacityKg ? m.capacityKg : ''}"></div></div>
+        <div class="bl-field"><label for="mf-cap">Poids repère (kg) — facultatif</label><input id="mf-cap" type="number" min="0" step="0.5" value="${m && m.capacityKg ? m.capacityKg : ''}" placeholder="Charge habituelle"></div></div>
+        <p class="rh-help" style="margin:-4px 0 10px">Le poids repère ne bride jamais la machine : on peut y mettre plus ou moins. Il sert de valeur proposée sur la tablette et à compter les charges d'un séchoir sans cadence.</p>
         <div class="bl-field"><label for="mf-tph">Cadence réelle (kg/h) — facultatif</label><input id="mf-tph" type="number" min="0" step="0.5" value="${m && m.throughputKgh ? m.throughputKgh : ''}" placeholder="Sert à prévoir la fin d'un passage (calandres)"></div>
         ${m ? `<label class="bl-check rh-chk"><input type="checkbox" id="mf-active"${m.active ? ' checked' : ''}> En service</label>` : ''}`,
     });

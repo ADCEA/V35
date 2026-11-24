@@ -185,8 +185,8 @@ test('enregistrement, modification, ancienne laveuse prévue, recopie', async ()
   assert.equal(none.data.forecast.machineId, null);
   assert.equal(none.data.forecast.plan.minutes.total, null);
 
-  // ancienne saisie (une laveuse + programme) : devient une ligne de lavage, capacité contrôlée comme avant
-  assert.equal((await admin('PUT', `${A}/forecasts/${f.id}`, { families: {}, weightKg: 30, machineId: mach('Laveuse 1') })).status, 400);
+  // ancienne saisie (une laveuse + programme) : devient une ligne de lavage ; la capacité (27 kg) n'est qu'un repère, 30 kg sont acceptés
+  assert.equal((await admin('PUT', `${A}/forecasts/${f.id}`, { families: {}, weightKg: 30, machineId: mach('Laveuse 1') })).status, 200);
   const old = await admin('PUT', `${A}/forecasts/${f.id}`, { families: {}, weightKg: 24, machineId: mach('Laveuse 1'), programId: prog });
   assert.equal(old.status, 200, JSON.stringify(old.data));
   assert.equal(old.data.forecast.plan.minutes.lavage, 55);
@@ -209,23 +209,28 @@ test('enregistrement, modification, ancienne laveuse prévue, recopie', async ()
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM lot_forecast_families WHERE forecast_id = ?').get(f.id).n, 0);
 });
 
-test('lancer un lot prévu sur plusieurs laveuses : première charge de la première laveuse, kilos des clients conservés', async () => {
+test('lancer un lot prévu sur plusieurs laveuses : la part de la première laveuse part, le reste attend dans la file', async () => {
   const r = await admin('POST', `${A}/forecasts`, base({
     day: plus(0), families: { grand_plat: 50, eponge: 30 }, clients: [{ clientId: hotel, weightKg: 60 }],
     machines: { lavage: [{ machineId: mach('Laveuse 2'), programId: prog }, { machineId: mach('Laveuse 3'), programId: prog }] },
   }));
   assert.equal(r.status, 201, JSON.stringify(r.data));
   const f = r.data.forecast;
-  // 80 kg au prorata 27 / 33 → 36 kg et 44 kg ; première charge : 27 kg (capacité de la Laveuse 2)
+  // 80 kg au prorata 27 / 33 → 36 kg et 44 kg ; la première laveuse prend sa part (36 kg, sa capacité de 27 kg n'est pas un plafond)
   assert.deepEqual(f.plan.stages.lavage.lines.map(x => x.weightKg), [36, 44]);
-  assert.deepEqual(f.firstPass, { machineId: mach('Laveuse 2'), programId: prog, weightKg: 27, others: ['Laveuse 3'] });
+  assert.deepEqual(f.firstPass, { machineId: mach('Laveuse 2'), programId: prog, weightKg: 36, others: ['Laveuse 3'] });
   const launched = await admin('POST', `${A}/forecasts/${f.id}/launch`, {});
   assert.equal(launched.status, 201, JSON.stringify(launched.data));
   const lot = launched.data.lot;
   assert.equal(lot.steps.length, 1);
   assert.equal(lot.steps[0].machineName, 'Laveuse 2');
-  assert.equal(lot.steps[0].weightKg, 27);
-  assert.equal(lot.clients[0].weightKg, 60, 'les kilos du client portent sur tout le lot, pas sur la première charge');
+  assert.equal(lot.steps[0].weightKg, 36);
+  assert.equal(lot.clients[0].weightKg, 27, 'les kilos du client suivent la part lancée (60 kg × 36 / 80)');
+  // le reste de la prévision (44 kg) reste à lancer : poids, types de pièces et kilos du client suivent
   const after = (await admin('GET', `${A}/forecast?day=${plus(0)}`)).data.forecasts.find(x => x.id === f.id);
-  assert.equal(after.status, 'lance');
+  assert.equal(after.status, 'prevu');
+  assert.equal(after.weightKg, 44);
+  assert.deepEqual(after.families.filter(x => x.weightKg > 0).map(x => [x.id, x.weightKg]), [['grand_plat', 27.5], ['eponge', 16.5]]);
+  assert.equal(after.clients[0].weightKg, 33);
+  assert.equal(after.lotCode, null);
 });

@@ -740,19 +740,40 @@ par trois étapes : **lavage → séchage → finition**. Chaque passage note la
 prévue / fin réelle. Les clients d'un lot : un seul (cas courant) ou **plusieurs** (lot mélangé, kilos par client facultatifs), chacun
 pouvant être relié à une commande. Remarques, relavages et problèmes se rattachent au lot ; les pannes de machine sont à part.
 
-**Tablette de l'atelier** (`/atelier`, même tablette et même jeton que la badgeuse : un lien d'activation `/atelier#<jeton>`, ou la tablette
-déjà activée pour `/badgeuse`). Colonnes Lavage / Séchage / Finition avec les machines (en marche avec avancement et heure de fin
-prévue, libre, en panne), « À reprendre » (lots attendant l'étape suivante) et « Lots du jour ». Créer un lot, lancer ou terminer
-un passage, signaler une panne, ajouter une remarque : chaque action demande le **code personnel** du collaborateur (ou son badge),
-gardé 90 s en mémoire du navigateur seulement ; 5 mauvais codes bloquent (même règle que la badgeuse).
+**Files d'attente, sans limite de capacité.** Chaque étape a sa file : **À laver**, **À sécher**, **À finir**. Les files ne sont pas stockées,
+elles se déduisent des données (`src/utils/prodQueues.js`) : *À laver* = les prévisions du jour (ou en retard) pas encore lancées, avec les
+kilos qui restent ; *À sécher* / *À finir* = pour chaque lot en cours, les kilos sortis de l'étape précédente moins ceux déjà mis dans cette
+étape. Le **parcours** dépend du type de linge (`routeOfLabel` dans `src/utils/washPlan.js`) : éponge, spa, bain, peignoir, toilette →
+lavage puis séchage ; plat, drap, housse, nappe, taie, torchon, alèse → lavage puis finition ; tout le reste (tenues, divers…) → les trois
+étapes. Le lot **se clôt tout seul** quand plus aucun passage n'est ouvert et que plus aucun kilo n'attend dans une étape de son parcours.
+**La capacité d'une machine ne limite plus rien** : on y met le poids qu'on veut ; elle reste un simple « poids repère » (valeur proposée
+sur la tablette, charges d'un séchoir sans cadence). Seules les collisions restent contrôlées (machine déjà occupée ou en panne). Un lot
+prévu lancé **en partie** (moins que son poids) reste dans la file « À laver » avec le reste ; en dessous d'une petite tolérance (la
+tolérance de poids des réglages, au moins 1 kg) le lot part entier au lieu de laisser un reliquat. La **fin prévue** n'est qu'une
+estimation : lavage = durée du programme, à défaut le cycle de lavage des réglages (50 min) ; séchage et finition = kilos ÷ cadence (kg/h)
+de la machine ; séchoir sans cadence = nombre de charges (kilos ÷ poids repère, arrondi au-dessus) × cycle de séchage (30 min) ; calandre
+sans cadence = médiane de ses passages des 90 derniers jours, sinon aucune heure affichée.
 
-**Onglets de l'administration** : *Aujourd'hui* (machines du jour, lots prévus à lancer, lots à reprendre, saisie manuelle d'un lot a posteriori), *Prévision* (lots du lendemain et des jours suivants),
-*Lots* (recherche par période, statut, client), *Machines* (30 jours : passages, kilos, charge moyenne, utilisation, cadence réelle,
-arrêts), *Heures* (par BU et par poste : heures, kilos, kg/h, coût, coût au kilo), *Tableau de bord* (coût au kilo comparé à
-l'objectif, kilos par jour, main-d'œuvre par étape, utilisation, kilos par type de linge et par client), *Réglages* (objectif, prix
-de l'eau et de l'énergie, tolérance de poids, horaires d'ouverture, **durée d'un cycle de lavage (50 min) et de séchage (30 min)**,
-programmes de lavage, types de linge). La cadence (kg/h) des
-calandres se règle dans Équipe → Machines (départ : 45 kg/h pour 320 cm, 35 kg/h pour 250 cm).
+**Tablette de l'atelier** (`/atelier`, même tablette et même jeton que la badgeuse : un lien d'activation `/atelier#<jeton>`, ou la tablette
+déjà activée pour `/badgeuse`). Trois colonnes Lavage / Séchage / Finition ; dans chacune, les machines (en marche avec avancement, fin
+prévue et « Ensuite : file Séchage » ou « Ensuite : lot terminé » ; libre ; en panne) puis la **file d'attente** de l'étape. Une machine
+libre propose « **Lancer** <premier lot de la file> » : un seul geste, avec tous les kilos qui attendent ; toucher un élément de la file
+ouvre le choix de la machine, du poids (« Il restera X kg dans la file ») et du programme. « **Terminé** » sur une machine envoie le lot
+dans la file suivante (ou le clôt) sans autre question. « + Nouveau lot » permet de **lancer** un lot tout de suite ou de l'**ajouter à la
+file À laver** (`POST /api/atelier/forecasts`). « Lots du jour » ouvre la liste du jour ; la fiche d'un lot garde remarques et problèmes
+et propose « Autre étape… » (relavage, étape hors parcours, terminer le lot). Chaque lancement ou « Terminé » affiche **Annuler** pendant
+8 secondes (l'annulation reste possible 5 minutes : `POST /api/atelier/steps/:id/undo-start` et `…/undo-finish`) ; le premier lavage annulé
+rend ses kilos à la prévision. **Identification une seule fois** : code personnel ou badge, gardé **5 minutes** d'inactivité en mémoire du
+navigateur seulement (jamais stocké) ; 5 mauvais codes bloquent (même règle que la badgeuse).
+
+**Onglets de l'administration** (4) : *Aujourd'hui* (machines du jour et les trois files d'attente, passages restés ouverts à clôturer,
+saisie manuelle d'un lot a posteriori), *Prévision* (lots du lendemain et des jours suivants), *Chiffres* (sélecteur **Synthèse** : coût
+au kilo comparé à l'objectif, kilos par jour, main-d'œuvre par étape, utilisation, kilos par type de linge et par client ; **Machines** :
+30 jours de passages, kilos, kilos par passage, utilisation, cadence réelle, arrêts ; **Lots** : recherche par période, statut, client ;
+**Heures** : par BU et par poste, heures, kilos, kg/h, coût, coût au kilo), *Réglages* (objectif, prix de l'eau et de l'énergie, tolérance
+de poids, horaires d'ouverture, cycles de lavage et de séchage, programmes de lavage, types de linge avec leur parcours). La cadence
+(kg/h) et le poids repère des machines se règlent dans Équipe → Machines (cadence de départ : 45 kg/h pour la calandre 320 cm, 35 kg/h
+pour la 250 cm).
 
 **Prévision de production** (onglet *Prévision*) : l'équipe saisit à l'avance les lots d'un jour à venir (jusqu'à 60 jours), par exemple
 ceux de demain : type de linge, clients (avec leur commande rattachée), poids estimé, laveuse et programme souhaités, remarque. Une bande
@@ -760,11 +781,12 @@ de 7 jours montre le nombre de lots et les kilos de chaque jour ; on peut réord
 un autre** (semaine type). Sous la liste, « Commandes à planifier » propose les commandes reçues ou en traitement qui ne sont encore dans
 aucun lot ni aucune prévision, avec un poids estimé (articles × poids catalogue) : « Prévoir » préremplit le formulaire. Une prévision
 **n'est pas un lot** : elle n'occupe aucune machine et n'entre dans aucun chiffre (tables séparées `lot_forecasts` et
-`lot_forecast_clients`). Le jour venu, elle apparaît dans « À lancer » (onglet *Aujourd'hui*) et dans la colonne « Prévu » de la tablette ;
-on la lance en confirmant la laveuse et le poids réellement chargé (prérempli, modifiable) : le vrai lot est alors créé (mêmes contrôles de
-capacité et d'occupation qu'un nouveau lot) et la prévision passe à « lancée » avec le code du lot. Une prévision lancée ne se modifie
+`lot_forecast_clients`). Le jour venu, elle arrive dans la file « À laver » (onglet *Aujourd'hui* et tablette) ;
+on la lance en confirmant la laveuse et le poids réellement chargé (prérempli avec tout le poids, modifiable) : le vrai lot est alors créé
+(contrôle d'occupation de la machine seulement, aucune limite de capacité) et la prévision passe à « lancée » avec le code du lot — ou reste
+en file avec le reliquat si le lancement est partiel. Une prévision lancée ne se modifie
 plus. API : `GET /api/admin/atelier/forecast?day=`, `POST/PUT/DELETE …/forecasts[/:id]`, `POST …/forecasts/copy`, `…/forecasts/:id/move`,
-`…/forecasts/:id/launch`, `POST …/forecasts/estimate` ; tablette `POST /api/atelier/forecasts/:id/launch` (code du collaborateur).
+`…/forecasts/:id/launch`, `POST …/forecasts/estimate` ; tablette `POST /api/atelier/forecasts` (ajout à la file) et `POST /api/atelier/forecasts/:id/launch` (code du collaborateur).
 
 **Poids par type de pièce et durée estimée** (formulaire « Prévoir un lot ») : le poids se répartit en *grand plat, petit plat, éponge, divers*
 (`lot_forecast_families`) ; dès qu'une répartition est saisie, sa somme fait le poids du lot. Pour chaque étape — **lavage, séchage, finition** —
@@ -782,14 +804,14 @@ aucune pièce ne passe est signalée (durée nulle). Les machines d'une même é
 travaillent en même temps (l'étape dure autant que la plus longue), les étapes s'enchaînent : **total = lavage + séchage + finition**
 (estimation prudente, sans chevauchement des charges ; une étape sans machine n'est pas comptée). Le formulaire recalcule en direct (`POST …/forecasts/estimate`, rien n'est enregistré) ; les cartes de la liste
 montrent les types de pièces et « Lavage → Séchage → Finition ». Une prévision ne réserve toujours aucune machine. Au lancement, on démarre
-la **première charge de la première laveuse** prévue (au plus sa capacité, programme repris) ; les kilos des clients portent sur tout le lot, et
-les autres charges se lancent ensuite passage par passage. L'ancienne saisie d'une seule laveuse (`machineId`, `programId`) reste acceptée
-(capacité contrôlée) et devient une ligne de lavage.
+la **première charge de la première laveuse** prévue (poids saisi ou, par défaut, la part de cette laveuse ; programme repris) ; les kilos
+des clients portent sur tout le lot, et ce qui reste attend dans la file « À laver » pour la machine suivante. L'ancienne saisie d'une seule
+laveuse (`machineId`, `programId`) reste acceptée et devient une ligne de lavage. Les capacités ne servent ici qu'à répartir et estimer.
 
 Règles :
-- une machine doit appartenir à l'étape (laveuse → lavage…), le poids ne dépasse pas sa capacité, et deux passages ne peuvent pas se
-  chevaucher sur la même machine (ni une panne) ; un lot annulé libère ses machines ;
-- fin prévue d'un lavage = durée du programme ; séchage et finition = poids ÷ cadence de la machine ;
+- une machine doit appartenir à l'étape (laveuse → lavage…) et deux passages ne peuvent pas se chevaucher sur la même machine (ni une
+  panne) ; **aucune limite de poids** ; un lot annulé libère ses machines ;
+- fin prévue : voir « Files d'attente » ci-dessus (estimation, elle ne bloque jamais rien) ;
 - **passage oublié** : un passage resté ouvert depuis la veille (ou plus de 14 h) n'est pas considéré comme en marche ; quand la machine
   est réutilisée il est refermé et une note « problème » est ajoutée au lot ;
 - un lot à un seul client sans poids explicite prend le poids du lot ; sur la fiche, le **poids attendu** (commande × poids d'article)
@@ -805,8 +827,8 @@ du m³) + énergie (kWh × prix du kWh) + lessive (programme) ; tant que le prix
 données) : le chiffre est donc un minimum, pas un coût complet. Période maximale d'un calcul : 92 jours.
 
 API : tablette `/api/atelier/*` (jeton de tablette + code ou badge par action) ; administration `/api/admin/atelier/*`
-(`overview`, `lots`, `steps`, `incidents`, `reference`, `settings`, `hours`, `stats`). Migrations : tables `lots`, `lot_clients`,
-`lot_steps`, `lot_notes`, `machine_incidents`, `wash_programs`, `linen_types`, `prod_settings` et colonne `machines.throughput_kgh`,
+(`overview` — qui renvoie aussi les files `queues` —, `lots`, `steps`, `incidents`, `reference`, `settings`, `hours`, `stats`). Migrations : tables `lots`, `lot_clients`,
+`lot_steps`, `lot_notes`, `machine_incidents`, `wash_programs`, `linen_types`, `prod_settings` et colonnes `machines.throughput_kgh` et `lots.forecast_id` (le lot né d'une prévision),
 créées au démarrage sans toucher aux données existantes ; aucun programme ni prix n'est pré-rempli.
 
 ### Présentation compacte des listes (factures, bons de livraison, Facturer le mois)
@@ -1276,7 +1298,7 @@ Migration : la table `order_items` portait `CHECK (qty > 0)`. Au démarrage, une
 
 ### Tests
 
-`npm test` (493 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
+`npm test` (502 tests ; bases SQLite jetables, serveurs HTTP factices pour S3, Pennylane et Microsoft, faux serveur SMTP, aucun effet sur vos données).
 
 ### Limites connues — à traiter avant d'utiliser en production
 

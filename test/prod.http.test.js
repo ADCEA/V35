@@ -98,10 +98,10 @@ test('nouveau lot depuis la tablette : un client, poids, laveuse, programme, fin
   const gp = types.find(t => t.label === 'Grand plat').id;
   const base = { linenTypeId: gp, clients: [{ clientId: hotel }], weightKg: '24,5', machineId: mach('Laveuse 1').id, programId: prog.id };
 
-  // Refus : pas de client, poids nul / absurde, mauvaise machine, capacité dépassée, type inconnu, client inconnu.
+  // Refus : pas de client, poids nul / absurde, mauvaise machine, type inconnu, client inconnu (la capacité n'est jamais un motif de refus).
   const refus = [
     [{ clients: [] }, 'NO_CLIENT'], [{ weightKg: 0 }, 'BAD_WEIGHT'], [{ weightKg: 9000 }, 'BAD_WEIGHT'], [{ machineId: mach('Séchoir 1').id }, 'WRONG_MACHINE'],
-    [{ weightKg: 28 }, 'OVER_CAPACITY'], [{ linenTypeId: 9999 }, 'BAD_TYPE'], [{ clients: [{ clientId: 99999 }] }, 'BAD_CLIENT'], [{ machineId: 9999 }, 'BAD_MACHINE'],
+    [{ linenTypeId: 9999 }, 'BAD_TYPE'], [{ clients: [{ clientId: 99999 }] }, 'BAD_CLIENT'], [{ machineId: 9999 }, 'BAD_MACHINE'],
     [{ clients: [{ clientId: hotel, weightKg: 20 }, { societe: 'Autre', weightKg: 10 }] }, 'BAD_WEIGHT'], [{ programId: 9999 }, 'BAD_PROGRAM'],
   ];
   for (const [patch, code] of refus) {
@@ -135,7 +135,7 @@ test('nouveau lot depuis la tablette : un client, poids, laveuse, programme, fin
   lot2 = mix.data.lot;
   assert.match(lot2.code, /^L-\d{4}-02$/);
   assert.deepEqual(lot2.clients.map(c => [c.societe, c.weightKg]), [['Hôtel du Palais', 10], ['Particulier Dupont', 8]]);
-  assert.equal(lot2.steps[0].plannedEndAt, null, 'sans programme, pas de fin prévue');
+  assert.equal(Math.round((Date.parse(lot2.steps[0].plannedEndAt) - Date.parse(lot2.steps[0].startedAt)) / 60000), 50, 'sans programme : le cycle de lavage des Réglages (50 min)');
 });
 
 test('avancement : fin du lavage, séchage, finition (fin prévue selon la cadence), clôture', async () => {
@@ -147,10 +147,9 @@ test('avancement : fin du lavage, séchage, finition (fin prévue selon la caden
   let w = (await tablet('GET', T + '/state')).data.waiting;
   assert.deepEqual(w.map(x => x.code), [lot1.code]); assert.equal(w[0].lastStage, 'lavage');
 
-  // Séchage : mauvaise machine, capacité, puis OK.
-  const dry = (patch) => act('POST', `${T}/lots/${lot1.id}/steps`, { stage: 'sechage', machineId: mach('Séchoir 1').id, weightKg: 18, ...patch });
+  // Séchage : mauvaise machine, étape inconnue, programme, puis OK. Le séchoir fait 18 kg : 19 kg passent quand même (la capacité n'est qu'un repère).
+  const dry = (patch) => act('POST', `${T}/lots/${lot1.id}/steps`, { stage: 'sechage', machineId: mach('Séchoir 1').id, weightKg: 19, ...patch });
   assert.equal((await dry({ machineId: mach('Laveuse 2').id })).data.code, 'WRONG_MACHINE');
-  assert.equal((await dry({ weightKg: 19 })).data.code, 'OVER_CAPACITY');
   assert.equal((await dry({ stage: 'repassage' })).data.code, 'BAD_STAGE');
   assert.equal((await dry({ programId: prog.id })).data.code, 'BAD_PROGRAM');
   r = await dry();
@@ -223,7 +222,6 @@ test('saisie à la main (admin) : jour passé, chevauchement refusé, futur refu
   assert.equal((await make({ date: parisDate(Date.now() + 2 * 86400000), start: '08:00', end: '08:50' })).status, 400, 'pas dans le futur');
   assert.equal((await make({ end: '07:30' })).status, 400);
   assert.equal((await make({ start: '8h' })).status, 400);
-  assert.equal((await make({ weightKg: 34 })).data.code, 'OVER_CAPACITY');
 
   let r = await make();
   assert.equal(r.status, 201, JSON.stringify(r.data));
@@ -241,7 +239,6 @@ test('saisie à la main (admin) : jour passé, chevauchement refusé, futur refu
   const stepId = lot.steps[0].id;
   r = await admin('PUT', `${A}/steps/${stepId}`, { weightKg: '31' });
   assert.equal(r.status, 200); assert.equal(r.data.lot.weightKg, 31);
-  assert.equal((await admin('PUT', `${A}/steps/${stepId}`, { weightKg: 40 })).status, 400);
   assert.equal((await admin('PUT', `${A}/steps/${stepId}`, { date: y, start: '08:00', end: '09:10' })).data.code, 'MACHINE_BUSY');
   r = await admin('PUT', `${A}/steps/${stepId}`, { date: y, start: '07:50', end: '08:50' });
   assert.equal(r.status, 200); assert.equal(r.data.lot.steps[0].minutes, 60);

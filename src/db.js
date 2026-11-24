@@ -505,6 +505,11 @@ if (!db.prepare('PRAGMA table_info(machines)').all().some(c => c.name === 'throu
   db.exec('ALTER TABLE machines ADD COLUMN throughput_kgh REAL;');
 }
 
+// Lot lancé depuis une prévision : permet d'annuler un lancement fait par erreur (la prévision reprend ses kilos).
+if (!db.prepare('PRAGMA table_info(lots)').all().some(c => c.name === 'forecast_id')) {
+  db.exec('ALTER TABLE lots ADD COLUMN forecast_id INTEGER;');
+}
+
 // Types de linge de départ (Production) : modifiables ensuite depuis l'administration.
 if (!db.prepare('SELECT 1 FROM linen_types LIMIT 1').get()) {
   const ins = db.prepare('INSERT INTO linen_types (label, sort_order) VALUES (?, ?)');
