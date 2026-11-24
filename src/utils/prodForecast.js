@@ -70,7 +70,7 @@ function readMachines(v, totalKg) {
     const seen = new Set();
     let given = 0;
     for (const l of arr) {
-      const m = P.checkMachine(stage, (l || {}).machineId, 0);     // la capacité n'est pas un plafond ici : au-delà, la machine fait plusieurs passages
+      const m = P.checkMachine(stage, (l || {}).machineId);
       if (seen.has(m.id)) throw bad(`${m.name} est déjà dans cette étape.`, 'DUPLICATE_MACHINE');
       seen.add(m.id);
       let programId = null;
@@ -143,7 +143,7 @@ function read(o, cur, nowMs) {
   if (has('machines')) out.lines = readMachines(b.machines, out.weightKg);
   else if (has('machineId') || has('programId')) {
     const keep = cur ? loadLines(cur.id).filter(l => l.stage !== 'lavage') : [];
-    const machineId = has('machineId') ? (b.machineId === null || b.machineId === '' ? null : P.checkMachine('lavage', b.machineId, out.weightKg || 0).id) : (cur ? cur.machine_id : null);
+    const machineId = has('machineId') ? (b.machineId === null || b.machineId === '' ? null : P.checkMachine('lavage', b.machineId).id) : (cur ? cur.machine_id : null);
     let programId = has('programId') ? null : (cur ? cur.program_id : null);
     if (has('programId') && b.programId !== null && b.programId !== '') {
       const pr = db.prepare('SELECT * FROM wash_programs WHERE id = ?').get(Number(b.programId));
@@ -174,9 +174,9 @@ function forecastOut(f, clients) {
   const families = loadFamilies(f.id);
   const lines = linesOf(f);
   const plan = planOut(f.weight_kg, families, lines);
-  // Premier passage à lancer : la première laveuse prévue, avec au plus sa capacité (les charges suivantes se lancent ensuite, passage par passage).
+  // Premier passage à lancer : la première laveuse prévue, avec sa part des kilos (le reste de la prévision attend dans la file de lavage).
   const w1 = plan.stages.lavage.lines[0];
-  const firstPass = w1 ? { machineId: w1.machineId, programId: w1.programId, weightKg: w1.weightKg != null ? (w1.capacityKg ? Math.min(w1.weightKg, w1.capacityKg) : w1.weightKg) : null, others: plan.stages.lavage.lines.slice(1).map(x => x.machineName) } : null;
+  const firstPass = w1 ? { machineId: w1.machineId, programId: w1.programId, weightKg: w1.weightKg, others: plan.stages.lavage.lines.slice(1).map(x => x.machineName) } : null;
   return {
     id: f.id, day: f.day, position: f.position, status: f.status, linenTypeId: f.linen_type_id, linenType: type ? type.label : null,
     weightKg: f.weight_kg, machineId: f.machine_id, machineName: m ? m.name : null, programId: f.program_id, programName: pr ? pr.name : null,
@@ -298,6 +298,7 @@ function copyDay(from, to, nowMs = Date.now()) {
 /**
  * Lance la prévision : crée le vrai lot (lavage démarré) à partir de ce que l'équipe a confirmé (`o`, même forme qu'un nouveau lot) ;
  * ce qui n'est pas précisé reprend la prévision. Possible dès que le jour de la prévision est arrivé.
+ * Lancer nettement moins de kilos que prévu est permis : le lot ne prend que ces kilos et le reste de la prévision reste dans la file de lavage.
  */
 function launch(id, o, nowMs = Date.now()) {
   return db.transaction(() => {
@@ -305,15 +306,20 @@ function launch(id, o, nowMs = Date.now()) {
     if (f.day > today(nowMs)) throw bad('Ce lot est prévu plus tard : changez son jour pour le lancer maintenant.', 'TOO_EARLY', 409);
     const b = o || {};
     const pick = (k, dflt) => (b[k] === undefined || b[k] === null || b[k] === '' ? dflt : b[k]);
+    const first = forecastOut(f).firstPass;   // plusieurs laveuses prévues : on lance la part de la première, le reste attend dans la file
+    const weight = P.parseKg(pick('weightKg', first && first.weightKg != null ? first.weightKg : f.weight_kg));
+    // un écart de pesée (moins de 1 kg ou que la tolérance de poids des Réglages) n'est pas un reste : la prévision est alors lancée en entier
+    const partial = f.weight_kg != null && f.weight_kg - weight > Math.max(1, f.weight_kg * P.getSettings().tolerancePct / 100);
+    const ratio = partial ? weight / f.weight_kg : 1;
     const clients = Array.isArray(b.clients) && b.clients.length ? b.clients
-      : db.prepare('SELECT * FROM lot_forecast_clients WHERE forecast_id = ? ORDER BY id').all(f.id).map(c => ({ clientId: c.client_id || undefined, societe: c.client_id ? undefined : c.societe, orderId: c.order_id || undefined, weightKg: c.weight_kg || undefined }));
-    const first = forecastOut(f).firstPass;   // plusieurs laveuses prévues : on lance la première charge de la première, les autres suivent passage par passage
+      : db.prepare('SELECT * FROM lot_forecast_clients WHERE forecast_id = ? ORDER BY id').all(f.id).map(c => ({ clientId: c.client_id || undefined, societe: c.client_id ? undefined : c.societe, orderId: c.order_id || undefined, weightKg: c.weight_kg ? round1(c.weight_kg * ratio) : undefined }));
     const lotId = P.createLot({
-      ...b, nowMs, linenTypeId: pick('linenTypeId', f.linen_type_id), weightKg: pick('weightKg', first && first.weightKg != null ? first.weightKg : f.weight_kg),
+      ...b, nowMs, linenTypeId: pick('linenTypeId', f.linen_type_id), weightKg: weight,
       machineId: pick('machineId', first ? first.machineId : f.machine_id), programId: pick('programId', first ? first.programId : f.program_id),
-      note: pick('note', f.note), clients, totalKg: f.weight_kg,
+      note: pick('note', f.note), clients, totalKg: partial ? weight : f.weight_kg, forecastId: f.id,
     });
-    db.prepare("UPDATE lot_forecasts SET status = 'lance', lot_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?").run(lotId, f.id);
+    if (partial) P.rescaleForecast(f.id, round1(f.weight_kg - weight));
+    else db.prepare("UPDATE lot_forecasts SET status = 'lance', lot_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?").run(lotId, f.id);
     return lotId;
   })();
 }

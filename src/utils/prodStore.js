@@ -195,17 +195,31 @@ function machineConflict(machineId, startMs, endMs, ignoreStepId, nowMs) {
   return null;
 }
 
-function checkMachine(stage, machineId, weightKg) {
+/** La capacité d'une machine (kg) n'est qu'un repère : elle ne limite jamais ce qu'on y met. */
+function checkMachine(stage, machineId) {
   const m = rhStore.machineById.get(Number(machineId));
   if (!m || !m.active) throw bad('Machine inconnue ou retirée.', 'BAD_MACHINE');
   if (m.bu !== STAGE_BU[stage]) throw bad(`${m.name} n'est pas une machine de ${STAGES[stage].toLowerCase()}.`, 'WRONG_MACHINE');
-  if (m.capacity_kg && weightKg > m.capacity_kg + 1e-9) throw bad(`${weightKg} kg dépassent la capacité de ${m.name} (${m.capacity_kg} kg).`, 'OVER_CAPACITY');
   return m;
 }
 
+/**
+ * Heure de fin estimée d'un passage (simple indication, rien n'est bloqué) :
+ *   - lavage : durée du programme choisi, à défaut le cycle de lavage des Réglages (50 min) ;
+ *   - séchage et finition : kilos ÷ cadence de la machine (kg/h) ;
+ *   - sans cadence : un séchage dure un cycle de séchage des Réglages (30 min, une fois par charge si la machine a un poids repère) ;
+ *     une finition reprend ce que la machine a réellement fait ces 90 derniers jours, sinon aucune estimation.
+ */
 function plannedEnd(stage, startMs, weightKg, machine, program) {
-  if (stage === 'lavage') return program && program.duration_min ? startMs + program.duration_min * 60000 : null;
-  return machine.throughput_kgh ? startMs + Math.round(weightKg / machine.throughput_kgh * 3600e3) : null;
+  const cyc = washPlan.cycles();
+  if (stage === 'lavage') return startMs + (program && program.duration_min ? program.duration_min : cyc.washMin) * 60000;
+  if (machine.throughput_kgh) return startMs + Math.round(weightKg / machine.throughput_kgh * 3600e3);
+  if (stage === 'sechage') {
+    const loads = machine.capacity_kg ? Math.max(1, Math.ceil(weightKg / machine.capacity_kg - 1e-9)) : 1;
+    return startMs + loads * cyc.dryMin * 60000;
+  }
+  const h = washPlan.history(machine.id, stage, startMs);
+  return h && h.kgh ? startMs + Math.round(weightKg / h.kgh * 3600e3) : null;
 }
 
 /** Referme un passage resté ouvert depuis la veille (fin non saisie) avant d'en lancer un nouveau sur la même machine. */
@@ -220,7 +234,7 @@ function closeStaleOnMachine(machineId, nowMs, employeeId) {
 }
 
 function insertStep({ lotId, stage, machineId, programId, weightKg, employeeId, startMs, endMs, nowMs, note }) {
-  const m = checkMachine(stage, machineId, weightKg);
+  const m = checkMachine(stage, machineId);
   let program = null;
   if (programId !== undefined && programId !== null && programId !== '') {
     if (stage !== 'lavage') throw bad('Un programme ne se choisit que pour le lavage.', 'BAD_PROGRAM');
@@ -252,8 +266,8 @@ function createLot(o) {
     // totalKg : poids de tout le lot quand ce premier passage n'en charge qu'une partie (lot prévu sur plusieurs machines ou plusieurs charges)
     const clients = resolveClients(o.clients, o.totalKg != null ? Math.max(weightKg, Number(o.totalKg) || 0) : weightKg);
     const day = rh.parisDate(startMs);
-    const lot = db.prepare('INSERT INTO lots (code, day, linen_type_id, note, created_by, terminal_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(nextCode(day), day, type.id, clean(o.note, 300) || null, o.employeeId || null, o.terminalId || null, iso(nowMs));
+    const lot = db.prepare('INSERT INTO lots (code, day, linen_type_id, note, created_by, terminal_id, created_at, forecast_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(nextCode(day), day, type.id, clean(o.note, 300) || null, o.employeeId || null, o.terminalId || null, iso(nowMs), o.forecastId || null);
     const lotId = Number(lot.lastInsertRowid);
     const ins = db.prepare('INSERT INTO lot_clients (lot_id, client_id, societe, order_id, weight_kg) VALUES (?, ?, ?, ?, ?)');
     clients.forEach(c => ins.run(lotId, c.clientId, c.societe, c.orderId, c.weightKg));
@@ -279,6 +293,25 @@ function startStep(o) {
   })();
 }
 
+/**
+ * Où en est un lot sur son parcours (lavage → séchage → finition, selon son type de linge) : pour chaque étape après le lavage,
+ * les kilos terminés à l'étape d'avant qui n'ont pas encore été mis en machine. C'est ce qui range le lot dans une file d'attente.
+ */
+function pendingStages(lot) {
+  const route = washPlan.routeOfLabel(lot.linenType);
+  const kg = (stage, doneOnly) => round1(lot.steps.filter(s => s.stage === stage && (!doneOnly || !s.open)).reduce((a, s) => a + s.weightKg, 0));
+  const out = [];
+  route.forEach((stage, i) => {
+    if (i === 0) return;
+    const prev = route[i - 1];
+    const ends = lot.steps.filter(s => s.stage === prev && s.endedAt).map(s => s.endedAt).sort();
+    out.push({ stage, kg: round1(kg(prev, true) - kg(stage, false)), since: ends.length ? ends[ends.length - 1] : null });
+  });
+  return out;
+}
+/** Un lot est fini quand plus rien ne tourne et que tous les kilos ont parcouru toutes les étapes de son parcours. */
+const lotComplete = (lot) => lot.status === 'en_cours' && lot.steps.length > 0 && !lot.steps.some(s => s.open) && pendingStages(lot).every(p => p.kg <= 0.04);
+
 function finishStep(stepId, { nowMs = Date.now(), closeLot = false } = {}) {
   const s = db.prepare('SELECT * FROM lot_steps WHERE id = ?').get(Number(stepId));
   if (!s) throw bad('Passage introuvable.', 'NOT_FOUND', 404);
@@ -287,6 +320,58 @@ function finishStep(stepId, { nowMs = Date.now(), closeLot = false } = {}) {
   db.transaction(() => {
     db.prepare('UPDATE lot_steps SET ended_at = ? WHERE id = ?').run(iso(end), s.id);
     if (closeLot) db.prepare("UPDATE lots SET status = 'termine', closed_at = ? WHERE id = ? AND status = 'en_cours'").run(iso(end), s.lot_id);
+    else { const lot = lotById(s.lot_id, nowMs); if (lot && lotComplete(lot)) db.prepare("UPDATE lots SET status = 'termine', closed_at = ? WHERE id = ? AND status = 'en_cours'").run(iso(end), s.lot_id); }
+  })();
+  return s.lot_id;
+}
+
+// ---------- annuler un geste fait par erreur (quelques minutes seulement) ----------
+const UNDO_MS = 5 * 60 * 1000;
+
+/** Remet une prévision au poids `kg` : les kilos par type de pièce et par client suivent au prorata, les kilos par machine redeviennent automatiques. */
+function rescaleForecast(forecastId, kg) {
+  const f = db.prepare('SELECT * FROM lot_forecasts WHERE id = ?').get(Number(forecastId));
+  if (!f || f.weight_kg == null || !(f.weight_kg > 0)) return;
+  const k = kg / f.weight_kg;
+  const scale = (table) => db.prepare(`UPDATE ${table} SET weight_kg = ROUND(weight_kg * ?, 1) WHERE forecast_id = ? AND weight_kg IS NOT NULL`).run(k, f.id);
+  scale('lot_forecast_clients'); scale('lot_forecast_families');
+  db.prepare('UPDATE lot_forecast_machines SET weight_kg = NULL WHERE forecast_id = ?').run(f.id);
+  db.prepare("UPDATE lot_forecasts SET weight_kg = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?").run(round1(kg), f.id);
+}
+
+/** Annule un lancement (passage encore en cours, lancé il y a moins de 5 min). Le premier lavage d'un lot défait le lot et rend ses kilos à la prévision. */
+function undoStart(stepId, nowMs = Date.now()) {
+  const s = db.prepare('SELECT * FROM lot_steps WHERE id = ?').get(Number(stepId));
+  if (!s) throw bad('Passage introuvable.', 'NOT_FOUND', 404);
+  if (s.ended_at) throw bad('Ce passage est déjà terminé.', 'ALREADY_DONE', 409);
+  if (nowMs - Date.parse(s.started_at) > UNDO_MS) throw bad('Il est trop tard pour annuler ce lancement : terminez le passage.', 'TOO_LATE', 409);
+  return db.transaction(() => {
+    db.prepare('DELETE FROM lot_steps WHERE id = ?').run(s.id);
+    const lot = db.prepare('SELECT * FROM lots WHERE id = ?').get(s.lot_id);
+    if (db.prepare('SELECT 1 FROM lot_steps WHERE lot_id = ?').get(lot.id)) return { lotId: lot.id, lotRemoved: false };
+    if (lot.forecast_id) {
+      const f = db.prepare('SELECT * FROM lot_forecasts WHERE id = ?').get(lot.forecast_id);
+      if (f && f.status === 'lance' && f.lot_id === lot.id) db.prepare("UPDATE lot_forecasts SET status = 'prevu', lot_id = NULL, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?").run(f.id);
+      else if (f && f.status === 'prevu' && f.weight_kg != null) rescaleForecast(f.id, round1(f.weight_kg + s.weight_kg));
+    }
+    db.prepare('DELETE FROM lots WHERE id = ?').run(lot.id);
+    return { lotId: lot.id, lotRemoved: true };
+  })();
+}
+
+/** Annule « Terminé » (passage terminé il y a moins de 5 min, machine pas déjà reprise) : le passage repart, le lot se rouvre s'il venait de se clore. */
+function undoFinish(stepId, nowMs = Date.now()) {
+  const s = db.prepare('SELECT * FROM lot_steps WHERE id = ?').get(Number(stepId));
+  if (!s) throw bad('Passage introuvable.', 'NOT_FOUND', 404);
+  if (!s.ended_at) throw bad('Ce passage n\'est pas terminé.', 'NOT_DONE', 409);
+  if (nowMs - Date.parse(s.ended_at) > UNDO_MS) throw bad('Il est trop tard pour annuler : rouvrez le lot depuis l\'administration.', 'TOO_LATE', 409);
+  const lot = db.prepare('SELECT * FROM lots WHERE id = ?').get(s.lot_id);
+  if (lot.status === 'annule') throw bad('Ce lot est annulé.', 'LOT_CLOSED', 409);
+  const c = s.machine_id ? machineConflict(s.machine_id, Date.parse(s.started_at), null, s.id, nowMs) : null;
+  if (c) throw bad(c.kind === 'incident' ? 'Cette machine est à l\'arrêt.' : 'Cette machine a déjà repris un autre passage.', c.kind === 'incident' ? 'MACHINE_DOWN' : 'MACHINE_BUSY', 409);
+  db.transaction(() => {
+    db.prepare('UPDATE lot_steps SET ended_at = NULL WHERE id = ?').run(s.id);
+    if (lot.status === 'termine' && lot.closed_at === s.ended_at) db.prepare("UPDATE lots SET status = 'en_cours', closed_at = NULL WHERE id = ?").run(lot.id);
   })();
   return s.lot_id;
 }
@@ -317,7 +402,7 @@ function editStep(id, o, nowMs = Date.now()) {
   const endMs = o.endMs !== undefined ? o.endMs : (s.ended_at ? Date.parse(s.ended_at) : null);
   if (startMs > nowMs + 60000 || (endMs && endMs > nowMs + 60000)) throw bad('Cette heure est dans le futur.');
   if (endMs != null && endMs <= startMs) throw bad('La fin doit être après le début.');
-  const m = checkMachine(s.stage, machineId, weightKg);
+  const m = checkMachine(s.stage, machineId);
   let program = null;
   const programId = o.programId !== undefined ? o.programId : s.program_id;
   if (programId !== null && programId !== '' && programId !== undefined) {
@@ -419,7 +504,7 @@ const programOut = (p) => ({
   id: p.id, name: p.name, tempC: p.temp_c, durationMin: p.duration_min, waterL: p.water_l, energyKwh: p.energy_kwh,
   detergentCost: p.detergent_cents == null ? null : p.detergent_cents / 100, active: !!p.active, sortOrder: p.sort_order,
 });
-const linenTypeOut = (t) => ({ id: t.id, label: t.label, active: !!t.active, sortOrder: t.sort_order });
+const linenTypeOut = (t) => ({ id: t.id, label: t.label, active: !!t.active, sortOrder: t.sort_order, route: washPlan.routeOfLabel(t.label) });
 const programs = () => db.prepare('SELECT * FROM wash_programs ORDER BY active DESC, sort_order, name COLLATE NOCASE').all().map(programOut);
 const linenTypes = () => db.prepare('SELECT * FROM linen_types ORDER BY active DESC, sort_order, label COLLATE NOCASE').all().map(linenTypeOut);
 
@@ -527,10 +612,17 @@ function board(nowMs = Date.now()) {
     return {
       id: m.id, name: m.name, bu: m.bu, capacityKg: m.capacity_kg, throughputKgh: m.throughput_kgh,
       state: inc ? 'down' : open ? 'running' : 'free',
-      step: open ? { ...open, lotCode: lot ? lot.code : null, linenType: lot ? lot.linenType : null, clients: lot ? lot.clients.map(c => c.societe) : [] } : null,
+      step: open ? { ...open, lotCode: lot ? lot.code : null, linenType: lot ? lot.linenType : null, clients: lot ? lot.clients.map(c => c.societe) : [], ...afterStep(open.stage, lot) } : null,
       incident: inc ? incidentOut(inc, nowMs) : null, lastEndedAt: lastEnd, todayKg: round1(mine.reduce((a, s) => a + s.weightKg, 0)), todayCount: mine.length,
     };
   });
+}
+
+/** Ce qui attend un lot après ce passage selon son parcours : l'étape suivante (sa file), ou null si c'était la dernière (le lot sera terminé). */
+function afterStep(stage, lot) {
+  const route = washPlan.routeOfLabel(lot ? lot.linenType : null);
+  const i = route.indexOf(stage);
+  return { nextStage: i >= 0 && i < route.length - 1 ? route[i + 1] : null, lastOfRoute: i === route.length - 1 };
 }
 
 /** Lots en cours dont aucun passage n'est ouvert : candidats pour séchage / finition. */
@@ -674,4 +766,5 @@ function stats(from, to, nowMs = Date.now()) {
 module.exports = {
   STAGES, STAGE_BU, ProdError, bad, parseKg, resolveClients, getSettings, saveSettings, loadLots, lotById, lotDetail, dayView, stepOut, stepCost, stale,
   route, programs, linenTypes, programOut, saveProgram, deleteProgram, saveLinenType, deleteLinenType, clientChoices, hoursView, stats, editStep, deleteStep, updateLot, cancelLot, reopenLot, createLot, startStep, finishStep, closeLot, addNote, openIncident, resolveIncident, incidentOut, board, waitingLots, machineConflict, checkMachine, round1, iso, clean,
+  pendingStages, lotComplete, undoStart, undoFinish, rescaleForecast,
 };

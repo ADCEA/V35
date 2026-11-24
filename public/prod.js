@@ -1,4 +1,4 @@
-// Administration → Atelier : l'atelier du jour, les lots, les machines, les heures par poste, le tableau de bord et les réglages.
+// Administration → Atelier, en 4 onglets : Aujourd'hui (machines + files d'attente), Prévision, Chiffres (synthèse, machines, lots, heures) et Réglages.
 // Dépend de api() et escHtml() (app.js) et de Bill (fenêtres, messages) chargé avant ce fichier.
 (function () {
   'use strict';
@@ -25,12 +25,14 @@
   const dFr = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('fr-FR', { timeZone: 'UTC' });
   const dLong = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('fr-FR', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' });
   const dShort = (d) => new Date(d + 'T00:00:00Z').toLocaleDateString('fr-FR', { timeZone: 'UTC', day: 'numeric', month: 'numeric' });
-  const TABS = [['today', 'Aujourd\'hui'], ['forecast', 'Prévision'], ['lots', 'Lots'], ['machines', 'Machines'], ['hours', 'Heures'], ['dash', 'Tableau de bord'], ['settings', 'Réglages']];
+  const TABS = [['today', 'Aujourd\'hui'], ['forecast', 'Prévision'], ['figures', 'Chiffres'], ['settings', 'Réglages']];
+  const FIGS = [['dash', 'Synthèse'], ['machines', 'Machines'], ['lots', 'Lots'], ['hours', 'Heures']];
   const STAGE_ORDER = ['lavage', 'sechage', 'finition'];
 
-  const S = { tab: 'today', day: null, fday: null, ov: null, ref: null, range: null, status: '', q: '', timer: null };
+  const S = { tab: 'today', fig: 'dash', day: null, fday: null, ov: null, ref: null, range: null, status: '', q: '', timer: null };
   const root = () => document.getElementById('atelier-root');
   const body = () => document.getElementById('pr-body');
+  const pane = () => document.getElementById('pr-fig') || body();   // zone des Chiffres (sous le sélecteur) ou page entière
   const visible = () => { const v = document.getElementById('admin-view-atelier'); return v && v.style.display !== 'none'; };
   const stageName = (s) => ({ lavage: 'Lavage', sechage: 'Séchage', finition: 'Finition' }[s] || s);
 
@@ -48,10 +50,7 @@
     try {
       if (tab === 'today') await paintToday();
       else if (tab === 'forecast') await paintForecast();
-      else if (tab === 'lots') await paintLots();
-      else if (tab === 'machines') await paintMachines();
-      else if (tab === 'hours') await paintHours();
-      else if (tab === 'dash') await paintDash();
+      else if (tab === 'figures') await paintFigures();
       else await paintSettings();
     } catch (err) { body().innerHTML = `<p class="rh-err">${e(err.message)}</p>`; }
   }
@@ -102,20 +101,23 @@
         const eta = st.stale ? '<div class="pr-sub late">Fin non saisie</div>' : st.plannedEndAt ? `<div class="pr-sub">fin prévue ${e(hm(st.plannedEndAt))}${st.remainingMin != null ? ' · reste ' + e(dur(st.remainingMin)) : ''}</div>` : `<div class="pr-sub">depuis ${e(hm(st.startedAt))}</div>`;
         return `<div class="pr-m run"><div class="pr-mh"><b>${e(m.name)}</b><span class="bl-tag wait">${st.stale ? 'à clôturer' : 'en marche'}</span></div>
           <div><button type="button" class="pr-code" data-lot="${st.lotId}">${e(st.lotCode)}</button> <span class="pr-sub">${e(st.linenType || '')}</span></div>
-          <div class="pr-sub">${e(st.clients.join(', '))}</div><div class="pr-kg">${e(NF1.format(st.weightKg))} kg${m.capacityKg ? `<small>${Math.round(st.weightKg / m.capacityKg * 100)} %</small>` : ''}</div>${bar}${eta}</div>`;
+          <div class="pr-sub">${e(st.clients.join(', '))}</div><div class="pr-kg">${e(NF1.format(st.weightKg))} kg${st.programName ? `<small>${e(st.programName)}</small>` : ''}</div>${bar}${eta}${st.stale ? `<button type="button" class="bl-btn small primary" data-endstep="${st.id}">Clôturer ce passage</button>` : ''}</div>`;
       }
       return `<div class="pr-m"><div class="pr-mh"><b>${e(m.name)}</b><span class="bl-tag ok">libre</span></div>
         <div class="pr-sub">${m.todayCount ? e(m.todayCount + ' passage' + (m.todayCount > 1 ? 's' : '') + ' · ' + NF1.format(m.todayKg) + ' kg') : 'pas encore utilisée'}</div>
         <button type="button" class="bl-btn small" data-down="${m.id}">Signaler un arrêt</button></div>`;
     };
-    const cols = isToday ? `<div class="pr-cols">${STAGE_ORDER.map(st => {
-      const ms = o.machines.filter(m => m.bu === st);
-      return `<section><h3 class="rh-h" style="margin-top:0">${e(stageName(st))} <span class="pr-sub">${ms.filter(m => m.state === 'running').length} / ${ms.length} en marche</span></h3>${ms.map(machineCard).join('') || '<p class="rh-none">Aucune machine.</p>'}</section>`;
-    }).join('')}</div>` : '';
-    const wait = isToday && o.waiting.length ? `<h3 class="rh-h">À reprendre <span class="pr-sub">lavage ou séchage terminé, étape suivante pas lancée</span></h3>
-      <div class="rh-chips">${o.waiting.map(l => `<button type="button" class="pr-lotchip" data-lot="${l.id}"><b>${e(l.code)}</b> ${e(l.linenType || '')} · ${e(NF1.format(l.weightKg))} kg<small>${e(stageName(l.lastStage))} terminé · ${e(l.clients.join(', '))}</small></button>`).join('')}</div>` : '';
-    const due = isToday && o.forecastDue && o.forecastDue.length ? `<h3 class="rh-h">À lancer <span class="pr-sub">lots prévus pour aujourd'hui, ou restés en attente</span></h3>
-      <div class="rh-chips">${o.forecastDue.map(f => `<button type="button" class="pr-lotchip pf-due" data-launch="${f.id}"><span><b>${e(f.linenType || 'Lot')}</b>${f.weightKg != null ? ' · ' + e(NF1.format(f.weightKg)) + ' kg' : ''}</span><small>${e(f.clients.map(c => c.societe).join(', '))}${f.day < o.today ? ' · prévu le ' + e(dFr(f.day)) : ''}</small></button>`).join('')}</div>` : '';
+    const queues = o.queues || { lavage: [], sechage: [], finition: [] };
+    const qItem = (it, i) => `<button type="button" class="pr-q${i === 0 ? ' first' : ''}" ${it.kind === 'forecast' ? `data-launch="${it.id}"` : `data-lot="${it.id}"`}><span class="n">${i + 1}</span>
+      <span class="b"><b>${e(it.linenType || 'Lot')}${it.weightKg != null ? ' · ' + e(NF1.format(it.weightKg)) + ' kg' : ''}</b><small>${e([it.clients.join(', '), it.code, it.note].filter(Boolean).join(' · '))}${it.kind === 'forecast' && it.day && it.day < o.today ? ' · prévu le ' + e(dFr(it.day)) : ''}</small></span>${it.planned ? '<span class="bl-tag wait">prévu</span>' : ''}</button>`;
+    const staleN = o.machines.filter(m => m.state === 'running' && m.step.stale).length;
+    const alert = isToday && staleN ? `<p class="rh-warn" style="margin:0 0 12px">${staleN} passage${staleN > 1 ? 's' : ''} sans fin saisie (ouvert${staleN > 1 ? 's' : ''} depuis trop longtemps) : terminez-le${staleN > 1 ? 's' : ''} ci-dessous pour libérer la machine.</p>` : '';
+    const cols = isToday ? `${alert}<div class="pr-cols">${STAGE_ORDER.map(st => {
+      const ms = o.machines.filter(m => m.bu === st), q = queues[st] || [];
+      return `<section><h3 class="rh-h" style="margin-top:0">${e(stageName(st))} <span class="pr-sub">${ms.filter(m => m.state === 'running').length} / ${ms.length} en marche</span></h3>${ms.map(machineCard).join('') || '<p class="rh-none">Aucune machine.</p>'}
+        <h4 class="pr-ql">${q.length ? `En attente · ${q.length}` : 'En attente'}</h4>${q.map(qItem).join('') || '<p class="rh-none">Rien en attente.</p>'}</section>`;
+    }).join('')}</div>
+      <p class="rh-help">Chaque lot passe tout seul d'une file à l'autre selon son type de linge (plat : lavage puis finition ; éponge : lavage puis séchage). Aucune machine n'est bridée par sa capacité.</p>` : '';
     const lots = o.view.lots;
     const table = lots.length ? `<div class="bl-tablewrap"><table class="bl-table rh-table"><thead><tr><th>Lot</th><th>Début</th><th>Type</th><th>Clients</th><th class="r">Kg</th><th>Parcours</th><th>État</th></tr></thead><tbody>
       ${lots.map(l => `<tr class="bl-row${l.status === 'annule' ? ' rh-off' : ''}" data-lot="${l.id}" tabindex="0"><td class="bl-mono">${e(l.code)}</td><td>${e(hm(l.steps.length ? l.steps[0].startedAt : l.createdAt))}</td><td>${e(l.linenType || '—')}</td>
@@ -133,7 +135,7 @@
         <div class="rh-kpi"><span>Kg lavés</span><b>${e(NF1.format(t.kgLavage))}</b></div>
         <div class="rh-kpi"><span>Kg séchés</span><b>${e(NF1.format(t.kgSechage))}</b></div>
         <div class="rh-kpi"><span>Kg en finition</span><b>${e(NF1.format(t.kgFinition))}</b></div></div>
-      ${cols}${due}${wait}<h3 class="rh-h">Lots du jour</h3>${table}
+      ${cols}<h3 class="rh-h">Lots du jour</h3>${table}
       <p class="rh-help">Les lots sont lancés depuis la tablette de l'atelier (Équipe → Badgeuses pour l'activer) ; ici on peut aussi les saisir ou les corriger après coup.</p>`;
     wireToday();
   }
@@ -143,7 +145,8 @@
     const day = document.getElementById('pr-day');
     day.onchange = () => { if (day.value && day.value <= today()) { S.day = day.value; refreshTab(); } };
     document.getElementById('pr-newlot').onclick = () => lotForm();
-    b.querySelectorAll('[data-launch]').forEach(x => x.onclick = () => { const f = S.ov.forecastDue.find(y => y.id === Number(x.dataset.launch)); if (f) lotForm(null, f); });
+    b.querySelectorAll('[data-launch]').forEach(x => x.onclick = () => { const f = (S.ov.forecastDue || []).find(y => y.id === Number(x.dataset.launch)); if (f) lotForm(null, f); });
+    b.querySelectorAll('[data-endstep]').forEach(x => x.onclick = async () => { try { await post(`/steps/${x.dataset.endstep}/finish`); toast('Passage terminé.'); refreshTab(); } catch (err) { toast(err.message, true); } });
     b.querySelectorAll('[data-lot]').forEach(x => { x.onclick = () => openLot(Number(x.dataset.lot)); if (x.tagName === 'TR') x.onkeydown = (ev) => { if (ev.key === 'Enter') openLot(Number(x.dataset.lot)); }; });
     b.querySelectorAll('[data-down]').forEach(x => x.onclick = () => downForm(Number(x.dataset.down)));
     b.querySelectorAll('[data-up]').forEach(x => x.onclick = async () => { try { await post(`/incidents/${x.dataset.up}/resolve`); toast('Machine remise en service.'); refreshTab(); } catch (err) { toast(err.message, true); } });
@@ -162,7 +165,7 @@
   }
 
   // ---------- saisie d'un lot / d'un passage ----------
-  const machOpts = (ref, stage, sel) => ref.machines.filter(m => m.bu === stage).map(m => opt(m.id, m.name + (m.capacityKg ? ` (${NF1.format(m.capacityKg)} kg)` : ''), Number(sel) === m.id)).join('');
+  const machOpts = (ref, stage, sel) => ref.machines.filter(m => m.bu === stage).map(m => opt(m.id, m.name, Number(sel) === m.id)).join('');
   const progOpts = (ref, sel) => opt('', '— aucun —', !sel) + ref.programs.filter(p => p.active || p.id === sel).map(p => opt(p.id, p.name + (p.durationMin ? ` · ${p.durationMin} min` : ''), p.id === sel)).join('');
 
   /** Lignes de clients (liste ou nom libre, kilos facultatifs, commande liée) — état tenu en mémoire, formulaire redessiné à chaque changement. */
@@ -191,7 +194,7 @@
   function launchNote(fc) {
     const wash = fc && fc.plan && fc.plan.stages.lavage;
     if (!wash || !wash.lines.length || !(wash.lines.length > 1 || wash.lines[0].passes > 1)) return '';
-    return `<p class="rh-help" style="margin:6px 0 12px">Lot de ${e(NF1.format(fc.weightKg || 0))} kg prévu sur ${wash.lines.map(l => `${e(l.machineName)} (${e(NF1.format(l.weightKg || 0))} kg, ${l.passes || 1} passage${l.passes > 1 ? 's' : ''})`).join(', ')} : on lance ici la première charge ; les suivantes se lancent ensuite avec « Ajouter un passage ».</p>`;
+    return `<p class="rh-help" style="margin:6px 0 12px">Lot de ${e(NF1.format(fc.weightKg || 0))} kg prévu sur ${wash.lines.map(l => `${e(l.machineName)} (${e(NF1.format(l.weightKg || 0))} kg)`).join(', ')} : on lance ici le poids saisi ; ce qui reste attend dans la file « À laver » pour la machine suivante.</p>`;
   }
 
   async function lotForm(lot, fc) {
@@ -226,10 +229,6 @@
       onOpen: (box) => {
         getClients = clientRows(box, choices, lot ? lot.clients.map(c => ({ clientId: c.clientId || '', societe: c.societe, kg: c.weightAuto ? '' : (c.weightKg || ''), orderId: c.orderId || '' }))
           : fc ? fc.clients.map(c => ({ clientId: c.clientId || '', societe: c.societe, kg: c.weightKg || '', orderId: c.orderId || '' })) : []);
-        if (!editing) {
-          const sync = () => { const m = ref.machines.find(x => x.id === Number(box.$('#lf-machine').value)); if (m && m.capacityKg && !box.$('#lf-kg').value) box.$('#lf-kg').placeholder = NF1.format(m.capacityKg); };
-          box.$('#lf-machine').onchange = sync; sync();
-        }
       },
     });
   }
@@ -336,7 +335,7 @@
         <div class="rh-kpi"><span>Clients concernés</span><b>${NF0.format(t.clients)}</b></div></div>
       <div class="pf-list">${d.forecasts.length ? d.forecasts.map((f, i) => card(f, i, d.forecasts.length)).join('') : `<p class="empty-note">Aucun lot prévu ${S.fday === tomorrow() ? 'demain' : 'ce jour-là'}. Ajoutez-les ci-dessous, ou prévoyez directement une commande reçue.</p>`}</div>
       <h3 class="rh-h">Commandes à planifier <span class="pr-sub">reçues ou en traitement, pas encore dans un lot ni une prévision</span></h3>${orders}
-      <p class="rh-help">Une prévision ne bloque aucune machine et n'entre dans aucun chiffre. Le jour venu, elle apparaît dans « Aujourd'hui » et sur la tablette de l'atelier : on la lance en confirmant la laveuse et le poids réellement chargé.</p>`;
+      <p class="rh-help">Une prévision ne bloque aucune machine et n'entre dans aucun chiffre. Le jour venu, elle arrive dans la file « À laver » (onglet Aujourd'hui et tablette de l'atelier) : on la lance en confirmant la laveuse et le poids réellement chargé.</p>`;
     wireForecast(d);
   }
 
@@ -397,7 +396,7 @@
         const all = machinesOf(st);
         const rows = lines[st].map((l, i) => {
           const taken = new Set(lines[st].filter((_, j) => j !== i).map(x => x.machineId));
-          const opts = opt('', '— machine —', !l.machineId) + all.filter(m => !taken.has(String(m.id))).map(m => opt(m.id, m.name + (m.capacityKg || m.throughputKgh ? ` (${[m.capacityKg ? NF1.format(m.capacityKg) + ' kg' : '', m.throughputKgh ? NF1.format(m.throughputKgh) + ' kg/h' : ''].filter(Boolean).join(' · ')})` : ''), String(m.id) === l.machineId)).join('');
+          const opts = opt('', '— machine —', !l.machineId) + all.filter(m => !taken.has(String(m.id))).map(m => opt(m.id, m.name + (m.throughputKgh ? ` (${NF1.format(m.throughputKgh)} kg/h)` : ''), String(m.id) === l.machineId)).join('');
           return `<div class="pr-crow pf-line" data-st="${st}" data-i="${i}">
             <select data-f="machineId" aria-label="${e(STAGE_NAME[st])} : machine">${opts}</select>
             ${st === 'lavage' ? `<select data-f="programId" aria-label="Programme">${progOpts(ref, l.programId ? Number(l.programId) : null)}</select>` : ''}
@@ -571,6 +570,13 @@
     });
   }
 
+  // ---------- chiffres : synthèse, machines, lots, heures ----------
+  async function paintFigures() {
+    body().innerHTML = `<div class="pr-seg" role="tablist" aria-label="Chiffres">${FIGS.map(([id, label]) => `<button type="button" role="tab" class="${S.fig === id ? 'on' : ''}" aria-selected="${S.fig === id}" data-fig="${id}">${label}</button>`).join('')}</div><div id="pr-fig"></div>`;
+    body().querySelector('.pr-seg').onclick = (ev) => { const t = ev.target.closest('[data-fig]'); if (t && t.dataset.fig !== S.fig) { S.fig = t.dataset.fig; refreshTab(); } };
+    await ({ dash: paintDash, machines: paintMachines, lots: paintLots, hours: paintHours }[S.fig] || paintDash)();
+  }
+
   // ---------- période ----------
   function presets() {
     const t = today(), mon = monday(t);
@@ -586,7 +592,7 @@
       <div class="bl-field"><label for="pr-to">Au</label><input id="pr-to" type="date" value="${to}" max="${today()}"></div>${extra || ''}</div>`;
   }
   function wireRange() {
-    const b = body();
+    const b = pane();
     b.querySelectorAll('[data-preset]').forEach(x => x.onclick = () => { const p = presets()[Number(x.dataset.preset)]; S.range = { from: p[1], to: p[2] }; refreshTab(); });
     const f = document.getElementById('pr-from'), t = document.getElementById('pr-to');
     const apply = () => { if (f.value && t.value && f.value <= t.value) { S.range = { from: f.value, to: t.value }; refreshTab(); } else toast('La fin de période précède le début.', true); };
@@ -600,7 +606,7 @@
     const { from, to } = S.range;
     const r = await get(`/lots?from=${from}&to=${to}&status=${S.status}&q=${encodeURIComponent(S.q)}`);
     const kg = r.lots.filter(l => l.status !== 'annule').reduce((a, l) => a + l.weightKg, 0);
-    body().innerHTML = `${range}
+    pane().innerHTML = `${range}
       <p class="rh-sub" style="margin:0 0 10px">${r.lots.length} lot${r.lots.length > 1 ? 's' : ''} · ${e(NF1.format(kg))} kg lavés${r.truncated ? ' · liste tronquée, affinez la période' : ''}</p>
       ${r.lots.length ? `<div class="bl-tablewrap"><table class="bl-table rh-table"><thead><tr><th>Lot</th><th>Jour</th><th>Type</th><th>Clients</th><th class="r">Kg</th><th>Parcours</th><th>État</th></tr></thead><tbody>
         ${r.lots.map(l => `<tr class="bl-row${l.status === 'annule' ? ' rh-off' : ''}" data-lot="${l.id}" tabindex="0"><td class="bl-mono">${e(l.code)}</td><td>${e(dFr(l.day))}</td><td>${e(l.linenType || '—')}</td>
@@ -609,7 +615,7 @@
     document.getElementById('pr-status').onchange = (ev) => { S.status = ev.target.value; refreshTab(); };
     let tm = null;
     document.getElementById('pr-q').oninput = (ev) => { clearTimeout(tm); tm = setTimeout(() => { S.q = ev.target.value; refreshTab(); }, 400); };
-    body().querySelectorAll('tr[data-lot]').forEach(tr => { tr.onclick = () => openLot(Number(tr.dataset.lot)); tr.onkeydown = (ev) => { if (ev.key === 'Enter') openLot(Number(tr.dataset.lot)); }; });
+    pane().querySelectorAll('tr[data-lot]').forEach(tr => { tr.onclick = () => openLot(Number(tr.dataset.lot)); tr.onkeydown = (ev) => { if (ev.key === 'Enter') openLot(Number(tr.dataset.lot)); }; });
   }
 
   // ---------- machines ----------
@@ -620,20 +626,20 @@
     const state = (m) => (m.state === 'down' ? '<span class="bl-tag bad">à l\'arrêt</span>' : m.state === 'running' ? '<span class="bl-tag wait">en marche</span>' : '<span class="bl-tag ok">libre</span>');
     const rows = ov.machines.map(m => {
       const s = st.machines.find(x => x.id === m.id) || {};
-      return `<tr><td class="client">${e(m.name)}</td><td>${e(stageName(m.bu))}</td><td>${state(m)}</td><td class="r bl-num">${m.capacityKg ? e(NF1.format(m.capacityKg)) + ' kg' : '—'}</td>
-        <td class="r bl-num">${s.passes || 0}</td><td class="r bl-num">${e(NF1.format(s.kg || 0))} kg</td><td class="r bl-num">${s.avgLoadPct != null ? s.avgLoadPct + ' %' : '—'}</td>
+      return `<tr><td class="client">${e(m.name)}</td><td>${e(stageName(m.bu))}</td><td>${state(m)}</td>
+        <td class="r bl-num">${s.passes || 0}</td><td class="r bl-num">${e(NF1.format(s.kg || 0))} kg</td><td class="r bl-num">${s.passes ? e(NF1.format((s.kg || 0) / s.passes)) + ' kg' : '—'}</td>
         <td class="r bl-num">${s.utilization != null ? Math.round(s.utilization * 100) + ' %' : '—'}</td><td class="r bl-num">${s.realKgh != null ? e(NF1.format(s.realKgh)) + ' kg/h' : '—'}${m.throughputKgh ? ` <span class="bl-faint">(prévu ${e(NF1.format(m.throughputKgh))})</span>` : ''}</td>
         <td class="r bl-num">${s.incidents ? s.incidents + ' · ' + e(dur(s.downMin)) : '—'}</td>
         <td class="r">${m.state === 'down' ? `<button type="button" class="bl-btn small" data-up="${m.incident.id}">Remettre en service</button>` : `<button type="button" class="bl-btn small" data-down="${m.id}">Signaler un arrêt</button>`}</td></tr>`;
     }).join('');
-    body().innerHTML = `<p class="rh-sub" style="margin:0 0 10px">Chiffres des 30 derniers jours (${e(dFr(from))} – ${e(dFr(t))}). L'utilisation compte les heures de marche sur les jours où l'atelier a tourné, dans les horaires d'ouverture (${e(ov.settings.openFrom)}–${e(ov.settings.openTo)}).</p>
-      <div class="bl-tablewrap"><table class="bl-table rh-table"><thead><tr><th>Machine</th><th>Étape</th><th>État</th><th class="r">Capacité</th><th class="r">Passages</th><th class="r">Kilos</th><th class="r">Charge moy.</th><th class="r">Utilisation</th><th class="r">Cadence réelle</th><th class="r">Arrêts</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-      <p class="rh-help">Capacités et cadences (kg/h) se règlent dans Équipe → Machines. La cadence réelle est calculée sur les passages terminés.</p>
+    pane().innerHTML = `<p class="rh-sub" style="margin:0 0 10px">Chiffres des 30 derniers jours (${e(dFr(from))} – ${e(dFr(t))}). L'utilisation compte les heures de marche sur les jours où l'atelier a tourné, dans les horaires d'ouverture (${e(ov.settings.openFrom)}–${e(ov.settings.openTo)}).</p>
+      <div class="bl-tablewrap"><table class="bl-table rh-table"><thead><tr><th>Machine</th><th>Étape</th><th>État</th><th class="r">Passages</th><th class="r">Kilos</th><th class="r">Kilos par passage</th><th class="r">Utilisation</th><th class="r">Cadence réelle</th><th class="r">Arrêts</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="rh-help">Les poids repères et les cadences (kg/h) se règlent dans Équipe → Machines ; aucun ne limite une machine. La cadence réelle est calculée sur les passages terminés.</p>
       <h3 class="rh-h">Arrêts et pannes</h3>
       ${inc.incidents.length ? `<div class="bl-tablewrap"><table class="bl-table rh-table"><thead><tr><th>Machine</th><th>Début</th><th>Fin</th><th class="r">Durée</th><th>Cause</th></tr></thead><tbody>
         ${inc.incidents.map(i => `<tr><td class="client">${e(i.machineName)}</td><td>${e(Bill.dtFr(i.startedAt))}</td><td>${i.endedAt ? e(Bill.dtFr(i.endedAt)) : '<span class="bl-tag bad">en cours</span>'}</td><td class="r bl-num">${e(dur(i.minutes))}</td><td>${e(i.reason)}${i.note ? ` <span class="bl-faint">· ${e(i.note)}</span>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty-note">Aucun arrêt signalé sur 30 jours.</p>'}`;
-    body().querySelectorAll('[data-down]').forEach(x => x.onclick = () => downForm(Number(x.dataset.down)));
-    body().querySelectorAll('[data-up]').forEach(x => x.onclick = async () => { try { await post(`/incidents/${x.dataset.up}/resolve`); toast('Machine remise en service.'); refreshTab(); } catch (err) { toast(err.message, true); } });
+    pane().querySelectorAll('[data-down]').forEach(x => x.onclick = () => downForm(Number(x.dataset.down)));
+    pane().querySelectorAll('[data-up]').forEach(x => x.onclick = async () => { try { await post(`/incidents/${x.dataset.up}/resolve`); toast('Machine remise en service.'); refreshTab(); } catch (err) { toast(err.message, true); } });
   }
 
   // ---------- heures par poste ----------
@@ -646,7 +652,7 @@
       <td class="r bl-num">${x.kg ? e(NF1.format(x.kg)) + ' kg' : '—'}</td><td class="r bl-num">${x.kgPerHour != null ? e(NF1.format(x.kgPerHour)) + ' kg/h' : '—'}</td>
       <td class="r bl-num">${priced ? e(EUR0.format(x.costCents / 100)) : '—'}</td><td class="r bl-num">${x.costPerKgCents != null ? cents(x.costPerKgCents) : '—'}</td></tr>`;
     const bus = { lavage: 'Lavage', sechage: 'Séchage', finition: 'Finition', logistique: 'Logistique', admin: 'Administration' };
-    body().innerHTML = `${range}
+    pane().innerHTML = `${range}
       <div class="pr-kpis"><div class="rh-kpi"><span>Heures pointées</span><b>${e(hLong(h.totalMin))}</b></div><div class="rh-kpi"><span>Coût de main-d'œuvre</span><b>${priced ? e(EUR0.format(h.costCents / 100)) : '—'}</b>${priced ? '' : '<small>Coût horaire à saisir dans Équipe</small>'}</div></div>
       <h3 class="rh-h">Par unité</h3>
       <div class="bl-tablewrap"><table class="bl-table rh-table"><thead><tr><th>Unité</th><th class="r">Heures</th><th class="r">Kilos traités</th><th class="r">Rendement</th><th class="r">Coût</th><th class="r">Coût au kilo</th></tr></thead><tbody>
@@ -674,7 +680,7 @@
     const util = s.machines.filter(m => m.utilization != null);
     const maxType = Math.max(1, ...s.byType.map(x => x.kg)), maxCl = Math.max(1, ...s.byClient.map(x => x.kg));
     const labourRows = s.labour.map(l => `<tr><td class="client">${e(stageName(l.bu))}</td><td class="r bl-num">${e(hLong(l.minutes))}</td><td class="r bl-num">${e(NF1.format(l.kg))} kg</td><td class="r bl-num">${l.kgPerHour != null ? e(NF1.format(l.kgPerHour)) + ' kg/h' : '—'}</td><td class="r bl-num">${l.costCents ? e(EUR0.format(l.costCents / 100)) : '—'}</td><td class="r bl-num">${l.costPerKgCents != null ? cents(l.costPerKgCents) : '—'}</td></tr>`).join('');
-    body().innerHTML = `${range}
+    pane().innerHTML = `${range}
       <div class="pr-kpis">${costCard}
         <div class="rh-kpi"><span>Kilos lavés</span><b>${e(NF1.format(s.kg.lavage))}</b><small>${s.lots} lot${s.lots > 1 ? 's' : ''} · ${s.activeDays} jour${s.activeDays > 1 ? 's' : ''} d'activité</small></div>
         <div class="rh-kpi"><span>Séchés · en finition</span><b>${e(NF0.format(s.kg.sechage))} · ${e(NF0.format(s.kg.finition))}</b><small>kg</small></div>
@@ -708,7 +714,7 @@
         <div class="bl-field"><label for="st-from">Ouverture</label><input id="st-from" type="time" value="${e(st.openFrom)}"></div>
         <div class="bl-field"><label for="st-to">Fermeture</label><input id="st-to" type="time" value="${e(st.openTo)}"></div></div>
       <div class="rh-bar"><button type="button" class="bl-btn primary" id="st-save">Enregistrer</button><span class="rh-sub" id="st-msg"></span></div>
-      <p class="rh-help">Les prix servent à estimer le coût de l'eau et de l'énergie de chaque lavage (consommations moyennes du programme × prix). Laissés vides, aucun coût n'est inventé : la ligne reste « à renseigner ». L'ouverture sert au calcul de l'utilisation des machines. Les cycles servent à la prévision : un lavage dure 50 minutes par charge (sauf si le programme choisi indique une autre durée) et un cycle de séchoir 30 minutes. Le plat (grand et petit) va du lavage à la calandre sans passer par le séchoir ; les éponges passent au séchoir.</p>
+      <p class="rh-help">Les prix servent à estimer le coût de l'eau et de l'énergie de chaque lavage (consommations moyennes du programme × prix). Laissés vides, aucun coût n'est inventé : la ligne reste « à renseigner ». L'ouverture sert au calcul de l'utilisation des machines. Les cycles servent à estimer la fin d'un passage, jamais à l'interdire : un lavage dure 50 minutes (sauf si le programme choisi indique une autre durée) ; un séchoir sans cadence compte un cycle de 30 minutes par charge de son poids repère ; une machine qui a une cadence (kg/h) donne sa fin prévue d'après le poids chargé. Chaque type de linge suit son parcours : le plat (grand et petit) va du lavage à la finition, les éponges du lavage au séchage, le reste passe par les trois étapes.</p>
 
       <h3 class="rh-h">Programmes de lavage</h3>
       <div class="rh-bar"><button type="button" class="bl-btn" id="pg-new">+ Nouveau programme</button></div>
@@ -719,8 +725,8 @@
         : '<p class="empty-note">Aucun programme. Sans programme, l\'écran de l\'atelier lance le lavage sans durée prévue ni coût estimé.</p>'}
       <p class="rh-help">La durée donne l'heure de fin prévue d'un lavage ; l'eau, l'énergie et la lessive (par charge) servent à estimer son coût. Reportez les valeurs de vos fiches machine.</p>
 
-      <h3 class="rh-h">Types de linge</h3>
-      <div class="rh-chips">${ref.linenTypes.map(t => `<button type="button" class="pr-lotchip${t.active ? '' : ' off'}" data-lt="${t.id}">${e(t.label)}${t.active ? '' : '<small>retiré</small>'}</button>`).join('')}
+      <h3 class="rh-h">Types de linge et parcours</h3>
+      <div class="rh-chips">${ref.linenTypes.map(t => `<button type="button" class="pr-lotchip${t.active ? '' : ' off'}" data-lt="${t.id}">${e(t.label)}<small>${t.active ? (t.route && t.route.length ? e(t.route.map(stageName).join(' → ')) : '') : 'retiré'}</small></button>`).join('')}
         <button type="button" class="bl-btn small" id="lt-new">+ Ajouter</button></div>
 
       <h3 class="rh-h">Tablette de l'atelier</h3>

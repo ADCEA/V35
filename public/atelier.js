@@ -1,10 +1,11 @@
-// Écran Atelier (tablette). Le jeton de la tablette est le même que celui de la badgeuse ; chaque action demande le code
-// personnel de la personne, gardé en mémoire 90 secondes seulement (jamais stocké).
+// Écran Atelier (tablette). Le jeton de la tablette est le même que celui de la badgeuse ; la personne s'identifie une fois
+// (code personnel ou badge), puis l'identité est gardée en mémoire 5 minutes d'inactivité seulement (jamais stockée).
+// Trois files d'attente (À laver, À sécher, À finir) : une machine libre prend le premier lot en un geste, aucune limite de charge.
 (function () {
   'use strict';
   const KEY = 'cezanne.badgeuse.token';
   const TZ = 'Europe/Paris';
-  const POLL_MS = 15000, SESSION_MS = 90000, SHEET_IDLE_MS = 180000;
+  const POLL_MS = 15000, SESSION_MS = 300000, SHEET_IDLE_MS = 180000;
   const main = document.getElementById('at-main');
   const sheetEl = document.getElementById('at-sheet');
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -69,11 +70,14 @@
     const el = document.getElementById('at-banner');
     el.hidden = !msg; el.textContent = msg || '';
   }
-  let toastTimer = null;
-  function toast(msg, bad) {
+  let toastTimer = null, undoPath = null;
+  /** Message en bas d'écran ; avec `undo` (chemin d'annulation), un bouton « Annuler » reste visible 8 secondes. */
+  function toast(msg, bad, undo) {
     const el = document.getElementById('at-toast');
-    el.textContent = msg; el.className = 'at-toast' + (bad ? ' bad' : ''); el.hidden = false;
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, bad ? 6000 : 3000);
+    undoPath = undo || null;
+    el.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button type="button" class="at-undo" data-act="undo">Annuler</button>' : ''}`;
+    el.className = 'at-toast' + (bad ? ' bad' : ''); el.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; undoPath = null; }, undo ? 8000 : bad ? 6000 : 3000);
   }
 
   // ---------- horloge, barres de progression, identité ----------
@@ -127,20 +131,28 @@
     if (sheetEl.hidden) renderBoard();
   }
 
-  // ---------- tableau des machines ----------
+
+  // ---------- tableau : trois colonnes (machines, puis file d'attente de l'étape) ----------
+  const STAGES = ['lavage', 'sechage', 'finition'];
+  const stageQueue = (stage) => (S && S.queues && S.queues[stage]) || [];
+  const itemTitle = (it) => `${esc(it.linenType || 'Lot')}${it.weightKg != null ? ' · ' + esc(kgf(it.weightKg)) + ' kg' : ''}`;
+  const itemSub = (it) => esc([it.clients.join(', '), it.code, it.note].filter(Boolean).join(' · '));
+
   function renderSummary() {
-    const t = S.today.totals;
+    const run = S.machines.filter((m) => m.state === 'running').length;
+    const wait = STAGES.reduce((a, st) => a + stageQueue(st).length, 0);
+    const done = S.today.lots.filter((l) => l.status === 'termine').length;
     const tm = S.forecast && S.forecast.tomorrow;
-    document.getElementById('at-sum').innerHTML = `<b>${num(t.lots)}</b> lot${t.lots > 1 ? 's' : ''} · <b>${kgf(t.kgLavage)}</b> kg lavés<br>${kgf(t.kgSechage)} kg séchés · ${kgf(t.kgFinition)} kg finis${tm && tm.count ? `<br>Demain : ${num(tm.count)} lot${tm.count > 1 ? 's' : ''} prévu${tm.count > 1 ? 's' : ''}${tm.kg ? ' · ' + kgf(tm.kg) + ' kg' : ''}` : ''}`;
+    document.getElementById('at-sum').innerHTML = `<b>${run}</b> en machine · <b>${wait}</b> en attente · <b>${done}</b> terminé${done > 1 ? 's' : ''}${tm && tm.count ? `<br>Demain : ${num(tm.count)} lot${tm.count > 1 ? 's' : ''} prévu${tm.count > 1 ? 's' : ''}${tm.kg ? ' · ' + kgf(tm.kg) + ' kg' : ''}` : ''}`;
     document.getElementById('at-new').hidden = false;
+    document.getElementById('at-day').hidden = false;
     renderWho();
   }
 
   function machineCard(m) {
-    const cap = m.capacityKg ? `<small>${kgf(m.capacityKg)} kg</small>` : '';
     if (m.state === 'down') {
       const i = m.incident;
-      return `<div class="at-m down"><div class="at-mh"><b>${esc(m.name)}</b>${cap}<span class="at-tag">À l'arrêt</span></div>
+      return `<div class="at-m down"><div class="at-mh"><b>${esc(m.name)}</b><span class="at-tag">À l'arrêt</span></div>
         <div class="at-why">${esc(i.reason)}</div><div class="at-eta">depuis ${esc(hmIso(i.startedAt))}${i.note ? ' · ' + esc(i.note) : ''}</div>
         <div class="at-mf"><button type="button" class="at-b main" data-act="up" data-inc="${num(i.id)}">Remettre en service</button></div></div>`;
     }
@@ -154,49 +166,51 @@
         bar = `<div class="at-bar${left < 0 ? ' late' : ''}" data-s="${Date.parse(st.startedAt)}" data-e="${Date.parse(st.plannedEndAt)}"><i style="width:${Math.round((st.progress || 0) * 100)}%"></i></div>`;
         eta = left >= 0 ? `<div class="at-eta">fin prévue <b>${esc(hmIso(st.plannedEndAt))}</b> · reste ${esc(dur(left))}</div>` : `<div class="at-eta late">Dépassé de ${esc(dur(-left))} (prévu ${esc(hmIso(st.plannedEndAt))})</div>`;
       } else eta = `<div class="at-eta">depuis ${esc(hmIso(st.startedAt))} · ${esc(dur(Math.round((nowMs() - Date.parse(st.startedAt)) / 60000)))}</div>`;
-      const pct = m.capacityKg ? ` · ${Math.round(st.weightKg / m.capacityKg * 100)} %` : '';
-      return `<div class="at-m running${st.stale ? ' stale' : ''}"><div class="at-mh"><b>${esc(m.name)}</b>${cap}<span class="at-tag">${st.stale ? 'À clôturer' : 'En marche'}</span></div>
+      const after = st.stale ? '' : `<div class="at-eta">${st.nextStage ? 'Ensuite : file ' + esc(stageName(st.nextStage)) : 'Ensuite : lot terminé'}</div>`;
+      return `<div class="at-m running${st.stale ? ' stale' : ''}"><div class="at-mh"><b>${esc(m.name)}</b><span class="at-tag">${st.stale ? 'À clôturer' : 'En marche'}</span></div>
         <div class="at-lotline"><button type="button" class="at-code" data-act="lot" data-lot="${num(st.lotId)}">${esc(st.lotCode)}</button><span class="at-cl">${esc(st.linenType || '')}${clients ? ' · ' + esc(clients) : ''}</span></div>
-        <div class="at-kg">${esc(kgf(st.weightKg))} kg<small>${esc(pct.replace(' · ', ''))}${st.programName ? (pct ? ' · ' : '') + esc(st.programName) : ''}</small></div>
-        ${bar}${eta}
-        <div class="at-mf"><button type="button" class="at-b main" data-act="finish" data-step="${num(st.id)}">Terminer</button></div></div>`;
+        <div class="at-kg">${esc(kgf(st.weightKg))} kg<small>${esc(st.programName || '')}</small></div>
+        ${bar}${eta}${after}
+        <div class="at-mf"><button type="button" class="at-b main" data-act="finish" data-step="${num(st.id)}">Terminé</button></div></div>`;
     }
-    return `<div class="at-m"><div class="at-mh"><b>${esc(m.name)}</b>${cap}<span class="at-tag">Libre</span></div>
+    const first = stageQueue(m.bu)[0];
+    const go = first
+      ? `<button type="button" class="at-b ghost next" data-act="launchnext" data-m="${num(m.id)}"><b>Lancer ${esc(first.code || first.linenType || 'le lot')}</b><small>${esc([first.linenType, first.weightKg != null ? kgf(first.weightKg) + ' kg' : '', first.clients.join(', ')].filter(Boolean).join(' · '))}</small></button>`
+      : (m.bu === 'lavage' ? `<button type="button" class="at-b ghost" data-act="newlotm" data-m="${num(m.id)}">Nouveau lot</button>` : '<div class="at-free grow">Rien en attente</div>');
+    return `<div class="at-m"><div class="at-mh"><b>${esc(m.name)}</b><span class="at-tag">Libre</span></div>
       <div class="at-free">${m.lastEndedAt ? 'libre depuis ' + esc(hmIso(m.lastEndedAt)) : 'libre'}${m.todayCount ? ' · aujourd\'hui ' + num(m.todayCount) + ' passage' + (m.todayCount > 1 ? 's' : '') + ', ' + esc(kgf(m.todayKg)) + ' kg' : ''}</div>
-      <div class="at-mf"><button type="button" class="at-b ghost" data-act="launch" data-m="${num(m.id)}">Lancer</button><button type="button" class="at-b small stop" data-act="down" data-m="${num(m.id)}">Panne</button></div></div>`;
+      <div class="at-mf">${go}<button type="button" class="at-b small stop" data-act="down" data-m="${num(m.id)}">Panne</button></div></div>`;
   }
 
-  function lotButton(l, kind) {
+  function lotButton(l) {
     const clients = l.clients.length ? l.clients.join(', ') : '';
-    if (kind === 'wait') {
-      return `<button type="button" class="at-lot wait" data-act="resume" data-lot="${num(l.id)}"><span class="t"><b>${esc(l.code)}</b> · ${esc(l.linenType || '')} · ${esc(kgf(l.weightKg))} kg</span>
-        <span class="s">${esc(stageName(l.lastStage))} terminé il y a ${esc(ago(l.lastEndedAt))}${clients ? ' · ' + esc(clients) : ''}</span></button>`;
-    }
     return `<button type="button" class="at-lot${l.status === 'termine' ? ' done' : ''}" data-act="lot" data-lot="${num(l.id)}"><span class="t"><b>${esc(l.code)}</b> · ${esc(l.linenType || '')} · ${esc(kgf(l.weightKg))} kg</span>
       <span class="s">${esc(l.stageLabel)}${clients ? ' · ' + esc(clients) : ''}</span></button>`;
   }
 
-  const durFr = (min) => (min >= 60 ? `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')}` : `${min} min`);
-  function forecastButton(f) {
-    const clients = f.clients.map((c) => c.societe).join(', ');
-    return `<button type="button" class="at-lot plan" data-act="launchfc" data-fc="${num(f.id)}"><span class="t"><b>${esc(f.linenType || 'Lot')}</b>${f.weightKg != null ? ' · ' + esc(kgf(f.weightKg)) + ' kg' : ''}</span>
-      <span class="s">${esc(clients)}${f.machineName ? ' · ' + esc(f.machineName) : ''}${f.plan && f.plan.minutes.total ? ' · ' + esc(durFr(f.plan.minutes.total)) + (f.plan.incomplete ? '+' : '') : ''}${f.note ? ' · ' + esc(f.note) : ''}</span></button>`;
+  function queueItem(stage, it, i) {
+    return `<button type="button" class="at-q${i === 0 ? ' first' : ''}" data-act="queueitem" data-stage="${esc(stage)}" data-k="${esc(it.kind)}" data-id="${num(it.id)}"><span class="n">${i + 1}</span>
+      <span class="b"><span class="t">${itemTitle(it)}</span><span class="s">${itemSub(it)}</span></span>${it.planned ? '<span class="pl">prévu</span>' : ''}</button>`;
   }
 
   function renderBoard() {
     renderSummary();
-    const cols = ['lavage', 'sechage', 'finition'].map((stage) => {
+    main.innerHTML = `<div class="at-cols">${STAGES.map((stage) => {
       const ms = stageMachines(stage);
       const busyN = ms.filter((m) => m.state === 'running').length;
-      return `<section class="at-col"><h2>${esc(stageName(stage))}<span>${busyN} / ${ms.length} en marche</span></h2>${ms.map(machineCard).join('') || '<p class="at-none">Aucune machine.</p>'}</section>`;
-    }).join('');
-    const wait = S.waiting.map((l) => lotButton(l, 'wait')).join('') || '<p class="at-none">Aucun lot en attente.</p>';
-    const today = S.today.lots.map((l) => lotButton(l, 'day')).join('') || '<p class="at-none">Aucun lot aujourd\'hui.</p>';
-    const due = (S.forecast && S.forecast.due) || [];
-    const planned = due.length ? `<section><h2>Prévu<span>${due.length}</span></h2>${due.map(forecastButton).join('')}</section>` : '';
-    main.innerHTML = `<div class="at-board"><div class="at-cols">${cols}</div>
-      <aside class="at-rail">${planned}<section><h2>À reprendre<span>${S.waiting.length}</span></h2>${wait}</section>
-      <section><h2>Lots du jour<span>${S.today.lots.length}</span></h2>${today}</section></aside></div>`;
+      const q = stageQueue(stage);
+      return `<section class="at-col"><h2>${esc(stageName(stage))}<span>${busyN} / ${ms.length} en marche</span></h2>${ms.map(machineCard).join('') || '<p class="at-none">Aucune machine.</p>'}
+        <h3 class="at-ql">${q.length ? `Ensuite · ${q.length} en attente` : 'Ensuite'}</h3>${q.map((it, i) => queueItem(stage, it, i)).join('') || '<p class="at-none">Rien en attente.</p>'}</section>`;
+    }).join('')}</div>`;
+  }
+
+  function openDay() {
+    F = { kind: 'day' };
+    showSheet(() => {
+      pane(`${head('Lots du jour', `${S.today.lots.length} lot${S.today.lots.length > 1 ? 's' : ''} · touchez un lot pour voir son parcours ou ajouter une remarque`)}
+        <div class="at-blk">${S.today.lots.map(lotButton).join('') || '<p class="at-none">Aucun lot aujourd\'hui.</p>'}</div>
+        <div class="at-go"><button type="button" class="at-b" data-act="close">Fermer</button></div>`);
+    });
   }
 
   // ---------- identification ----------
@@ -280,21 +294,19 @@
   }
 
   // ---------- formulaires : pièces communes ----------
-  const stepper = (kg, cap, id) => `<div class="at-weight"><button type="button" data-act="kg" data-d="-5">−5</button><button type="button" data-act="kg" data-d="-0.5">−0,5</button>
-    <div class="v" id="${id}">${esc(kgf(kg))}<small>kg</small></div><button type="button" data-act="kg" data-d="0.5">+0,5</button><button type="button" data-act="kg" data-d="5">+5</button>
-    ${cap ? `<button type="button" data-act="kg" data-d="max">Pleine charge</button>` : ''}</div>
-    <div class="at-fill${cap && kg > cap ? ' over' : ''}" id="${id}-fill">${fillText(kg, cap)}</div>`;
-  function fillText(kg, cap) {
-    if (!cap) return '';
-    return kg > cap ? `Dépasse la capacité (${esc(kgf(cap))} kg)` : `Charge : ${Math.round(kg / cap * 100)} % de ${esc(kgf(cap))} kg`;
+  // Aucune limite de capacité : le poids saisi est celui qu'on met dans la machine.
+  const stepper = (kg, id) => `<div class="at-weight"><button type="button" data-act="kg" data-d="-5">−5</button><button type="button" data-act="kg" data-d="-0.5">−0,5</button>
+    <div class="v" id="${id}">${esc(kgf(kg))}<small>kg</small></div><button type="button" data-act="kg" data-d="0.5">+0,5</button><button type="button" data-act="kg" data-d="5">+5</button></div>`;
+  function restText() {
+    if (!F || F.kind !== 'launch' || F.item.weightKg == null) return '';
+    const rest = F.item.weightKg - F.kg;
+    if (rest > 0.04) return `Il restera ${kgf(rest)} kg dans la file. Aucune limite de charge : vous mettez dans la machine ce que vous voulez.`;
+    return '';
   }
   function setKg(d) {
-    const m = machineById(F.machineId), cap = m && m.capacityKg;
-    if (d === 'max') F.kg = cap || F.kg;
-    else F.kg = Math.max(0, Math.round((F.kg + Number(d)) * 2) / 2);
+    F.kg = Math.max(0, Math.round((F.kg + Number(d)) * 2) / 2);
     document.getElementById('at-kg').firstChild.nodeValue = kgf(F.kg);
-    const fill = document.getElementById('at-kg-fill');
-    fill.className = 'at-fill' + (cap && F.kg > cap ? ' over' : ''); fill.innerHTML = fillText(F.kg, cap);
+    const rest = document.getElementById('at-rest'); if (rest) rest.textContent = restText();
   }
   const chips = (items, selected, act, attr) => items.map((i) => `<button type="button" class="at-chip${i.off ? ' off' : ''}${selected(i) ? ' on' : ''}" data-act="${act}" data-${attr}="${num(i.id)}">${i.html}</button>`).join('');
   const errBox = () => `<div class="at-err" role="alert" id="at-err">${esc(F.err || '')}</div>`;
@@ -303,31 +315,64 @@
   function machineChips(stage) {
     const ms = stageMachines(stage).map((m) => {
       const free = m.state === 'free';
-      return { id: m.id, off: !free, html: `${esc(m.name)}${m.capacityKg ? ` <small>${esc(kgf(m.capacityKg))} kg</small>` : ''}${free ? '' : ` <small>${m.state === 'down' ? 'à l\'arrêt' : 'occupée'}</small>`}` };
+      return { id: m.id, off: !free, html: `${esc(m.name)}${free ? '' : ` <small>${m.state === 'down' ? 'à l\'arrêt' : 'occupée'}</small>`}` };
     });
     return chips(ms, (i) => i.id === F.machineId, 'machine', 'm');
   }
   const programChips = () => (S.programs.length ? `<div class="at-blk"><div class="l">Programme <small>facultatif</small></div><div class="at-chips">
     ${chips([{ id: 0, html: 'Aucun' }, ...S.programs.map((p) => ({ id: p.id, html: `${esc(p.name)}${p.durationMin ? ` <small>${num(p.durationMin)} min</small>` : ''}` }))], (i) => (F.programId || 0) === i.id, 'program', 'p')}</div></div>` : '');
 
-  // ---------- nouveau lot ----------
-  function openNewLot(machineId, fc) {
-    const free = stageMachines('lavage').filter((m) => m.state === 'free');
-    // Un lot prévu : sa laveuse souhaitée si elle est libre, sinon la première libre.
-    const fp = fc && fc.firstPass;
-    const wanted = fc && (fp ? fp.machineId : fc.machineId) ? free.find((m) => m.id === (fp ? fp.machineId : fc.machineId)) : null;
-    const m = wanted || (machineId ? machineById(machineId) : free[0]);
-    if (!m) { toast('Aucune laveuse libre pour le moment.', true); return; }
-    F = { kind: 'newlot', typeId: null, clients: [], find: '', free: '', machineId: m.id, kg: m.capacityKg || 0, programId: null, err: '' };
-    if (fc) {
-      F.forecastId = fc.id; F.typeId = fc.linenTypeId; F.note = fc.note || '';
-      F.clients = fc.clients.map((c) => ({ clientId: c.clientId || null, societe: c.societe, kg: c.weightKg || '', orderId: c.orderId || null }));
-      const kg = fp && fp.weightKg != null ? fp.weightKg : fc.weightKg;
-      if (kg) F.kg = m.capacityKg ? Math.min(kg, m.capacityKg) : kg;
-      F.programId = (fp ? fp.programId : fc.programId) || null;
-      F.wash = fc.plan && fc.plan.stages.lavage ? fc.plan.stages.lavage.lines : [];
-      F.total = fc.weightKg || 0;
+  // ---------- lancer un lot de la file ----------
+  async function launchItem(stage, it, machineId, kg, programId) {
+    if (busy) return; busy = true;
+    try {
+      const body = { machineId, weightKg: kg, programId: programId || undefined };
+      const r = it.kind === 'forecast' ? await act(`/forecasts/${num(it.id)}/launch`, body) : await act(`/lots/${num(it.id)}/steps`, { stage, ...body });
+      busy = false; const m = machineById(machineId);
+      closeSheet(); toast(`${r.lot.code} lancé${m ? ' sur ' + m.name : ''}`, false, r.stepId ? `/steps/${num(r.stepId)}/undo-start` : null);
+    } catch (err) {
+      busy = false;
+      if (current) { current(); setErr(err.network ? 'Pas de connexion au serveur.' : err.message); } else { toast(err.network ? 'Pas de connexion au serveur.' : err.message, true); refresh(); }
     }
+  }
+  /** Un geste : la machine libre prend le premier lot de sa file, en entier. Sans poids connu (prévision sans kilos), on demande le poids. */
+  function launchNext(machineId) {
+    const m = machineById(machineId);
+    const it = m ? stageQueue(m.bu)[0] : null;
+    if (!it) { toast('Plus rien en attente.', true); return refresh(); }
+    if (it.weightKg == null) return openQueueItem(m.bu, it.kind, it.id, m.id);
+    needAuth(() => launchItem(m.bu, it, m.id, it.weightKg, it.programId));
+  }
+  function openQueueItem(stage, kind, id, machineId) {
+    const it = stageQueue(stage).find((x) => x.kind === kind && x.id === Number(id));
+    if (!it) { toast('Ce lot n\'est plus dans la file.', true); return refresh(); }
+    const free = stageMachines(stage).filter((m) => m.state === 'free');
+    const m = (machineId && free.find((x) => x.id === Number(machineId))) || free[0] || null;
+    F = { kind: 'launch', stage, item: it, machineId: m ? m.id : null, kg: it.weightKg != null ? it.weightKg : (m && m.capacityKg) || 20, programId: it.programId || null, err: '' };
+    showSheet(renderLaunch);
+  }
+  function renderLaunch() {
+    const it = F.item;
+    const free = stageMachines(F.stage).some((m) => m.state === 'free');
+    pane(`${head('Lancer ' + (it.code || it.linenType || 'le lot'), `${esc(it.linenType || '')}${it.weightKg != null ? ' · ' + esc(kgf(it.weightKg)) + ' kg' : ''}${it.clients.length ? ' · ' + esc(it.clients.join(', ')) : ''}`)}
+      <div class="at-blk"><div class="l">Machine</div><div class="at-chips">${machineChips(F.stage)}</div>${free ? '' : '<p class="at-none">Aucune machine libre : le lot reste dans la file et pourra partir dès qu\'une machine se libère.</p>'}</div>
+      <div class="at-blk"><div class="l">Poids dans cette machine</div>${stepper(F.kg, 'at-kg')}<div class="at-fill" id="at-rest">${esc(restText())}</div></div>
+      ${F.stage === 'lavage' ? programChips() : ''}
+      ${errBox()}
+      <div class="at-go"><button type="button" class="at-b" data-act="close">Annuler</button><button type="button" class="at-b main" data-act="submit-launch"${F.machineId ? '' : ' disabled'}>Lancer</button></div>`);
+  }
+  function submitLaunch() {
+    if (!F.machineId) return setErr('Choisissez la machine.');
+    if (!(F.kg > 0)) return setErr('Indiquez le poids.');
+    const { stage, item, machineId, kg, programId } = F;
+    needAuth(() => launchItem(stage, item, machineId, kg, programId));
+  }
+
+  // ---------- nouveau lot ----------
+  function openNewLot(machineId) {
+    const free = stageMachines('lavage').filter((m) => m.state === 'free');
+    const m = (machineId && machineById(machineId)) || free[0] || null;
+    F = { kind: 'newlot', typeId: null, clients: [], find: '', free: '', machineId: m && m.state === 'free' ? m.id : (free[0] ? free[0].id : null), kg: (m && m.capacityKg) || 20, programId: null, err: '' };
     showSheet(renderNewLot);
   }
   function filteredClients() {
@@ -344,72 +389,72 @@
       return `<div class="row"><button type="button" class="at-chip on" data-act="rmclient" data-i="${i}">${esc(c.societe)} <span class="x">✕</span></button>${multi ? `<input inputmode="decimal" data-kgin="${i}" placeholder="kg" value="${esc(c.kg)}" aria-label="Kilos de ${esc(c.societe)}">` : ''}</div>${orders ? `<div class="at-chips" style="width:100%">${orders}</div>` : ''}`;
     }).join('');
   }
-  /** Lot prévu sur plusieurs laveuses ou plusieurs charges : on lance la première charge, les suivantes viennent ensuite. */
-  function moreNote() {
-    const w = F.wash || [];
-    if (!w.length || !(w.length > 1 || w[0].passes > 1)) return '';
-    return `<p class="at-none">Lot de ${esc(kgf(F.total))} kg prévu sur ${w.map((l) => `${esc(l.machineName)} (${esc(kgf(l.weightKg || 0))} kg, ${num(l.passes || 1)} passage${l.passes > 1 ? 's' : ''})`).join(', ')} : on lance la première charge, les suivantes viennent ensuite.</p>`;
-  }
   function renderNewLot() {
     const m = machineById(F.machineId);
-    pane(`${head(F.forecastId ? 'Lancer le lot prévu' : 'Nouveau lot', F.forecastId ? 'Vérifiez la laveuse et le poids réellement chargé.' : 'Lavage lancé maintenant.')}
+    const anyFree = stageMachines('lavage').some((x) => x.state === 'free');
+    pane(`${head('Nouveau lot', 'Lancez-le tout de suite ou mettez-le dans la file À laver.')}
       <div class="at-blk"><div class="l">Type de linge</div><div class="at-chips">${chips(S.linenTypes.map((t) => ({ id: t.id, html: esc(t.label) })), (i) => F.typeId === i.id, 'type', 't')}</div></div>
       <div class="at-blk"><div class="l">Client <small>plusieurs possibles si le lot est mélangé</small></div>
         <div class="at-sel" id="at-sel">${selectedHtml()}</div>
         <input class="at-find" id="at-find" type="search" placeholder="Chercher un client…" value="${esc(F.find)}" autocomplete="off">
         <div class="at-pick" id="at-pick">${pickHtml()}</div>
         <div style="display:flex;gap:8px;margin-top:8px"><input class="at-find" id="at-free" style="margin:0" placeholder="Autre client (nom libre)" value="${esc(F.free)}" autocomplete="off" maxlength="120"><button type="button" class="at-b" data-act="addfree">Ajouter</button></div></div>
-      <div class="at-blk"><div class="l">Machine</div><div class="at-chips">${machineChips('lavage')}</div></div>
-      <div class="at-blk"><div class="l">Poids chargé</div>${stepper(F.kg, m && m.capacityKg, 'at-kg')}</div>
+      <div class="at-blk"><div class="l">Poids du lot</div>${stepper(F.kg, 'at-kg')}</div>
+      <div class="at-blk"><div class="l">Machine</div><div class="at-chips">${machineChips('lavage')}</div>${anyFree ? '' : '<p class="at-none">Aucune laveuse libre : ajoutez le lot à la file, il partira dès qu\'une machine se libère.</p>'}</div>
       ${programChips()}
-      ${moreNote()}
       ${errBox()}
-      <div class="at-go"><button type="button" class="at-b" data-act="close">Annuler</button><button type="button" class="at-b main" data-act="submit-newlot">Démarrer le lavage</button></div>`);
+      <div class="at-go"><button type="button" class="at-b" data-act="close">Annuler</button><button type="button" class="at-b" data-act="submit-queue">Ajouter à la file</button><button type="button" class="at-b main" data-act="submit-newlot"${m && m.state === 'free' ? '' : ' disabled'}>${m && m.state === 'free' ? 'Lancer sur ' + esc(m.name) : 'Aucune laveuse libre'}</button></div>`);
   }
   function refreshClients() { document.getElementById('at-sel').innerHTML = selectedHtml(); document.getElementById('at-pick').innerHTML = pickHtml(); }
+  const lotClients = () => F.clients.map((c) => ({ clientId: c.clientId || undefined, societe: c.clientId ? undefined : c.societe, weightKg: c.kg || undefined, orderId: c.orderId || undefined }));
+  function checkNewLot() {
+    if (!F.typeId) return setErr('Choisissez le type de linge.'), false;
+    if (!F.clients.length) return setErr('Choisissez au moins un client.'), false;
+    if (!(F.kg > 0)) return setErr('Indiquez le poids.'), false;
+    return true;
+  }
   function submitNewLot() {
-    if (!F.typeId) return setErr('Choisissez le type de linge.');
-    if (!F.clients.length) return setErr('Choisissez au moins un client.');
-    if (!(F.kg > 0)) return setErr('Indiquez le poids chargé.');
+    if (!checkNewLot()) return;
     needAuth(async () => {
       if (busy) return; busy = true;
       try {
-        const r = await act(F.forecastId ? `/forecasts/${F.forecastId}/launch` : '/lots', {
-          linenTypeId: F.typeId, weightKg: F.kg, machineId: F.machineId, programId: F.programId || undefined, note: F.note || undefined,
-          clients: F.clients.map((c) => ({ clientId: c.clientId || undefined, societe: c.clientId ? undefined : c.societe, weightKg: c.kg || undefined, orderId: c.orderId || undefined })),
-        });
-        busy = false; const code = r.lot.code; closeSheet(); toast('Lot ' + code + ' lancé.');
+        const r = await act('/lots', { linenTypeId: F.typeId, weightKg: F.kg, machineId: F.machineId, programId: F.programId || undefined, note: F.note || undefined, clients: lotClients() });
+        busy = false; const m = machineById(F.machineId); closeSheet(); toast(`${r.lot.code} lancé${m ? ' sur ' + m.name : ''}`, false, r.stepId ? `/steps/${num(r.stepId)}/undo-start` : null);
+      } catch (err) { busy = false; if (current) { current(); setErr(err.network ? 'Pas de connexion au serveur.' : err.message); } }
+    });
+  }
+  function submitQueue() {
+    if (!checkNewLot()) return;
+    needAuth(async () => {
+      if (busy) return; busy = true;
+      try {
+        await act('/forecasts', { linenTypeId: F.typeId, weightKg: F.kg, note: F.note || undefined, clients: lotClients() });
+        busy = false; closeSheet(); toast('Lot ajouté à la file À laver.');
       } catch (err) { busy = false; if (current) { current(); setErr(err.network ? 'Pas de connexion au serveur.' : err.message); } }
     });
   }
 
+  // ---------- autre étape d'un lot (relavage, séchage ou finition hors parcours, terminer le lot) ----------
   const START = { lavage: 'Démarrer le lavage', sechage: 'Démarrer le séchage', finition: 'Démarrer la finition' };
-  // ---------- reprendre un lot (séchage, finition, relavage) ----------
-  function openResume(lotId, machineId) {
-    const lot = S.waiting.find((l) => l.id === Number(lotId));
-    if (!lot) { toast('Ce lot n\'est plus en attente.', true); refresh(); return; }
-    const m = machineId ? machineById(machineId) : null;
-    F = { kind: 'resume', lot, stage: m ? m.bu : null, machineId: m ? m.id : null, kg: lot.weightKg, programId: null, err: '' };
-    if (m) F.kg = m.capacityKg ? Math.min(lot.weightKg, m.capacityKg) : lot.weightKg;
+  function openResume(lot) {
+    F = { kind: 'resume', lot, stage: null, machineId: null, kg: lot.weightKg, programId: null, err: '' };
     showSheet(renderResume);
   }
-  function nextStage(last) { return last === 'lavage' ? 'sechage' : last === 'sechage' ? 'finition' : 'sechage'; }
   function renderResume() {
     const lot = F.lot, clients = lot.clients.length ? ' · ' + esc(lot.clients.join(', ')) : '';
     const sub = `<b>${esc(lot.code)}</b> · ${esc(lot.linenType || '')} · ${esc(kgf(lot.weightKg))} kg${clients}`;
     if (!F.stage) {
-      const sug = nextStage(lot.lastStage);
-      const opt = (stage, label, small) => `<button type="button" class="at-b${stage === sug ? ' main' : ''}" data-act="stage" data-s="${esc(stage)}">${esc(label)}<small>${esc(small)}</small></button>`;
-      pane(`${head('Que faire de ce lot ?', sub)}
-        <div class="at-blk"><div class="at-opts">${opt('sechage', 'Séchage', 'Mettre en séchoir')}${opt('finition', 'Finition', 'Calandre')}${opt('lavage', 'Relavage', 'Repasser en laveuse')}
+      const opt = (stage, label, small) => `<button type="button" class="at-b" data-act="stage" data-s="${esc(stage)}">${esc(label)}<small>${esc(small)}</small></button>`;
+      pane(`${head('Autre étape pour ce lot', sub)}
+        <p class="at-sub">Le lot suit déjà son parcours tout seul (les files). Utilisez ceci pour un relavage ou une étape hors parcours.</p>
+        <div class="at-blk"><div class="at-opts">${opt('lavage', 'Relavage', 'Repasser en laveuse')}${opt('sechage', 'Séchage', 'Mettre en séchoir')}${opt('finition', 'Finition', 'Calandre')}
         <button type="button" class="at-b" data-act="closelot">Terminer le lot<small>Prêt à ranger</small></button></div></div>
         <div class="at-go"><button type="button" class="at-b" data-act="close">Annuler</button></div>`);
       return;
     }
-    const m = machineById(F.machineId);
     pane(`${head(stageName(F.stage), sub)}
       <div class="at-blk"><div class="l">Machine</div><div class="at-chips">${machineChips(F.stage)}</div></div>
-      <div class="at-blk"><div class="l">Poids dans cette machine<small>le lot fait ${esc(kgf(F.lot.weightKg))} kg ; le reste pourra partir dans une autre machine</small></div>${stepper(F.kg, m && m.capacityKg, 'at-kg')}</div>
+      <div class="at-blk"><div class="l">Poids dans cette machine</div>${stepper(F.kg, 'at-kg')}</div>
       ${F.stage === 'lavage' ? programChips() : ''}
       ${errBox()}
       <div class="at-go"><button type="button" class="at-b" data-act="back-stage">Retour</button><button type="button" class="at-b main" data-act="submit-resume">${esc(START[F.stage] || 'Démarrer')}</button></div>`);
@@ -421,7 +466,7 @@
       if (busy) return; busy = true;
       try {
         const r = await act(`/lots/${num(F.lot.id)}/steps`, { stage: F.stage, machineId: F.machineId, weightKg: F.kg, programId: F.programId || undefined });
-        busy = false; const m = machineById(F.machineId); closeSheet(); toast(r.lot.code + ' lancé' + (m ? ' sur ' + m.name : '') + '.');
+        busy = false; const m = machineById(F.machineId); closeSheet(); toast(`${r.lot.code} lancé${m ? ' sur ' + m.name : ''}`, false, r.stepId ? `/steps/${num(r.stepId)}/undo-start` : null);
       } catch (err) { busy = false; if (current) { current(); setErr(err.network ? 'Pas de connexion au serveur.' : err.message); } }
     });
   }
@@ -431,42 +476,26 @@
     });
   }
 
-  // ---------- lancer depuis une machine libre ----------
-  function openLaunch(machineId) {
-    const m = machineById(machineId);
-    if (!m) return;
-    if (m.bu === 'lavage') return openNewLot(m.id);
-    F = { kind: 'launch', machineId: m.id };
-    showSheet(() => {
-      pane(`${head('Lancer ' + m.name, 'Quel lot mettre dedans ?')}
-        <div class="at-blk">${S.waiting.map((l) => `<button type="button" class="at-lot wait" data-act="launchlot" data-lot="${num(l.id)}"><span class="t"><b>${esc(l.code)}</b> · ${esc(l.linenType || '')} · ${esc(kgf(l.weightKg))} kg</span><span class="s">${esc(stageName(l.lastStage))} terminé il y a ${esc(ago(l.lastEndedAt))}${l.clients.length ? ' · ' + esc(l.clients.join(', ')) : ''}</span></button>`).join('') || '<p class="at-none">Aucun lot à reprendre : lancez d\'abord un lavage.</p>'}</div>
-        <div class="at-go"><button type="button" class="at-b" data-act="close">Annuler</button></div>`);
-    });
-  }
-
-  // ---------- terminer un passage ----------
-  function openFinish(stepId) {
+  // ---------- terminé : un geste, le lot passe dans la file suivante (ou se clôt) ----------
+  function finishNow(stepId) {
     const m = S.machines.find((x) => x.step && x.step.id === Number(stepId));
     if (!m) return;
     const st = m.step;
-    F = { kind: 'finish', step: st, machine: m };
-    showSheet(() => {
-      pane(`${head('Terminer ' + m.name + ' ?', `<b>${esc(st.lotCode)}</b> · ${esc(st.linenType || '')} · ${esc(kgf(st.weightKg))} kg`)}
-        <div class="at-go" style="flex-direction:column">
-          <button type="button" class="at-b ${st.stage === 'finition' ? '' : 'main'}" data-act="dofinish" data-close="0">Terminer ce passage</button>
-          ${st.stage !== 'lavage' ? `<button type="button" class="at-b ${st.stage === 'finition' ? 'main' : ''}" data-act="dofinish" data-close="1">Terminer et clore le lot</button>` : ''}
-          <button type="button" class="at-b" data-act="close">Annuler</button></div>
-        <div class="at-err" role="alert" id="at-err"></div>`, true);
-    });
-  }
-  function doFinish(closeLot) {
-    const st = F.step;
     needAuth(async () => {
       if (busy) return; busy = true;
       try {
-        const r = await act(`/steps/${num(st.id)}/finish`, { closeLot: !!closeLot });
-        busy = false; closeSheet(); toast(closeLot ? 'Lot ' + r.lot.code + ' terminé.' : st.machineName + ' terminé.');
-      } catch (err) { busy = false; if (current) { current(); setErr(err.network ? 'Pas de connexion au serveur.' : err.message); } }
+        const r = await act(`/steps/${num(stepId)}/finish`, {});
+        busy = false;
+        const msg = r.lot.status === 'termine' ? `${st.lotCode} est terminé` : (st.nextStage ? `${st.lotCode} passe en file ${stageName(st.nextStage)}` : st.machineName + ' est libre');
+        toast(msg, false, `/steps/${num(stepId)}/undo-finish`); refresh();
+      } catch (err) { busy = false; toast(err.network ? 'Pas de connexion au serveur.' : err.message, true); refresh(); }
+    });
+  }
+  async function undoLast() {
+    const path = undoPath; undoPath = null;
+    if (!path) return;
+    needAuth(async () => {
+      try { await act(path, {}); toast('Annulé.'); refresh(); } catch (err) { toast(err.network ? 'Pas de connexion au serveur.' : err.message, true); refresh(); }
     });
   }
 
@@ -514,7 +543,7 @@
       <div class="at-blk"><div class="at-chips">${KINDS.map(([k, label]) => `<button type="button" class="at-chip${F.noteKind === k ? ' on' : ''}" data-act="notekind" data-k="${esc(k)}">${esc(label)}</button>`).join('')}</div>
         <div style="display:flex;gap:8px;margin-top:8px"><input class="at-note" id="at-ntext" maxlength="400" placeholder="Ex. 3 draps à reprendre (taches)" value="${esc(F.text)}"><button type="button" class="at-b main" data-act="addnote">Ajouter</button></div></div>
       ${errBox()}
-      <div class="at-go"><button type="button" class="at-b" data-act="close">Fermer</button></div>`);
+      <div class="at-go">${l.status === 'en_cours' ? '<button type="button" class="at-b" data-act="resumelot">Autre étape…</button>' : ''}<button type="button" class="at-b" data-act="close">Fermer</button></div>`);
   }
   function addNote() {
     const text = (document.getElementById('at-ntext').value || '').trim();
@@ -534,11 +563,11 @@
       case 'close': if (F_auth) return authCancel(); return closeSheet();
       case 'logout': creds = null; credsName = ''; renderWho(); return toast('Vous êtes déconnecté(e).');
       case 'lot': return openLot(d.lot);
-      case 'resume': return openResume(d.lot);
-      case 'launch': return openLaunch(d.m);
-      case 'launchfc': { const fc = ((S.forecast && S.forecast.due) || []).find((x) => x.id === Number(d.fc)); if (fc) openNewLot(null, fc); else { toast('Ce lot prévu n\'est plus à lancer.', true); refresh(); } return; }
-      case 'launchlot': return openResume(d.lot, F.machineId);
-      case 'finish': return openFinish(d.step);
+      case 'launchnext': return launchNext(d.m);
+      case 'newlotm': return openNewLot(d.m);
+      case 'queueitem': return openQueueItem(d.stage, d.k, d.id);
+      case 'finish': return finishNow(d.step);
+      case 'undo': return undoLast();
       case 'down': return openDown(d.m);
       case 'up': return doUp(d.inc);
       case 'who': { const e = S.employees.find((x) => x.id === Number(d.emp)); if (e) { F_auth.emp = e; F_auth.step = 'pin'; F_auth.pin = ''; F_auth.err = ''; renderAuth(); } return; }
@@ -546,23 +575,19 @@
       case 'kg': return setKg(d.d);
       case 'type': F.typeId = Number(d.t); return current();
       case 'program': F.programId = Number(d.p) || null; return current();
-      case 'machine': {
-        const m = machineById(d.m); if (!m || m.state !== 'free') return;
-        F.machineId = m.id;
-        if (m.capacityKg && F.kind === 'newlot') F.kg = m.capacityKg;
-        else if (m.capacityKg && F.kind === 'resume') F.kg = Math.min(F.lot.weightKg, m.capacityKg);
-        return current();
-      }
+      case 'machine': { const m = machineById(d.m); if (!m || m.state !== 'free') return; F.machineId = m.id; return current(); }
       case 'addclient': { const c = S.clients.find((x) => x.id === Number(d.c)); if (c) { F.clients.push({ clientId: c.id, societe: c.societe, kg: '', orderId: null }); F.find = ''; document.getElementById('at-find').value = ''; refreshClients(); } return; }
       case 'addfree': { const v = (document.getElementById('at-free').value || '').trim(); if (v) { F.clients.push({ clientId: null, societe: v, kg: '', orderId: null }); F.free = ''; current(); } return; }
       case 'rmclient': F.clients.splice(Number(d.i), 1); return current();
       case 'order': { const c = F.clients[Number(d.i)]; c.orderId = c.orderId === Number(d.o) ? null : Number(d.o); return current(); }
       case 'submit-newlot': return submitNewLot();
-      case 'stage': F.stage = d.s; { const m = stageMachines(F.stage).filter((x) => x.state === 'free'); F.machineId = m.length === 1 ? m[0].id : null; const cap = m.length === 1 ? m[0].capacityKg : null; F.kg = cap ? Math.min(F.lot.weightKg, cap) : F.lot.weightKg; } return current();
+      case 'submit-queue': return submitQueue();
+      case 'submit-launch': return submitLaunch();
+      case 'resumelot': { const l = F.lot; return openResume({ id: l.id, code: l.code, linenType: l.linenType, weightKg: l.weightKg, clients: l.clients.map((c) => c.societe) }); }
+      case 'stage': { F.stage = d.s; const m = stageMachines(F.stage).filter((x) => x.state === 'free'); F.machineId = m.length === 1 ? m[0].id : null; F.kg = F.lot.weightKg; return current(); }
       case 'back-stage': F.stage = null; F.machineId = null; return current();
       case 'submit-resume': return submitResume();
       case 'closelot': return closeLotNow(F.lot.id);
-      case 'dofinish': return doFinish(d.close === '1');
       case 'reason': F.reason = REASONS[Number(d.i)]; F.note = (document.getElementById('at-pnote') || {}).value || F.note; return current();
       case 'dodown': F.note = (document.getElementById('at-pnote').value || '').trim(); return doDown();
       case 'notekind': F.noteKind = d.k; F.text = (document.getElementById('at-ntext') || {}).value || ''; return current();
@@ -571,6 +596,7 @@
     }
   });
   document.getElementById('at-new').addEventListener('click', () => openNewLot());
+  document.getElementById('at-day').addEventListener('click', openDay);
   document.addEventListener('input', (ev) => {
     const t = ev.target;
     if (!F) return;
@@ -581,7 +607,7 @@
 
   // ---------- activation de la tablette ----------
   function showSetup(msg) {
-    S = null; banner(''); document.getElementById('at-new').hidden = true; document.getElementById('at-sum').textContent = '';
+    S = null; banner(''); document.getElementById('at-new').hidden = true; document.getElementById('at-day').hidden = true; document.getElementById('at-sum').textContent = '';
     main.innerHTML = `<div class="at-empty" style="max-width:520px"><h1 class="at-h">Activer cette tablette</h1>
       <p class="at-sub">${esc(msg || 'Ouvrez le lien d\'activation donné dans l\'administration (Équipe → Badgeuses), ou collez ici le code d\'activation.')}</p>
       <input class="at-find" id="at-token" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="64" placeholder="Code d'activation">

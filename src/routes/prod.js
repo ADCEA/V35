@@ -6,6 +6,7 @@ const { requireAdmin } = require('../middleware/auth');
 const rh = require('../utils/rh');
 const P = require('../utils/prodStore');
 const F = require('../utils/prodForecast');
+const Q = require('../utils/prodQueues');
 
 const router = express.Router();
 router.use(requireAdmin);
@@ -36,7 +37,7 @@ router.get('/overview', R((req, res) => {
   if (!rh.isDate(day)) throw P.bad('Jour invalide.');
   res.json({
     now: new Date(nowMs).toISOString(), today: rh.parisDate(nowMs), day, settings: P.getSettings(), stages: P.STAGES,
-    machines: P.board(nowMs), waiting: P.waitingLots(nowMs), view: P.dayView(day, nowMs), forecastDue: F.due(nowMs),
+    machines: P.board(nowMs), queues: Q.queues(nowMs), waiting: P.waitingLots(nowMs), view: P.dayView(day, nowMs), forecastDue: F.due(nowMs),
     linenTypes: P.linenTypes(), programs: P.programs(),
     incidents: db.prepare('SELECT i.*, m.name AS machine_name FROM machine_incidents i JOIN machines m ON m.id = i.machine_id WHERE i.ended_at IS NULL ORDER BY i.started_at').all().map(i => P.incidentOut(i, nowMs)),
   });

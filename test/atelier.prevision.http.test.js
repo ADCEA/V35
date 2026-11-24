@@ -57,7 +57,6 @@ test('saisie d\'une prévision pour demain : contrôles, puis lecture du jour', 
   const wrong = await admin('POST', `${A}/forecasts`, { ...ok, machineId: mach('Calandre 320 cm').id });
   assert.equal(wrong.status, 400, 'la laveuse prévue doit être une laveuse');
   assert.equal((await admin('POST', `${A}/forecasts`, { ...ok, weightKg: 9999 })).status, 400);
-  assert.equal((await admin('POST', `${A}/forecasts`, { ...ok, weightKg: 30 })).status, 400, 'plus lourd que la capacité de la laveuse prévue (27 kg)');
 
   const r = await admin('POST', `${A}/forecasts`, ok);
   assert.equal(r.status, 201, JSON.stringify(r.data));
